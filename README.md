@@ -30,6 +30,10 @@ A module is organized as a folder, that contains `loom.yaml` at the root of dire
 
 loom.yaml
 ```yaml
-
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
 
 ```
+
+High level diagram: ./high-level-diagram.png
+

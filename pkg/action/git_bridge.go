@@ -33,7 +33,7 @@ func commitAndPush(ctx context.Context, execCtx *ExecutionContext, message, auth
 
 // openPR opens a pull request using the configured provider.
 func openPR(ctx context.Context, execCtx *ExecutionContext, cfg config.PR, title, body string) error {
-	provider, err := git.NewProvider(cfg.Provider, cfg.TokenEnv)
+	provider, err := git.NewProvider(cfg.Provider, cfg.TokenEnv, execCtx.Logger)
 	if err != nil {
 		return actionError("pr", err)
 	}
@@ -65,6 +65,7 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, cfg config.PR, title
 		HeadBranch: headBranch,
 		BaseBranch: baseBranch,
 		Labels:     cfg.Labels,
+		WorkDir:    execCtx.TargetDir,
 	})
 	if err != nil {
 		return actionError("pr", err)

@@ -4,154 +4,225 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
-	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
-// Repo wraps a go-git repository for loom operations.
+// Repository is the interface for git operations.
+// All methods try the go-git library first and fall back to the git CLI.
+type Repository interface {
+	Dir() string
+	CreateBranch(name string) error
+	AddAll() error
+	Commit(message, author, email string) error
+	Push(ctx context.Context, token string) error
+	CurrentBranch() (string, error)
+	RemoteURL() (string, error)
+}
+
+// Repo implements Repository using go-git with CLI fallback.
 type Repo struct {
-	repo   *gogit.Repository
+	gg     *gogit.Repository // nil when go-git is unavailable
 	dir    string
 	logger *slog.Logger
 }
 
-// Clone clones a git repository to the given directory.
-func Clone(ctx context.Context, url, dir, branch string, logger *slog.Logger) (*Repo, error) {
-	opts := &gogit.CloneOptions{
-		URL:      url,
-		Progress: nil,
-	}
+// Clone clones a repository. It tries go-git first, then falls back to git CLI.
+func Clone(ctx context.Context, url, dir, branch string, logger *slog.Logger) (Repository, error) {
+	logger.Info("cloning repository", "url", url, "dir", dir, "branch", branch)
+
+	// Try go-git.
+	opts := &gogit.CloneOptions{URL: url}
 	if branch != "" {
 		opts.ReferenceName = plumbing.NewBranchReferenceName(branch)
 		opts.SingleBranch = true
 	}
 
-	logger.Info("cloning repository", "url", url, "dir", dir, "branch", branch)
 	r, err := gogit.PlainCloneContext(ctx, dir, false, opts)
-	if err != nil {
-		return nil, fmt.Errorf("cloning %s: %w", url, err)
+	if err == nil {
+		return &Repo{gg: r, dir: dir, logger: logger}, nil
+	}
+	libErr := err
+
+	// Fallback to git CLI.
+	if !hasBinary("git") {
+		return nil, fmt.Errorf("go-git clone failed: %w (git CLI not available for fallback)", libErr)
 	}
 
-	return &Repo{repo: r, dir: dir, logger: logger}, nil
+	logger.Info("go-git clone failed, falling back to git CLI", "error", libErr)
+	if err := cliClone(ctx, url, dir, branch); err != nil {
+		return nil, fmt.Errorf("clone failed — go-git: %v, git CLI: %w", libErr, err)
+	}
+
+	// Try to open with go-git so local operations can use the library.
+	gg, _ := gogit.PlainOpen(dir)
+	return &Repo{gg: gg, dir: dir, logger: logger}, nil
 }
 
-// Open opens an existing git repository.
-func Open(dir string, logger *slog.Logger) (*Repo, error) {
+// Open opens an existing repository. go-git handles this reliably for any
+// valid repo, so there is no CLI fallback needed here.
+func Open(dir string, logger *slog.Logger) (Repository, error) {
 	r, err := gogit.PlainOpen(dir)
 	if err != nil {
 		return nil, fmt.Errorf("opening repo at %s: %w", dir, err)
 	}
-	return &Repo{repo: r, dir: dir, logger: logger}, nil
+	return &Repo{gg: r, dir: dir, logger: logger}, nil
 }
 
-// Dir returns the repository working directory.
-func (r *Repo) Dir() string {
-	return r.dir
-}
+func (r *Repo) Dir() string { return r.dir }
 
-// CreateBranch creates and checks out a new branch.
+// ---------------------------------------------------------------------------
+// CreateBranch
+// ---------------------------------------------------------------------------
+
 func (r *Repo) CreateBranch(name string) error {
-	wt, err := r.repo.Worktree()
+	if r.gg != nil {
+		err := r.createBranchLib(name)
+		if err == nil {
+			return nil
+		}
+		if !hasBinary("git") {
+			return err
+		}
+		r.logger.Debug("go-git CreateBranch failed, falling back to git CLI", "error", err)
+	}
+	return cliCreateBranch(r.dir, name)
+}
+
+func (r *Repo) createBranchLib(name string) error {
+	wt, err := r.gg.Worktree()
 	if err != nil {
 		return err
 	}
-
-	head, err := r.repo.Head()
+	head, err := r.gg.Head()
 	if err != nil {
 		return err
 	}
-
 	ref := plumbing.NewBranchReferenceName(name)
-	err = r.repo.Storer.SetReference(plumbing.NewHashReference(ref, head.Hash()))
-	if err != nil {
+	if err := r.gg.Storer.SetReference(plumbing.NewHashReference(ref, head.Hash())); err != nil {
 		return err
 	}
-
-	return wt.Checkout(&gogit.CheckoutOptions{
-		Branch: ref,
-	})
+	return wt.Checkout(&gogit.CheckoutOptions{Branch: ref})
 }
 
-// AddAll stages all changes.
+// ---------------------------------------------------------------------------
+// AddAll
+// ---------------------------------------------------------------------------
+
 func (r *Repo) AddAll() error {
-	wt, err := r.repo.Worktree()
-	if err != nil {
-		return err
-	}
-
-	// Add will stage all changes recursively.
-	err = wt.AddWithOptions(&gogit.AddOptions{All: true})
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// Commit creates a commit with the given message and author info.
-func (r *Repo) Commit(message, author, email string) error {
-	wt, err := r.repo.Worktree()
-	if err != nil {
-		return err
-	}
-
-	_, err = wt.Commit(message, &gogit.CommitOptions{
-		Author: &object.Signature{
-			Name:  author,
-			Email: email,
-			When:  time.Now(),
-		},
-	})
-	return err
-}
-
-// Push pushes commits to the remote.
-func (r *Repo) Push(ctx context.Context, token string) error {
-	opts := &gogit.PushOptions{}
-	if token != "" {
-		opts.Auth = &http.BasicAuth{
-			Username: "loom", // username is ignored for token auth
-			Password: token,
+	if r.gg != nil {
+		wt, err := r.gg.Worktree()
+		if err == nil {
+			if err := wt.AddWithOptions(&gogit.AddOptions{All: true}); err == nil {
+				return nil
+			} else if !hasBinary("git") {
+				return err
+			} else {
+				r.logger.Debug("go-git AddAll failed, falling back to git CLI", "error", err)
+			}
 		}
 	}
-	return r.repo.PushContext(ctx, opts)
+	return cliAddAll(r.dir)
 }
 
-// CurrentBranch returns the name of the current branch.
+// ---------------------------------------------------------------------------
+// Commit
+// ---------------------------------------------------------------------------
+
+func (r *Repo) Commit(message, author, email string) error {
+	if r.gg != nil {
+		wt, err := r.gg.Worktree()
+		if err == nil {
+			_, cerr := wt.Commit(message, &gogit.CommitOptions{
+				Author: &object.Signature{
+					Name:  author,
+					Email: email,
+					When:  time.Now(),
+				},
+			})
+			if cerr == nil {
+				return nil
+			}
+			if !hasBinary("git") {
+				return cerr
+			}
+			r.logger.Debug("go-git Commit failed, falling back to git CLI", "error", cerr)
+		}
+	}
+	return cliCommit(r.dir, message, author, email)
+}
+
+// ---------------------------------------------------------------------------
+// Push
+// ---------------------------------------------------------------------------
+
+func (r *Repo) Push(ctx context.Context, token string) error {
+	if r.gg != nil {
+		opts := &gogit.PushOptions{}
+		if token != "" {
+			opts.Auth = &http.BasicAuth{
+				Username: "loom",
+				Password: token,
+			}
+		}
+		err := r.gg.PushContext(ctx, opts)
+		if err == nil {
+			return nil
+		}
+		if !hasBinary("git") {
+			return err
+		}
+		r.logger.Info("go-git push failed, falling back to git CLI", "error", err)
+	}
+	return cliPush(ctx, r.dir)
+}
+
+// ---------------------------------------------------------------------------
+// CurrentBranch
+// ---------------------------------------------------------------------------
+
 func (r *Repo) CurrentBranch() (string, error) {
-	head, err := r.repo.Head()
-	if err != nil {
-		return "", err
+	if r.gg != nil {
+		head, err := r.gg.Head()
+		if err == nil {
+			return head.Name().Short(), nil
+		}
+		if !hasBinary("git") {
+			return "", err
+		}
+		r.logger.Debug("go-git CurrentBranch failed, falling back to git CLI", "error", err)
 	}
-	return head.Name().Short(), nil
+	return cliCurrentBranch(r.dir)
 }
 
-// RemoteURL returns the URL of the "origin" remote.
+// ---------------------------------------------------------------------------
+// RemoteURL
+// ---------------------------------------------------------------------------
+
 func (r *Repo) RemoteURL() (string, error) {
-	remote, err := r.repo.Remote("origin")
-	if err != nil {
-		return "", err
+	if r.gg != nil {
+		remote, err := r.gg.Remote("origin")
+		if err == nil {
+			cfg := remote.Config()
+			if len(cfg.URLs) > 0 {
+				return cfg.URLs[0], nil
+			}
+		}
+		if !hasBinary("git") {
+			return "", err
+		}
+		r.logger.Debug("go-git RemoteURL failed, falling back to git CLI", "error", err)
 	}
-	cfg := remote.Config()
-	if len(cfg.URLs) == 0 {
-		return "", fmt.Errorf("no URLs configured for origin remote")
-	}
-	return cfg.URLs[0], nil
+	return cliRemoteURL(r.dir)
 }
 
-// SetRemoteURL updates the origin remote URL.
-func (r *Repo) SetRemoteURL(url string) error {
-	err := r.repo.DeleteRemote("origin")
-	if err != nil {
-		return err
-	}
-	_, err = r.repo.CreateRemote(&gogitcfg.RemoteConfig{
-		Name: "origin",
-		URLs: []string{url},
-	})
-	return err
+// hasBinary reports whether a binary is available on PATH.
+func hasBinary(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }

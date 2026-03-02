@@ -16,6 +16,11 @@ spec:
       newFiles:
         source: "."
         dest: ""
+    - name: patch-kustomize
+      patch:
+        engine: kustomize
+        path: "__functions/patches/add-app.yaml"
+        target: "argocd/kustomization.yaml"
     - name: validate
       shell:
         command: "echo 'validating {{ .serviceName }} in {{ .namespace }}'"

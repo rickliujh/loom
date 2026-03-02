@@ -1,0 +1,36 @@
+# This patch adds the new service's ArgoCD application file to the
+# kustomization.yaml in the target repository.
+#
+# It expects the target repo to already have a kustomization.yaml that
+# manages ArgoCD resources via a "resources" list.
+#
+# How it works:
+#   Loom runs `kustomize build` on the directory containing the target
+#   kustomization.yaml. This patch is a standard kustomize strategic-merge
+#   patch that appends the new application to the resource list.
+#
+# Usage in loom.yaml:
+#   - name: patch-kustomize
+#     patch:
+#       engine: kustomize
+#       path: "__functions/patches/add-app.yaml"
+#       target: "argocd/kustomization.yaml"
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - applicaton.yaml
+  - project.yaml
+
+patches:
+  - target:
+      kind: Application
+      name: guestbook
+    patch: |-
+      - op: replace
+        path: /metadata/namespace
+        value: argocd
+      - op: add
+        path: /metadata/labels/managed-by
+        value: loom

@@ -26,8 +26,9 @@ type ParamDef struct {
 }
 
 type TargetSpec struct {
-	URL    string `yaml:"url"`
-	Branch string `yaml:"branch,omitempty"`
+	URL           string `yaml:"url"`
+	Branch        string `yaml:"branch,omitempty"`
+	FeatureBranch string `yaml:"featureBranch,omitempty"`
 }
 
 type ModuleRef struct {

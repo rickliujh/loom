@@ -8,6 +8,7 @@ import (
 
 	"github.com/rickliujh/loom/pkg/git"
 	"github.com/rickliujh/loom/pkg/module"
+	tmpl "github.com/rickliujh/loom/pkg/template"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -63,10 +64,23 @@ func runModule(cmd *cobra.Command, args []string) error {
 		}
 		defer os.RemoveAll(tmpDir)
 
-		_, err = git.Clone(cmd.Context(), mod.Config.Spec.Target.URL, tmpDir, mod.Config.Spec.Target.Branch, logger)
+		repo, err := git.Clone(cmd.Context(), mod.Config.Spec.Target.URL, tmpDir, mod.Config.Spec.Target.Branch, logger)
 		if err != nil {
 			return err
 		}
+
+		// Create and checkout a feature branch if configured.
+		if mod.Config.Spec.Target.FeatureBranch != "" {
+			branchName, err := tmpl.RenderString(mod.Config.Spec.Target.FeatureBranch, paramMap)
+			if err != nil {
+				return fmt.Errorf("rendering featureBranch: %w", err)
+			}
+			logger.Info("creating feature branch", "branch", branchName)
+			if err := repo.CreateBranch(branchName); err != nil {
+				return fmt.Errorf("creating feature branch %q: %w", branchName, err)
+			}
+		}
+
 		targetDir = tmpDir
 	}
 

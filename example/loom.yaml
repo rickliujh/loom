@@ -11,6 +11,7 @@ spec:
   target:
     url: "https://github.com/myorg/gitops-repo.git"
     branch: "main"
+    featureBranch: "loom/onboard-{{ .serviceName }}"
   operations:
     - name: create-files
       newFiles:

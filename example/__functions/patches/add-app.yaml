@@ -1,36 +1,27 @@
-# This patch adds the new service's ArgoCD application file to the
-# kustomization.yaml in the target repository.
+# RFC 6902 JSON Patch operations applied to the target YAML file.
 #
-# It expects the target repo to already have a kustomization.yaml that
-# manages ArgoCD resources via a "resources" list.
+# This patch modifies the ArgoCD Application to:
+#   1. Set the namespace to the configured namespace
+#   2. Add a "managed-by: loom" label
+#   3. Set the application name to the service name
 #
-# How it works:
-#   Loom runs `kustomize build` on the directory containing the target
-#   kustomization.yaml. This patch is a standard kustomize strategic-merge
-#   patch that appends the new application to the resource list.
+# Values are templated — {{ .serviceName }} and {{ .namespace }} are
+# replaced with parameters before the patch is applied.
 #
 # Usage in loom.yaml:
-#   - name: patch-kustomize
+#   - name: patch-app
 #     patch:
-#       engine: kustomize
 #       path: "__functions/patches/add-app.yaml"
-#       target: "argocd/kustomization.yaml"
+#       target: "argocd/applicaton.yaml"
 
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
+- op: replace
+  path: /metadata/name
+  value: "{{ .serviceName }}"
 
-resources:
-  - applicaton.yaml
-  - project.yaml
+- op: replace
+  path: /metadata/namespace
+  value: "{{ .namespace }}"
 
-patches:
-  - target:
-      kind: Application
-      name: guestbook
-    patch: |-
-      - op: replace
-        path: /metadata/namespace
-        value: argocd
-      - op: add
-        path: /metadata/labels/managed-by
-        value: loom
+- op: add
+  path: /metadata/labels/managed-by
+  value: loom

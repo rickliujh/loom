@@ -52,7 +52,7 @@ type NewFiles struct {
 }
 
 type Patch struct {
-	Engine string `yaml:"engine"`
+	Engine string `yaml:"engine,omitempty"` // "smp" (default, strategic merge patch) or "json6902"
 	Path   string `yaml:"path"`
 	Target string `yaml:"target"`
 }

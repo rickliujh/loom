@@ -87,11 +87,11 @@ spec:
         source: "."
         dest: ""
 
-    - name: patch-kustomize
+    - name: patch-app
       patch:
-        engine: kustomize
+        engine: json6902
         path: "__functions/patches/add-app.yaml"
-        target: "kustomization.yaml"
+        target: "argocd/application.yaml"
 
     - name: validate
       shell:
@@ -179,17 +179,76 @@ Every file in the source directory (except `loom.yaml`, `loom.jsonnet`, and anyt
 
 ### `patch` — Patch Existing Files
 
-Applies a kustomize patch to a file already in the target repository.
+Modifies YAML files already in the target repository. Loom supports two patch engines, selected with the `engine` field:
+
+| Engine | Description |
+|--------|-------------|
+| `smp` | [Strategic Merge Patch](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/update-api-object-kubectl-patch/#use-a-strategic-merge-patch-to-update-a-deployment) — a partial YAML document that is deep-merged into the target. Default when `engine` is omitted. |
+| `json6902` | [RFC 6902 JSON Patch](https://datatracker.ietf.org/doc/html/rfc6902) — a list of explicit add/remove/replace/move/copy/test operations. |
+
+Both engines are powered by the [kustomize](https://github.com/kubernetes-sigs/kustomize) library and built into Loom — no external tools required.
+
+#### Strategic Merge Patch (default)
 
 ```yaml
-- name: patch-kustomize
+- name: overlay-app
   patch:
-    engine: kustomize
-    path: "__functions/patches/add-app.yaml"
-    target: "kustomization.yaml"
+    path: "__functions/patches/smp-overlay.yaml"
+    target: "argocd/application.yaml"
 ```
 
-This shells out to the `kustomize` binary, so it must be installed on the machine running Loom. The `__functions/` directory is the conventional place for patch files.
+The patch file is a partial YAML document. Fields present in the patch overwrite the target; fields absent from the patch are left untouched. Maps are merged recursively. Lists with associative keys (like `name` in containers) merge by key.
+
+```yaml
+# __functions/patches/smp-overlay.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "{{ .serviceName }}"
+  namespace: "{{ .namespace }}"
+  labels:
+    managed-by: loom
+    team: platform
+spec:
+  source:
+    targetRevision: HEAD
+```
+
+Strategic merge also supports Kubernetes patch directives: `$patch: delete` to remove a field or list element, `$patch: replace` to replace an entire subtree instead of merging. This is the same patching strategy used by `kubectl apply` and kustomize.
+
+#### JSON6902
+
+```yaml
+- name: patch-app
+  patch:
+    engine: json6902
+    path: "__functions/patches/add-app.yaml"
+    target: "argocd/application.yaml"
+```
+
+The patch file is a YAML list of RFC 6902 operations. Values are templated, so you can inject parameters:
+
+```yaml
+# __functions/patches/add-app.yaml
+- op: replace
+  path: /metadata/name
+  value: "{{ .serviceName }}"
+
+- op: replace
+  path: /metadata/namespace
+  value: "{{ .namespace }}"
+
+- op: add
+  path: /metadata/labels/managed-by
+  value: loom
+
+- op: remove
+  path: /metadata/annotations/deprecated
+```
+
+Supported operations: `add`, `remove`, `replace`, `move`, `copy`, `test`. Paths follow [RFC 6901 JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) syntax — `/` separated segments, with `~0` for `~` and `~1` for `/` in key names. The `add` operation creates intermediate maps if they don't exist yet, and supports appending to arrays with `-`.
+
+The `__functions/` directory is the conventional place for patch files — it's excluded from template rendering so patches are never copied to the target as new files.
 
 ### `shell` — Run a Command
 
@@ -388,7 +447,7 @@ cd loom
 go build -o loom .
 ```
 
-Loom is a single static binary. It embeds Go libraries for Git and PR/MR creation so it can run with zero external dependencies. When those libraries hit an edge case — an SSH agent configuration go-git doesn't handle, or a credential helper it can't talk to — Loom automatically falls back to the CLI tools already on your machine (`git`, `gh`, `glab`, `kustomize`).
+Loom is a single static binary. It embeds Go libraries for Git, PR/MR creation, and YAML patching, so it can run with zero external dependencies. When the Git or PR libraries hit an edge case — an SSH agent configuration go-git doesn't handle, or a credential helper it can't talk to — Loom automatically falls back to the CLI tools already on your machine (`git`, `gh`, `glab`).
 
 On a DevOps laptop where these tools are already authenticated and configured, Loom just works.
 
@@ -404,14 +463,14 @@ On a DevOps laptop where these tools are already authenticated and configured, L
 
 **Template everywhere.** Every string in operations — commands, commit messages, PR titles, file paths — is a Go template. You never have to switch between "static" and "dynamic" configuration. It's all dynamic, all the time.
 
-**Library first, CLI fallback.** Loom embeds [go-git](https://github.com/go-git/go-git) for Git operations and uses the GitHub/GitLab APIs for PR creation — no external binaries needed in CI or containers. But on a developer's laptop, the system `git`, `gh`, and `glab` are already authenticated and configured. When the library path fails (auth issues, unsupported SSH configs, token not set), Loom detects the local binary and retries through it. You get the portability of a self-contained binary and the compatibility of native tooling, without choosing between them.
+**Library first, CLI fallback.** Loom embeds [go-git](https://github.com/go-git/go-git) for Git operations, uses the GitHub/GitLab APIs for PR creation, and implements RFC 6902 patching natively — no external binaries needed in CI or containers. But on a developer's laptop, the system `git`, `gh`, and `glab` are already authenticated and configured. When the library path fails (auth issues, unsupported SSH configs, token not set), Loom detects the local binary and retries through it. You get the portability of a self-contained binary and the compatibility of native tooling, without choosing between them.
 
 | Operation | Library (primary) | CLI fallback |
 |-----------|------------------|-------------|
 | Clone, push, branch, commit | go-git | `git` |
 | GitHub PR | go-github API | `gh` |
 | GitLab MR | go-gitlab API | `glab` |
-| Kustomize patch | — | `kustomize` |
+| YAML patch (SMP, JSON6902) | kustomize library | — |
 
 ## Architecture
 

@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 const FunctionsDir = "__functions"
@@ -80,10 +79,10 @@ func WriteFile(path string, content []byte, perm os.FileMode) error {
 }
 
 // ExpandPath resolves a source path relative to a base directory.
-// If source starts with "." it is relative to baseDir, otherwise treated as-is.
+// Absolute paths are returned as-is. Everything else is relative to baseDir.
 func ExpandPath(baseDir, source string) string {
-	if strings.HasPrefix(source, ".") {
-		return filepath.Join(baseDir, source)
+	if filepath.IsAbs(source) {
+		return source
 	}
-	return source
+	return filepath.Join(baseDir, source)
 }

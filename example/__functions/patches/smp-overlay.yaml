@@ -1,0 +1,27 @@
+# Strategic Merge Patch overlay.
+#
+# This patch is merged into the target YAML using Kubernetes-style
+# strategic merge. Fields present in the patch are set or overwritten;
+# fields absent from the patch are left untouched.
+#
+# Values are templated — {{ .serviceName }} and {{ .namespace }} are
+# replaced with parameters before the merge.
+#
+# Usage in loom.yaml:
+#   - name: overlay-app
+#     patch:
+#       engine: smp
+#       path: "__functions/patches/smp-overlay.yaml"
+#       target: "argocd/application.yaml"
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: "{{ .serviceName }}"
+  namespace: "{{ .namespace }}"
+  labels:
+    managed-by: loom
+    team: platform
+spec:
+  source:
+    targetRevision: HEAD

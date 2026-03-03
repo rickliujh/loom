@@ -59,6 +59,15 @@ func Validate(lf *LoomFile) error {
 		if count != 1 {
 			return fmt.Errorf("operation %q must have exactly one action type, got %d", op.Name, count)
 		}
+
+		if op.Patch != nil && op.Patch.Engine != "" {
+			switch op.Patch.Engine {
+			case "smp", "json6902":
+				// valid
+			default:
+				return fmt.Errorf("operation %q: unknown patch engine %q (supported: smp, json6902)", op.Name, op.Patch.Engine)
+			}
+		}
 	}
 
 	return nil

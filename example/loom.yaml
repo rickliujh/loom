@@ -17,11 +17,15 @@ spec:
       newFiles:
         source: "."
         dest: ""
-    - name: patch-kustomize
+    - name: patch-app
       patch:
-        engine: kustomize
+        engine: json6902
         path: "__functions/patches/add-app.yaml"
-        target: "argocd/kustomization.yaml"
+        target: "argocd/applicaton.yaml"
+    - name: overlay-app
+      patch:
+        path: "__functions/patches/smp-overlay.yaml"
+        target: "argocd/applicaton.yaml"
     - name: validate
       shell:
         command: "echo 'validating {{ .serviceName }} in {{ .namespace }}'"

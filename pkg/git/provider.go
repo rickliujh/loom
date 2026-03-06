@@ -108,6 +108,11 @@ func (p *GitHubProvider) createPRAPI(ctx context.Context, opts PROptions) (strin
 	}
 
 	if len(opts.Labels) > 0 {
+		for _, l := range opts.Labels {
+			_, _, _ = client.Issues.CreateLabel(ctx, owner, repo, &github.Label{
+				Name: github.String(l),
+			})
+		}
 		_, _, err = client.Issues.AddLabelsToIssue(ctx, owner, repo, pr.GetNumber(), opts.Labels)
 		if err != nil {
 			return pr.GetHTMLURL(), fmt.Errorf("adding labels: %w", err)
@@ -135,12 +140,10 @@ func ghCLICreatePR(ctx context.Context, opts PROptions) (string, error) {
 	}
 
 	owner, repo, err := parseGitHubURL(opts.RepoURL)
+	nwo := ""
 	if err == nil {
-		args = append(args, "--repo", owner+"/"+repo)
-	}
-
-	for _, l := range opts.Labels {
-		args = append(args, "--label", l)
+		nwo = owner + "/" + repo
+		args = append(args, "--repo", nwo)
 	}
 
 	cmd := exec.CommandContext(ctx, "gh", args...)
@@ -153,8 +156,41 @@ func ghCLICreatePR(ctx context.Context, opts PROptions) (string, error) {
 		return "", fmt.Errorf("gh pr create: %w\n%s", err, output)
 	}
 
-	// gh outputs the PR URL on stdout.
-	return strings.TrimSpace(string(output)), nil
+	prURL := strings.TrimSpace(string(output))
+
+	// Labels are applied after PR creation so that a missing label
+	// does not prevent the PR from being opened.
+	if len(opts.Labels) > 0 {
+		ghAddLabels(ctx, opts, nwo, prURL)
+	}
+
+	return prURL, nil
+}
+
+// ghAddLabels ensures every requested label exists in the repo, then
+// adds them to the PR via `gh pr edit`.
+func ghAddLabels(ctx context.Context, opts PROptions, nwo, prURL string) {
+	for _, l := range opts.Labels {
+		cArgs := []string{"label", "create", l, "--force"}
+		if nwo != "" {
+			cArgs = append(cArgs, "--repo", nwo)
+		}
+		cmd := exec.CommandContext(ctx, "gh", cArgs...)
+		if opts.WorkDir != "" {
+			cmd.Dir = opts.WorkDir
+		}
+		_ = cmd.Run()
+	}
+
+	eArgs := []string{"pr", "edit", prURL}
+	for _, l := range opts.Labels {
+		eArgs = append(eArgs, "--add-label", l)
+	}
+	cmd := exec.CommandContext(ctx, "gh", eArgs...)
+	if opts.WorkDir != "" {
+		cmd.Dir = opts.WorkDir
+	}
+	_ = cmd.Run()
 }
 
 // parseGitHubURL extracts owner and repo from a GitHub URL.

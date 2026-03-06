@@ -11,36 +11,36 @@ spec:
     - name: commitHash
       dynamic: "git rev-parse --short HEAD"
   target:
-    url: "https://github.com/myorg/gitops-repo.git"
+    url: "git@github.com:rickliujh/loom-test.git"
     branch: "main"
-    featureBranch: "loom/onboard-{{ .serviceName }}"
+    featureBranch: "loom/test-{{ .serviceName }}"
   operations:
     - name: create-files
       newFiles:
         source: "."
         dest: ""
-    - name: patch-app
+    # - name: patch-app
+    #   patch:
+    #     engine: json6902
+    #     path: "__functions/patches/add-app.yaml"
+    #     target: "cluster/constraints/cluster-secret-store-control.yaml"
+    - name: patch-clsuter-secret-store
       patch:
-        engine: json6902
-        path: "__functions/patches/add-app.yaml"
-        target: "argocd/applicaton.yaml"
-    - name: overlay-app
-      patch:
-        path: "__functions/patches/smp-overlay.yaml"
-        target: "argocd/applicaton.yaml"
+        path: "__functions/patches/clustersecretstore-patch.yaml"
+        target: "cluster/constraints/cluster-secret-store-control.yaml"
     - name: validate
       shell:
         command: "echo 'validating {{ .serviceName }} in {{ .namespace }}'"
         timeout: "30s"
     - name: commit
       commitPush:
-        message: "feat: onboard {{ .serviceName }}"
-        author: "loom-bot"
-        email: "loom@example.com"
+        message: "feat: loom test {{ .serviceName }}"
+        # author: "loom-bot"
+        # email: "loom@example.com"
     - name: open-pr
       pr:
         provider: github
-        title: "Onboard {{ .serviceName }}"
+        title: "loom test pr {{ .serviceName }}"
         baseBranch: main
         labels: [automated]
         tokenEnv: GITHUB_TOKEN

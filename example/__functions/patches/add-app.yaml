@@ -14,14 +14,6 @@
 #       path: "__functions/patches/add-app.yaml"
 #       target: "argocd/applicaton.yaml"
 
-- op: replace
-  path: /metadata/name
-  value: "{{ .serviceName }}"
-
-- op: replace
-  path: /metadata/namespace
-  value: "{{ .namespace }}"
-
 - op: add
-  path: /metadata/labels/managed-by
-  value: loom
+  path: /spec/parameters/ClusterSecretStore/1/allowednamespace/-
+  value: myloomtest

@@ -252,7 +252,16 @@ Both engines are powered by the [kustomize](https://github.com/kubernetes-sigs/k
     target: "argocd/application.yaml"
 ```
 
-The patch file is a partial YAML document. Fields present in the patch overwrite the target; fields absent from the patch are left untouched. Maps are merged recursively. Lists with associative keys (like `name` in containers) merge by key.
+The patch file is a partial YAML document. Loom deep-merges it into the target with the following rules:
+
+- **Maps** are merged recursively — fields present in the patch overwrite the target; fields absent from the patch are left untouched.
+- **Lists of maps** are merged by an inferred key. Loom detects a common string field (e.g. `name`) across list items and uses it to match entries. Matched items are deep-merged; unmatched patch items are appended.
+- **Lists of scalars** (strings, numbers) append unique values from the patch. Existing values are preserved, and duplicates are skipped.
+- **Scalars** are replaced by the patch value.
+
+Original file formatting (indentation, key order, flow style) is preserved.
+
+**Example — merging scalar values into a map:**
 
 ```yaml
 # __functions/patches/smp-overlay.yaml
@@ -268,6 +277,26 @@ spec:
   source:
     targetRevision: HEAD
 ```
+
+**Example — appending to a list of scalars inside a matched list item:**
+
+Given a target with a list of `ClusterSecretStore` entries keyed by `name`, this patch appends `loom` to the `allowednamespace` list of `vault-example-2` without touching other entries:
+
+```yaml
+# __functions/patches/clustersecretstore-patch.yaml
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: ClusterSecretStoreControl
+metadata:
+  name: clustersecretstorecontrol
+spec:
+  parameters:
+    ClusterSecretStore:
+      - name: vault-example-2
+        allowednamespace:
+          - loom
+```
+
+If the target's `vault-example-2` already has `allowednamespace: [istio-system, argocd]`, the result will be `[istio-system, argocd, loom]`. Other entries like `vault-example-1` and `vault-example-3` remain unchanged.
 
 Strategic merge also supports Kubernetes patch directives: `$patch: delete` to remove a field or list element, `$patch: replace` to replace an entire subtree instead of merging. This is the same patching strategy used by `kubectl apply` and kustomize.
 

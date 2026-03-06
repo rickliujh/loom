@@ -9,6 +9,7 @@ import (
 	"github.com/rickliujh/loom/internal/util"
 	"github.com/rickliujh/loom/pkg/config"
 	tmpl "github.com/rickliujh/loom/pkg/template"
+	"gopkg.in/yaml.v3"
 	"sigs.k8s.io/kustomize/api/filters/patchjson6902"
 	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 	"sigs.k8s.io/kustomize/kyaml/yaml/merge2"
@@ -60,14 +61,22 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	}
 }
 
-// applySMP applies a Strategic Merge Patch using kustomize's merge2.
+// applySMP applies a Strategic Merge Patch using kustomize's merge2 for
+// format preservation. Scalar lists in the patch are pre-expanded with
+// the target's existing values so that merge2's list replacement produces
+// the correct append-unique result.
 func (a *PatchAction) applySMP(patchContent, targetPath string) error {
 	targetRaw, err := os.ReadFile(targetPath)
 	if err != nil {
 		return actionError("patch", fmt.Errorf("reading target file %q: %w", targetPath, err))
 	}
 
-	result, err := merge2.MergeStrings(patchContent, string(targetRaw), false, kyaml.MergeOptions{
+	expanded, err := expandScalarLists(string(targetRaw), patchContent)
+	if err != nil {
+		expanded = patchContent
+	}
+
+	result, err := merge2.MergeStrings(expanded, string(targetRaw), true, kyaml.MergeOptions{
 		ListIncreaseDirection: kyaml.MergeOptionsListAppend,
 	})
 	if err != nil {
@@ -78,6 +87,137 @@ func (a *PatchAction) applySMP(patchContent, targetPath string) error {
 		return actionError("patch", fmt.Errorf("writing patched file %q: %w", targetPath, err))
 	}
 	return nil
+}
+
+// expandScalarLists walks the patch and target as untyped Go values.
+// For every scalar list in the patch, it prepends the target's existing
+// values (deduped) so that when merge2 replaces the list the result
+// contains both old and new entries.
+func expandScalarLists(targetStr, patchStr string) (string, error) {
+	var target, patch any
+	if err := yaml.Unmarshal([]byte(targetStr), &target); err != nil {
+		return "", err
+	}
+	if err := yaml.Unmarshal([]byte(patchStr), &patch); err != nil {
+		return "", err
+	}
+
+	expandWalk(target, patch)
+
+	out, err := yaml.Marshal(patch)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+// expandWalk recursively walks target and patch in parallel. When it finds
+// a scalar list in patch that also exists in target, it prepends the
+// target values (skipping duplicates).
+func expandWalk(target, patch any) {
+	pm, pOk := patch.(map[string]any)
+	tm, tOk := target.(map[string]any)
+	if !pOk || !tOk {
+		return
+	}
+
+	for k, pv := range pm {
+		tv, exists := tm[k]
+		if !exists {
+			continue
+		}
+
+		pSlice, pIsList := pv.([]any)
+		tSlice, tIsList := tv.([]any)
+
+		if pIsList && tIsList && len(pSlice) > 0 {
+			if isScalarSlice(pSlice) && isScalarSlice(tSlice) {
+				pm[k] = appendUniqueScalars(tSlice, pSlice)
+				continue
+			}
+			// Recurse into matched map-list items by merge key.
+			expandWalkMapSlices(tSlice, pSlice)
+			continue
+		}
+
+		expandWalk(tv, pv)
+	}
+}
+
+// expandWalkMapSlices matches map items in target and patch by a common
+// string key, then recurses into matched pairs.
+func expandWalkMapSlices(target, patch []any) {
+	key := inferMapSliceKey(target, patch)
+	if key == "" {
+		return
+	}
+	for _, pi := range patch {
+		pm, ok := pi.(map[string]any)
+		if !ok {
+			continue
+		}
+		pv, ok := pm[key]
+		if !ok {
+			continue
+		}
+		for _, ti := range target {
+			tm, ok := ti.(map[string]any)
+			if !ok {
+				continue
+			}
+			if tm[key] == pv {
+				expandWalk(ti, pi)
+				break
+			}
+		}
+	}
+}
+
+// inferMapSliceKey finds a common string-valued key across the first
+// map elements of both slices (e.g. "name").
+func inferMapSliceKey(target, patch []any) string {
+	if len(target) == 0 || len(patch) == 0 {
+		return ""
+	}
+	tm, tOk := target[0].(map[string]any)
+	pm, pOk := patch[0].(map[string]any)
+	if !tOk || !pOk {
+		return ""
+	}
+	for k, v := range pm {
+		if _, isStr := v.(string); !isStr {
+			continue
+		}
+		if _, exists := tm[k]; exists {
+			return k
+		}
+	}
+	return ""
+}
+
+func isScalarSlice(s []any) bool {
+	for _, v := range s {
+		switch v.(type) {
+		case map[string]any, []any:
+			return false
+		}
+	}
+	return true
+}
+
+func appendUniqueScalars(target, patch []any) []any {
+	seen := make(map[any]bool, len(target))
+	for _, v := range target {
+		seen[v] = true
+	}
+	result := make([]any, len(target))
+	copy(result, target)
+	for _, v := range patch {
+		if !seen[v] {
+			result = append(result, v)
+		}
+	}
+	return result
 }
 
 // applyJSON6902 applies an RFC 6902 JSON Patch using kustomize's patchjson6902 filter.

@@ -12,6 +12,41 @@ loom run ./onboard-service -p serviceName=payments -p namespace=fintech
 
 No scripting. No custom CI jobs. No imperative glue code. Just a declarative workflow that turns parameters into a pull request.
 
+## Installation
+
+### Download a release binary
+
+Pre-built binaries are available on the [Releases](https://github.com/rickliujh/loom/releases) page for Linux and macOS (amd64/arm64).
+
+```bash
+# Example: Linux amd64
+curl -Lo loom https://github.com/rickliujh/loom/releases/latest/download/loom-linux-amd64
+chmod +x loom
+sudo mv loom /usr/local/bin/
+```
+
+### Build from source
+
+Requires Go 1.25+.
+
+```bash
+go install github.com/rickliujh/loom@latest
+```
+
+Or clone and build:
+
+```bash
+git clone https://github.com/rickliujh/loom.git
+cd loom
+go build -o loom .
+```
+
+### Verify
+
+```bash
+loom version
+```
+
 ## The Problem Loom Solves
 
 GitOps repositories accumulate operational patterns. Onboarding a service means creating an ArgoCD Application, an AppProject, a Gatekeeper constraint, and a kustomization entry — every time. Teams handle this in different ways:
@@ -544,4 +579,4 @@ Adding a new operation type means implementing this interface and registering it
 
 ## License
 
-[Apache 2.0](LICENSE)
+[GPL-3.0](LICENSE)

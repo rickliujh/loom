@@ -27,6 +27,9 @@ func Validate(lf *LoomFile) error {
 		if paramNames[p.Name] {
 			return fmt.Errorf("duplicate param name %q", p.Name)
 		}
+		if p.Dynamic != "" && p.Required {
+			return fmt.Errorf("param %q: dynamic and required are mutually exclusive", p.Name)
+		}
 		paramNames[p.Name] = true
 	}
 

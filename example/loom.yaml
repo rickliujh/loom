@@ -8,6 +8,8 @@ spec:
       required: true
     - name: namespace
       default: "default"
+    - name: commitHash
+      dynamic: "git rev-parse --short HEAD"
   target:
     url: "https://github.com/myorg/gitops-repo.git"
     branch: "main"

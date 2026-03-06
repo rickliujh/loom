@@ -1,8 +1,11 @@
 package module
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"strings"
 
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
@@ -31,7 +34,7 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, fmt.Errorf("validating %s: %w", dir, err)
 	}
 
-	params, err := resolveParams(cfg.Spec.Params, providedParams)
+	params, err := resolveParams(cfg.Spec.Params, providedParams, logger)
 	if err != nil {
 		return nil, fmt.Errorf("resolving params for %s: %w", cfg.Metadata.Name, err)
 	}
@@ -45,11 +48,18 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 }
 
 // resolveParams merges provided params with declared defaults, checking required params.
-func resolveParams(declared []config.ParamDef, provided map[string]string) (map[string]string, error) {
+// Dynamic params (command) are evaluated here: provided > command > default > required error.
+func resolveParams(declared []config.ParamDef, provided map[string]string, logger *slog.Logger) (map[string]string, error) {
 	result := make(map[string]string)
 
 	for _, p := range declared {
 		if val, ok := provided[p.Name]; ok {
+			result[p.Name] = val
+		} else if p.Dynamic != "" {
+			val, err := evalParamCommand(p.Name, p.Dynamic, logger)
+			if err != nil {
+				return nil, err
+			}
 			result[p.Name] = val
 		} else if p.Default != "" {
 			result[p.Name] = p.Default
@@ -66,6 +76,21 @@ func resolveParams(declared []config.ParamDef, provided map[string]string) (map[
 	}
 
 	return result, nil
+}
+
+// evalParamCommand runs a shell command and returns its trimmed stdout as the param value.
+func evalParamCommand(name, command string, logger *slog.Logger) (string, error) {
+	logger.Info("evaluating dynamic parameter", "param", name, "command", command)
+	cmd := exec.Command("sh", "-c", command)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("dynamic parameter %q command failed: %w\nstderr: %s", name, err, stderr.String())
+	}
+	val := strings.TrimRight(stdout.String(), "\n")
+	logger.Info("dynamic parameter resolved", "param", name, "value", val)
+	return val, nil
 }
 
 // NewExecutionContext creates an ExecutionContext for this module.

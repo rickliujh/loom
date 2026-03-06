@@ -23,6 +23,7 @@ type ParamDef struct {
 	Name     string `yaml:"name"`
 	Required bool   `yaml:"required,omitempty"`
 	Default  string `yaml:"default,omitempty"`
+	Dynamic  string `yaml:"dynamic,omitempty"` // Shell command whose stdout becomes the param value.
 }
 
 type TargetSpec struct {

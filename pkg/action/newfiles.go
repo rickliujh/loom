@@ -36,8 +36,8 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 			return actionError("newFiles", err)
 		}
 
-		// Render the destination path itself (may contain template expressions).
-		destRel, err := tmpl.RenderString(relPath, execCtx.Params)
+		// Convert filesystem-friendly __param__ placeholders, then render.
+		destRel, err := tmpl.RenderString(tmpl.ConvertPathTemplate(relPath), execCtx.Params)
 		if err != nil {
 			return actionError("newFiles", err)
 		}

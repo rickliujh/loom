@@ -69,14 +69,14 @@ A Loom module is a directory. Inside it, you put:
 onboard-service/
 ├── loom.yaml
 ├── argocd/
-│   ├── application.yaml      <- template, rendered with params
-│   └── project.yaml          <- template, rendered with params
-├── cluster/
+│   ├── application-__serviceName__.yaml   <- file name is templated
+│   └── project.yaml                       <- template, rendered with params
+├── __namespace__/                         <- folder name is templated
 │   └── constraints/
 │       └── pod-must-have-label.yaml
 └── __functions/
     └── patches/
-        └── add-app.yaml      <- used by patch operations, not copied
+        └── add-app.yaml                   <- used by patch operations, not copied
 ```
 
 When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
@@ -230,7 +230,7 @@ Copies template files from the module directory into the target repository, rend
     dest: ""       # relative to target repository root
 ```
 
-Every file in the source directory (except `loom.yaml`, `loom.jsonnet`, and anything under `__functions/`) is treated as a Go template. The directory structure is preserved. File paths themselves can also contain template expressions.
+Every file in the source directory (except `loom.yaml`, `loom.jsonnet`, and anything under `__functions/`) is treated as a Go template. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
 
 ### `patch` — Patch Existing Files
 
@@ -414,12 +414,44 @@ Available functions:
 
 Templates work in:
 - File contents (newFiles)
-- File paths (newFiles)
+- File and folder paths (newFiles) — see [Path Templating](#path-templating)
 - Shell commands
 - Commit messages
 - PR/MR titles and bodies
 - Feature branch names
 - Child module parameters
+
+### Path Templating
+
+File and folder names support a filesystem-friendly `__paramName__` placeholder syntax. Loom converts these to Go template expressions before rendering, so you don't need curly braces in filenames.
+
+| Source path | With `serviceName=payments`, `env=prod` | Result |
+|-------------|------------------------------------------|--------|
+| `__env__/config.yaml` | `{{ .env }}/config.yaml` | `prod/config.yaml` |
+| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` | `application-payments.yaml` |
+| `__env__/__serviceName__-deploy.yaml` | `{{ .env }}/{{ .serviceName }}-deploy.yaml` | `prod/payments-deploy.yaml` |
+
+This means your module directory can look like:
+
+```
+onboard-service/
+├── loom.yaml
+├── __env__/
+│   └── __serviceName__-app.yaml
+└── shared/
+    └── config.yaml
+```
+
+Running with `-p serviceName=payments -p env=prod` produces:
+
+```
+prod/
+└── payments-app.yaml
+shared/
+└── config.yaml
+```
+
+The standard Go template syntax (`{{ .paramName }}`) also works directly in paths if your filesystem and shell handle it — both syntaxes can be mixed freely.
 
 ## Module Composition
 

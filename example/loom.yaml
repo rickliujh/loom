@@ -8,8 +8,9 @@ spec:
       required: true
     - name: namespace
       default: "default"
+  dynamicParams:
     - name: commitHash
-      dynamic: "git rev-parse --short HEAD"
+      command: "git rev-parse --short HEAD"
   excludes:
     - __functions
   target:

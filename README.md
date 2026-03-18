@@ -105,6 +105,12 @@ spec:
     - name: namespace
       default: "default"
 
+  dynamicParams:
+    - name: commitHash
+      command: "git rev-parse --short HEAD"
+    - name: branchLabel
+      command: "echo {{ .serviceName }}-{{ .namespace }}"
+
   excludes:
     - __functions
 
@@ -160,26 +166,43 @@ Parameters are the inputs to your module. They're injected into every template �
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
 | `required` | If `true`, the run fails when this param is not provided |
 | `default` | Fallback value when the param is not provided |
-| `dynamic` | Shell command whose stdout becomes the parameter value (dynamic parameter) |
 
-#### Dynamic Parameters
+Resolution priority: **provided (`-p`) → default → required error**.
 
-A parameter can declare a `dynamic` field instead of (or alongside) a `default`. The value is a shell command executed via `sh -c` at module load time, before any operations run. Its stdout (trailing newlines stripped) becomes the parameter value.
+### `spec.dynamicParams`
+
+Dynamic parameters are evaluated via shell commands **after** all regular `params` are resolved. Their commands are Go templates — they can reference any regular param or any previously declared dynamic param.
+
+| Field | Description |
+|-------|-------------|
+| `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
+| `default` | Fallback value if the command fails |
 
 ```yaml
-params:
+dynamicParams:
   - name: commitHash
-    dynamic: "git rev-parse --short HEAD"
+    command: "git rev-parse --short HEAD"
   - name: timestamp
-    dynamic: "date +%s"
+    command: "date +%s"
+  - name: configPath
+    command: "echo /configs/{{ .namespace }}/app.yaml"    # references a regular param
   - name: clusterRegion
-    dynamic: "kubectl config view --minify -o jsonpath='{.clusters[0].name}'"
-    default: "us-east-1"   # fallback if dynamic is not needed
+    command: "kubectl config view --minify -o jsonpath='{.clusters[0].name}'"
+    default: "us-east-1"   # fallback if command fails
 ```
 
-Resolution priority: **provided (`-p`) → dynamic → default → required error**. If a value is explicitly passed via `-p` or `--params-file`, the command is skipped entirely. This means you can always override a dynamic parameter from the CLI.
+Dynamic params are evaluated in declaration order, so later entries can reference earlier ones:
 
-`dynamic` and `required` are mutually exclusive — a parameter with a dynamic command always has a way to produce a value.
+```yaml
+dynamicParams:
+  - name: branch
+    command: "git rev-parse --abbrev-ref HEAD"
+  - name: branchLabel
+    command: "echo {{ .branch }}-{{ .namespace }}"    # references the dynamic param above
+```
+
+If a value is explicitly passed via `-p` or `--params-file`, the command is skipped entirely. This means you can always override a dynamic parameter from the CLI.
 
 ### `spec.excludes` and `spec.includes`
 

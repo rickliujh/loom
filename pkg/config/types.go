@@ -13,19 +13,28 @@ type Metadata struct {
 }
 
 type Spec struct {
-	Params     []ParamDef    `yaml:"params,omitempty"`
-	Excludes   []string      `yaml:"excludes,omitempty"`
-	Includes   []string      `yaml:"includes,omitempty"`
-	Target     *TargetSpec   `yaml:"target,omitempty"`
-	Modules    []ModuleRef   `yaml:"modules,omitempty"`
-	Operations []Operation   `yaml:"operations,omitempty"`
+	Params        []ParamDef        `yaml:"params,omitempty"`
+	DynamicParams []DynamicParamDef `yaml:"dynamicParams,omitempty"`
+	Excludes      []string          `yaml:"excludes,omitempty"`
+	Includes      []string          `yaml:"includes,omitempty"`
+	Target        *TargetSpec       `yaml:"target,omitempty"`
+	Modules       []ModuleRef       `yaml:"modules,omitempty"`
+	Operations    []Operation       `yaml:"operations,omitempty"`
 }
 
 type ParamDef struct {
 	Name     string `yaml:"name"`
 	Required bool   `yaml:"required,omitempty"`
 	Default  string `yaml:"default,omitempty"`
-	Dynamic  string `yaml:"dynamic,omitempty"` // Shell command whose stdout becomes the param value.
+}
+
+// DynamicParamDef defines a parameter whose value comes from a shell command.
+// The command is templated with all resolved params before execution.
+// Dynamic params are always evaluated after all regular params are resolved.
+type DynamicParamDef struct {
+	Name    string `yaml:"name"`
+	Command string `yaml:"command"`
+	Default string `yaml:"default,omitempty"` // Fallback if not needed; command takes priority.
 }
 
 type TargetSpec struct {

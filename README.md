@@ -240,8 +240,11 @@ spec:
 **Precedence**: `includes` > `excludes` > implicit excludes. If a file matches both an exclude and an include pattern, it is included.
 
 ### `spec.target`
+Where the rendered files go. This field is **optional**. Loom clones this repository, creates a feature branch, writes into it, and pushes.
 
-Where the rendered files go. Loom clones this repository, creates a feature branch, writes into it, and pushes.
+If omitted (and no `--target-path` is provided), Loom uses the module directory itself as the target.
+
+> **Warning:** When no `target` is configured, operations like `newFiles` will write directly into the module directory, and `shell` commands will execute there. Git operations (`commitPush`, `pr`) will fail if the directory is not a Git repository. Only omit `target` for modules that don't need Git operations.
 
 | Field | Description |
 |-------|-------------|

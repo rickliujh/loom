@@ -85,7 +85,10 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	if targetDir == "" {
-		return fmt.Errorf("no target specified: use --target-path or define spec.target in loom.yaml")
+		// No target specified — default to the module directory.
+		// This supports modules that only use local operations (shell, newFiles)
+		// without needing a git clone.
+		targetDir = moduleDir
 	}
 
 	ctx := context.Background()

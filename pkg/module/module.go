@@ -99,6 +99,8 @@ func (m *Module) NewExecutionContext(targetDir string, dryRun bool) *action.Exec
 		ModuleDir: m.Dir,
 		TargetDir: targetDir,
 		Params:    m.Params,
+		Excludes:  m.Config.Spec.Excludes,
+		Includes:  m.Config.Spec.Includes,
 		DryRun:    dryRun,
 		Logger:    m.Logger,
 	}

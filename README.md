@@ -63,7 +63,7 @@ A Loom module is a directory. Inside it, you put:
 
 1. **`loom.yaml`** — the workflow definition. It declares parameters, operations, and optionally references child modules.
 2. **Template files** — any files alongside `loom.yaml` are treated as Go templates. Their directory structure mirrors where they'll land in the target repository.
-3. **`__functions/`** — a reserved directory for patches, configs, and supporting files that should _not_ be copied to the target.
+3. **`__functions/`** — a conventional directory for patches, configs, and supporting files that should _not_ be copied to the target. Add it to `excludes` in your `loom.yaml` to prevent it from being rendered as template files.
 
 ```
 onboard-service/
@@ -104,6 +104,9 @@ spec:
       required: true
     - name: namespace
       default: "default"
+
+  excludes:
+    - __functions
 
   target:
     url: "https://github.com/myorg/gitops-repo.git"
@@ -178,6 +181,41 @@ Resolution priority: **provided (`-p`) → dynamic → default → required erro
 
 `dynamic` and `required` are mutually exclusive — a parameter with a dynamic command always has a way to produce a value.
 
+### `spec.excludes` and `spec.includes`
+
+Control which files and directories are picked up during template walking (e.g. by `newFiles`).
+
+**Implicit excludes** — these are always excluded by default, without needing to list them:
+- `.git` directory
+- `README.md` file (case-insensitive)
+- `loom.yaml` and `loom.jsonnet` config files (always excluded, cannot be overridden)
+
+Directories that contain shell scripts or supporting files — such as `__functions` — are **not** implicitly excluded. You must list them explicitly in `excludes` if you don't want them copied to the target.
+
+**`excludes`** adds additional glob patterns to skip. **`includes`** overrides any exclusion (both implicit and user-defined), letting you bring back files that would otherwise be filtered out.
+
+Both fields accept [glob patterns](https://pkg.go.dev/path/filepath#Match) matched against file or directory names.
+
+```yaml
+spec:
+  # Exclude the __functions directory and all .env files
+  excludes:
+    - __functions
+    - "*.env"
+
+  # Override implicit excludes to include README.md and .git
+  includes:
+    - README.md
+    - .git
+```
+
+| Field | Description |
+|-------|-------------|
+| `excludes` | Glob patterns for files/directories to skip during template walking |
+| `includes` | Glob patterns that override excludes (including implicit ones) |
+
+**Precedence**: `includes` > `excludes` > implicit excludes. If a file matches both an exclude and an include pattern, it is included.
+
 ### `spec.target`
 
 Where the rendered files go. Loom clones this repository, creates a feature branch, writes into it, and pushes.
@@ -230,7 +268,7 @@ Copies template files from the module directory into the target repository, rend
     dest: ""       # relative to target repository root
 ```
 
-Every file in the source directory (except `loom.yaml`, `loom.jsonnet`, and anything under `__functions/`) is treated as a Go template. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
+Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
 
 ### `patch` — Patch Existing Files
 
@@ -332,7 +370,7 @@ The patch file is a YAML list of RFC 6902 operations. Values are templated, so y
 
 Supported operations: `add`, `remove`, `replace`, `move`, `copy`, `test`. Paths follow [RFC 6901 JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) syntax — `/` separated segments, with `~0` for `~` and `~1` for `/` in key names. The `add` operation creates intermediate maps if they don't exist yet, and supports appending to arrays with `-`.
 
-The `__functions/` directory is the conventional place for patch files — it's excluded from template rendering so patches are never copied to the target as new files.
+The `__functions/` directory is the conventional place for patch files. Add it to `excludes` in your `loom.yaml` so patches are never copied to the target as new files.
 
 ### `shell` — Run a Command
 

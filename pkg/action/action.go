@@ -14,6 +14,10 @@ type ExecutionContext struct {
 	TargetDir string
 	// Params are the resolved template parameters.
 	Params map[string]string
+	// Excludes are glob patterns for files/dirs to exclude from template walking.
+	Excludes []string
+	// Includes are glob patterns that override excludes (including implicit ones).
+	Includes []string
 	// DryRun indicates whether to simulate operations.
 	DryRun bool
 	// Logger is the structured logger.

@@ -14,6 +14,8 @@ type Metadata struct {
 
 type Spec struct {
 	Params     []ParamDef    `yaml:"params,omitempty"`
+	Excludes   []string      `yaml:"excludes,omitempty"`
+	Includes   []string      `yaml:"includes,omitempty"`
 	Target     *TargetSpec   `yaml:"target,omitempty"`
 	Modules    []ModuleRef   `yaml:"modules,omitempty"`
 	Operations []Operation   `yaml:"operations,omitempty"`

@@ -9,6 +9,7 @@ import (
 
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
+	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
 // Module represents a loaded and resolved loom module.
@@ -39,6 +40,10 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, fmt.Errorf("resolving params for %s: %w", cfg.Metadata.Name, err)
 	}
 
+	if err := resolveDynamicParams(cfg.Spec.DynamicParams, params, providedParams, logger); err != nil {
+		return nil, fmt.Errorf("resolving dynamic params for %s: %w", cfg.Metadata.Name, err)
+	}
+
 	return &Module{
 		Dir:    dir,
 		Config: cfg,
@@ -48,18 +53,11 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 }
 
 // resolveParams merges provided params with declared defaults, checking required params.
-// Dynamic params (command) are evaluated here: provided > command > default > required error.
 func resolveParams(declared []config.ParamDef, provided map[string]string, logger *slog.Logger) (map[string]string, error) {
 	result := make(map[string]string)
 
 	for _, p := range declared {
 		if val, ok := provided[p.Name]; ok {
-			result[p.Name] = val
-		} else if p.Dynamic != "" {
-			val, err := evalParamCommand(p.Name, p.Dynamic, logger)
-			if err != nil {
-				return nil, err
-			}
 			result[p.Name] = val
 		} else if p.Default != "" {
 			result[p.Name] = p.Default
@@ -76,6 +74,37 @@ func resolveParams(declared []config.ParamDef, provided map[string]string, logge
 	}
 
 	return result, nil
+}
+
+// resolveDynamicParams evaluates dynamic parameters after all regular params
+// are resolved. The command string is templated with the resolved params before
+// execution. Provided params override dynamic evaluation.
+func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string]string, provided map[string]string, logger *slog.Logger) error {
+	for _, dp := range declared {
+		// Provided params always take priority.
+		if val, ok := provided[dp.Name]; ok {
+			resolved[dp.Name] = val
+			continue
+		}
+
+		// Template the command with all currently resolved params.
+		renderedCmd, err := tmpl.RenderString(dp.Command, resolved)
+		if err != nil {
+			return fmt.Errorf("templating command for dynamic param %q: %w", dp.Name, err)
+		}
+
+		val, err := evalParamCommand(dp.Name, renderedCmd, logger)
+		if err != nil {
+			if dp.Default != "" {
+				logger.Warn("dynamic param command failed, using default", "param", dp.Name, "error", err)
+				resolved[dp.Name] = dp.Default
+				continue
+			}
+			return err
+		}
+		resolved[dp.Name] = val
+	}
+	return nil
 }
 
 // evalParamCommand runs a shell command and returns its trimmed stdout as the param value.
@@ -99,6 +128,8 @@ func (m *Module) NewExecutionContext(targetDir string, dryRun bool) *action.Exec
 		ModuleDir: m.Dir,
 		TargetDir: targetDir,
 		Params:    m.Params,
+		Excludes:  m.Config.Spec.Excludes,
+		Includes:  m.Config.Spec.Includes,
 		DryRun:    dryRun,
 		Logger:    m.Logger,
 	}

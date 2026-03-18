@@ -27,10 +27,20 @@ func Validate(lf *LoomFile) error {
 		if paramNames[p.Name] {
 			return fmt.Errorf("duplicate param name %q", p.Name)
 		}
-		if p.Dynamic != "" && p.Required {
-			return fmt.Errorf("param %q: dynamic and required are mutually exclusive", p.Name)
-		}
 		paramNames[p.Name] = true
+	}
+
+	for _, dp := range lf.Spec.DynamicParams {
+		if dp.Name == "" {
+			return fmt.Errorf("dynamicParam name cannot be empty")
+		}
+		if paramNames[dp.Name] {
+			return fmt.Errorf("duplicate param name %q (declared in both params and dynamicParams)", dp.Name)
+		}
+		if dp.Command == "" {
+			return fmt.Errorf("dynamicParam %q: command is required", dp.Name)
+		}
+		paramNames[dp.Name] = true
 	}
 
 	opNames := make(map[string]bool)

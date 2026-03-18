@@ -63,7 +63,7 @@ A Loom module is a directory. Inside it, you put:
 
 1. **`loom.yaml`** — the workflow definition. It declares parameters, operations, and optionally references child modules.
 2. **Template files** — any files alongside `loom.yaml` are treated as Go templates. Their directory structure mirrors where they'll land in the target repository.
-3. **`__functions/`** — a reserved directory for patches, configs, and supporting files that should _not_ be copied to the target.
+3. **`__functions/`** — a conventional directory for patches, configs, and supporting files that should _not_ be copied to the target. Add it to `excludes` in your `loom.yaml` to prevent it from being rendered as template files.
 
 ```
 onboard-service/
@@ -104,6 +104,15 @@ spec:
       required: true
     - name: namespace
       default: "default"
+
+  dynamicParams:
+    - name: commitHash
+      command: "git rev-parse --short HEAD"
+    - name: branchLabel
+      command: "echo {{ .serviceName }}-{{ .namespace }}"
+
+  excludes:
+    - __functions
 
   target:
     url: "https://github.com/myorg/gitops-repo.git"
@@ -157,30 +166,85 @@ Parameters are the inputs to your module. They're injected into every template �
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
 | `required` | If `true`, the run fails when this param is not provided |
 | `default` | Fallback value when the param is not provided |
-| `dynamic` | Shell command whose stdout becomes the parameter value (dynamic parameter) |
 
-#### Dynamic Parameters
+Resolution priority: **provided (`-p`) → default → required error**.
 
-A parameter can declare a `dynamic` field instead of (or alongside) a `default`. The value is a shell command executed via `sh -c` at module load time, before any operations run. Its stdout (trailing newlines stripped) becomes the parameter value.
+### `spec.dynamicParams`
+
+Dynamic parameters are evaluated via shell commands **after** all regular `params` are resolved. Their commands are Go templates — they can reference any regular param or any previously declared dynamic param.
+
+| Field | Description |
+|-------|-------------|
+| `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
+| `default` | Fallback value if the command fails |
 
 ```yaml
-params:
+dynamicParams:
   - name: commitHash
-    dynamic: "git rev-parse --short HEAD"
+    command: "git rev-parse --short HEAD"
   - name: timestamp
-    dynamic: "date +%s"
+    command: "date +%s"
+  - name: configPath
+    command: "echo /configs/{{ .namespace }}/app.yaml"    # references a regular param
   - name: clusterRegion
-    dynamic: "kubectl config view --minify -o jsonpath='{.clusters[0].name}'"
-    default: "us-east-1"   # fallback if dynamic is not needed
+    command: "kubectl config view --minify -o jsonpath='{.clusters[0].name}'"
+    default: "us-east-1"   # fallback if command fails
 ```
 
-Resolution priority: **provided (`-p`) → dynamic → default → required error**. If a value is explicitly passed via `-p` or `--params-file`, the command is skipped entirely. This means you can always override a dynamic parameter from the CLI.
+Dynamic params are evaluated in declaration order, so later entries can reference earlier ones:
 
-`dynamic` and `required` are mutually exclusive — a parameter with a dynamic command always has a way to produce a value.
+```yaml
+dynamicParams:
+  - name: branch
+    command: "git rev-parse --abbrev-ref HEAD"
+  - name: branchLabel
+    command: "echo {{ .branch }}-{{ .namespace }}"    # references the dynamic param above
+```
+
+If a value is explicitly passed via `-p` or `--params-file`, the command is skipped entirely. This means you can always override a dynamic parameter from the CLI.
+
+### `spec.excludes` and `spec.includes`
+
+Control which files and directories are picked up during template walking (e.g. by `newFiles`).
+
+**Implicit excludes** — these are always excluded by default, without needing to list them:
+- `.git` directory
+- `README.md` file (case-insensitive)
+- `loom.yaml` and `loom.jsonnet` config files (always excluded, cannot be overridden)
+
+Directories that contain shell scripts or supporting files — such as `__functions` — are **not** implicitly excluded. You must list them explicitly in `excludes` if you don't want them copied to the target.
+
+**`excludes`** adds additional glob patterns to skip. **`includes`** overrides any exclusion (both implicit and user-defined), letting you bring back files that would otherwise be filtered out.
+
+Both fields accept [glob patterns](https://pkg.go.dev/path/filepath#Match) matched against file or directory names.
+
+```yaml
+spec:
+  # Exclude the __functions directory and all .env files
+  excludes:
+    - __functions
+    - "*.env"
+
+  # Override implicit excludes to include README.md and .git
+  includes:
+    - README.md
+    - .git
+```
+
+| Field | Description |
+|-------|-------------|
+| `excludes` | Glob patterns for files/directories to skip during template walking |
+| `includes` | Glob patterns that override excludes (including implicit ones) |
+
+**Precedence**: `includes` > `excludes` > implicit excludes. If a file matches both an exclude and an include pattern, it is included.
 
 ### `spec.target`
+Where the rendered files go. This field is **optional**. Loom clones this repository, creates a feature branch, writes into it, and pushes.
 
-Where the rendered files go. Loom clones this repository, creates a feature branch, writes into it, and pushes.
+If omitted (and no `--target-path` is provided), Loom uses the module directory itself as the target.
+
+> **Warning:** When no `target` is configured, operations like `newFiles` will write directly into the module directory, and `shell` commands will execute there. Git operations (`commitPush`, `pr`) will fail if the directory is not a Git repository. Only omit `target` for modules that don't need Git operations.
 
 | Field | Description |
 |-------|-------------|
@@ -230,7 +294,7 @@ Copies template files from the module directory into the target repository, rend
     dest: ""       # relative to target repository root
 ```
 
-Every file in the source directory (except `loom.yaml`, `loom.jsonnet`, and anything under `__functions/`) is treated as a Go template. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
+Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
 
 ### `patch` — Patch Existing Files
 
@@ -332,7 +396,7 @@ The patch file is a YAML list of RFC 6902 operations. Values are templated, so y
 
 Supported operations: `add`, `remove`, `replace`, `move`, `copy`, `test`. Paths follow [RFC 6901 JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) syntax — `/` separated segments, with `~0` for `~` and `~1` for `/` in key names. The `add` operation creates intermediate maps if they don't exist yet, and supports appending to arrays with `-`.
 
-The `__functions/` directory is the conventional place for patch files — it's excluded from template rendering so patches are never copied to the target as new files.
+The `__functions/` directory is the conventional place for patch files. Add it to `excludes` in your `loom.yaml` so patches are never copied to the target as new files.
 
 ### `shell` — Run a Command
 

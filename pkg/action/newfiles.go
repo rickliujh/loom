@@ -19,7 +19,11 @@ type NewFilesAction struct {
 func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext) error {
 	sourceDir := util.ExpandPath(execCtx.ModuleDir, a.Config.Source)
 
-	files, err := util.WalkTemplateFiles(sourceDir)
+	opts := &util.FilterOptions{
+		Excludes: execCtx.Excludes,
+		Includes: execCtx.Includes,
+	}
+	files, err := util.WalkTemplateFiles(sourceDir, opts)
 	if err != nil {
 		return actionError("newFiles", err)
 	}

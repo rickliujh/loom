@@ -69,14 +69,14 @@ A Loom module is a directory. Inside it, you put:
 onboard-service/
 ├── loom.yaml
 ├── argocd/
-│   ├── application-__serviceName__.yaml   <- file name is templated
-│   └── project.yaml                       <- template, rendered with params
-├── __namespace__/                         <- folder name is templated
+│   ├── application-{{ .serviceName }}.yaml   <- file name is templated
+│   └── project.yaml                          <- template, rendered with params
+├── {{ .namespace }}/                         <- folder name is templated
 │   └── constraints/
 │       └── pod-must-have-label.yaml
 └── __functions/
     └── patches/
-        └── add-app.yaml                   <- used by patch operations, not copied
+        └── add-app.yaml                      <- used by patch operations, not copied
 ```
 
 When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
@@ -294,7 +294,7 @@ Copies template files from the module directory into the target repository, rend
     dest: ""       # relative to target repository root
 ```
 
-Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
+Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain Go template expressions (see [Path Templating](#path-templating)).
 
 ### `patch` — Patch Existing Files
 
@@ -487,21 +487,21 @@ Templates work in:
 
 ### Path Templating
 
-File and folder names support a filesystem-friendly `__paramName__` placeholder syntax. Loom converts these to Go template expressions before rendering, so you don't need curly braces in filenames.
+File and folder names are rendered as Go templates, just like file contents. You can use `{{ .paramName }}` directly in file and directory names.
 
 | Source path | With `serviceName=payments`, `env=prod` | Result |
 |-------------|------------------------------------------|--------|
-| `__env__/config.yaml` | `{{ .env }}/config.yaml` | `prod/config.yaml` |
-| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` | `application-payments.yaml` |
-| `__env__/__serviceName__-deploy.yaml` | `{{ .env }}/{{ .serviceName }}-deploy.yaml` | `prod/payments-deploy.yaml` |
+| `{{ .env }}/config.yaml` | | `prod/config.yaml` |
+| `application-{{ .serviceName }}.yaml` | | `application-payments.yaml` |
+| `{{ .env }}/{{ .serviceName }}-deploy.yaml` | | `prod/payments-deploy.yaml` |
 
 This means your module directory can look like:
 
 ```
 onboard-service/
 ├── loom.yaml
-├── __env__/
-│   └── __serviceName__-app.yaml
+├── {{ .env }}/
+│   └── {{ .serviceName }}-app.yaml
 └── shared/
     └── config.yaml
 ```
@@ -515,7 +515,12 @@ shared/
 └── config.yaml
 ```
 
-The standard Go template syntax (`{{ .paramName }}`) also works directly in paths if your filesystem and shell handle it — both syntaxes can be mixed freely.
+For convenience, Loom also supports a filesystem-friendly `__paramName__` placeholder syntax. This is useful when your filesystem, shell, or editor has trouble with curly braces in filenames. Loom converts `__paramName__` to `{{ .paramName }}` before rendering. Both syntaxes can be mixed freely.
+
+| `__paramName__` syntax | Equivalent Go template |
+|------------------------|----------------------|
+| `__env__/config.yaml` | `{{ .env }}/config.yaml` |
+| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` |
 
 ## Module Composition
 
@@ -631,7 +636,7 @@ loom generate https://github.com/myorg/gitops-repo/pull/42 \
 
 Loom fetches the PR diff and produces a ready-to-use module:
 
-- **Added files** become templates with `{{ .serviceName }}` and `{{ .namespace }}` replacing the concrete values. File/folder names use the `__paramName__` syntax.
+- **Added files** become templates with `{{ .serviceName }}` and `{{ .namespace }}` replacing the concrete values, including in file and folder names.
 - **Modified YAML files** become strategic merge patches under `__functions/patches/`.
 - **Deleted files** become `shell` operations with `rm`.
 - **Renamed files** become `shell` operations with `mv`.

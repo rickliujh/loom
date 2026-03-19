@@ -17,11 +17,11 @@ func Parameterize(content string, params map[string]string) string {
 }
 
 // ParameterizePath replaces literal occurrences of param values in a file path
-// with the __key__ placeholder syntax. Replacements are applied longest-value-first.
+// with Go template expressions ({{ .key }}). Replacements are applied longest-value-first.
 func ParameterizePath(path string, params map[string]string) string {
 	pairs := sortedParamPairs(params)
 	for _, p := range pairs {
-		path = strings.ReplaceAll(path, p.value, "__"+p.key+"__")
+		path = strings.ReplaceAll(path, p.value, "{{ ."+p.key+" }}")
 	}
 	return path
 }

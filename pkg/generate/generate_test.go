@@ -39,7 +39,7 @@ func TestBuildModule_AddedFiles(t *testing.T) {
 	}
 
 	// Check template file was parameterized.
-	content, ok := mod.templateFiles["argocd/application-__serviceName__.yaml"]
+	content, ok := mod.templateFiles["argocd/application-{{ .serviceName }}.yaml"]
 	if !ok {
 		t.Fatal("expected parameterized template file path")
 	}
@@ -151,7 +151,7 @@ func TestEmitModule(t *testing.T) {
 			},
 		},
 		templateFiles: map[string][]byte{
-			"app/__svc__.yaml": []byte("name: {{ .svc }}"),
+			"app/{{ .svc }}.yaml": []byte("name: {{ .svc }}"),
 		},
 		patchFiles: map[string][]byte{
 			"config.patch.yaml": []byte("replicas: 3"),
@@ -176,7 +176,7 @@ func TestEmitModule(t *testing.T) {
 	}
 
 	// Verify template file.
-	tmplData, err := os.ReadFile(filepath.Join(outputDir, "app", "__svc__.yaml"))
+	tmplData, err := os.ReadFile(filepath.Join(outputDir, "app", "{{ .svc }}.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

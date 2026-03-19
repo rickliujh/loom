@@ -62,19 +62,19 @@ func TestParameterizePath(t *testing.T) {
 			name:   "param in filename",
 			path:   "argocd/application-payments.yaml",
 			params: map[string]string{"serviceName": "payments"},
-			want:   "argocd/application-__serviceName__.yaml",
+			want:   "argocd/application-{{ .serviceName }}.yaml",
 		},
 		{
 			name:   "param in directory",
 			path:   "prod/config.yaml",
 			params: map[string]string{"env": "prod"},
-			want:   "__env__/config.yaml",
+			want:   "{{ .env }}/config.yaml",
 		},
 		{
 			name:   "multiple params in path",
 			path:   "prod/payments-deploy.yaml",
 			params: map[string]string{"env": "prod", "serviceName": "payments"},
-			want:   "__env__/__serviceName__-deploy.yaml",
+			want:   "{{ .env }}/{{ .serviceName }}-deploy.yaml",
 		},
 	}
 

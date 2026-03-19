@@ -38,7 +38,7 @@ func (p *GitLabDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 
 	if hasBinary("glab", logger) {
 		logger.Debug("falling back to glab CLI")
-		return p.fetchCLI(ctx, projectPath, mrIID, logger)
+		return p.fetchCLI(ctx, baseURL, projectPath, mrIID, logger)
 	}
 
 	if token == "" {
@@ -151,14 +151,24 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 	return info, nil
 }
 
-func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, mrIID int64, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath string, mrIID int64, logger *slog.Logger) (*PRInfo, error) {
 	encodedProject := url.PathEscape(projectPath)
-	logger.Debug("using glab CLI", "project", projectPath, "encodedProject", encodedProject, "mrIID", mrIID)
 
-	// Fetch MR metadata.
+	// Extract hostname from baseURL for --hostname flag.
+	hostname := ""
+	if u, err := url.Parse(baseURL); err == nil {
+		hostname = u.Host
+	}
+	logger.Debug("using glab CLI", "project", projectPath, "encodedProject", encodedProject, "mrIID", mrIID, "hostname", hostname)
+
+	glabCall := func(ctx context.Context, endpoint string) ([]byte, error) {
+		return glabAPI(ctx, endpoint, hostname, logger)
+	}
+
+	// Fetch MR metadata. Use the encoded project path for this first call.
 	mrEndpoint := fmt.Sprintf("projects/%s/merge_requests/%d", encodedProject, mrIID)
 	logger.Debug("glab api call", "endpoint", mrEndpoint)
-	mrJSON, err := glabAPI(ctx, mrEndpoint)
+	mrJSON, err := glabCall(ctx, mrEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("glab api (MR metadata): %w", err)
 	}
@@ -170,6 +180,7 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 		TargetBranch string `json:"target_branch"`
 		SourceBranch string `json:"source_branch"`
 		WebURL       string `json:"web_url"`
+		ProjectID    int64  `json:"project_id"`
 		DiffRefs     struct {
 			HeadSha string `json:"head_sha"`
 			BaseSha string `json:"base_sha"`
@@ -178,6 +189,11 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 	if err := json.Unmarshal(mrJSON, &mrMeta); err != nil {
 		return nil, fmt.Errorf("parsing glab output: %w", err)
 	}
+
+	// Use numeric project_id for subsequent API calls — avoids URL-encoding issues
+	// where glab may double-encode %2F in the project path.
+	projectID := strconv.FormatInt(mrMeta.ProjectID, 10)
+	logger.Debug("resolved numeric project ID", "projectID", projectID)
 
 	// Use commit SHAs instead of branch names — branches may be deleted after merge.
 	headRef := mrMeta.DiffRefs.HeadSha
@@ -200,10 +216,10 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 		Provider:   "gitlab",
 	}
 
-	// Fetch diffs.
-	diffsEndpoint := fmt.Sprintf("projects/%s/merge_requests/%d/diffs", encodedProject, mrIID)
+	// Fetch diffs using numeric project ID.
+	diffsEndpoint := fmt.Sprintf("projects/%s/merge_requests/%d/diffs", projectID, mrIID)
 	logger.Debug("glab api call", "endpoint", diffsEndpoint)
-	diffsJSON, err := glabAPI(ctx, diffsEndpoint)
+	diffsJSON, err := glabCall(ctx, diffsEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("glab api (MR diffs): %w", err)
 	}
@@ -238,11 +254,11 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 
 		if fc.Type == ChangeAdded || fc.Type == ChangeModified || fc.Type == ChangeRenamed {
 			fileEndpoint := fmt.Sprintf("projects/%s/repository/files/%s/raw?ref=%s",
-				encodedProject,
+				projectID,
 				url.PathEscape(fc.Path),
 				url.QueryEscape(headRef))
 			logger.Debug("glab api call (file content)", "endpoint", fileEndpoint)
-			content, err := glabAPI(ctx, fileEndpoint)
+			content, err := glabCall(ctx, fileEndpoint)
 			if err != nil {
 				logger.Warn("failed to fetch file content", "file", fc.Path, "error", err)
 				continue
@@ -253,11 +269,11 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 
 		if fc.Type == ChangeModified {
 			baseEndpoint := fmt.Sprintf("projects/%s/repository/files/%s/raw?ref=%s",
-				encodedProject,
+				projectID,
 				url.PathEscape(fc.Path),
 				url.QueryEscape(baseRef))
 			logger.Debug("glab api call (base content)", "endpoint", baseEndpoint)
-			content, err := glabAPI(ctx, baseEndpoint)
+			content, err := glabCall(ctx, baseEndpoint)
 			if err != nil {
 				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
 			} else {
@@ -273,8 +289,17 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 }
 
 // glabAPI runs `glab api <path>` and returns stdout, including stderr in errors.
-func glabAPI(ctx context.Context, path string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "glab", "api", path)
+// If hostname is non-empty, it is passed via --hostname.
+// If token is non-empty, it is set as GITLAB_TOKEN in the command environment.
+func glabAPI(ctx context.Context, path, hostname string, logger *slog.Logger) ([]byte, error) {
+	args := []string{"api"}
+	if hostname != "" {
+		args = append(args, "--hostname", hostname)
+	}
+	args = append(args, path)
+
+	logger.Debug("executing glab", "args", args)
+	cmd := exec.CommandContext(ctx, "glab", args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -9,8 +9,9 @@ build: ## Compile binary
 	go build -v -ldflags="-X 'github.com/rickliujh/loom/cmd.Version=$(VERSION)'" -o $(PROJ_BIN_PATH)$(BINARY_NAME) .
 
 .PHONY: build-prod
-build-prod: ## Compile production binary (static, stripped)
-	CGO_ENABLED=0 go build -v -ldflags='-w -s -X "github.com/rickliujh/loom/cmd.Version=$(VERSION)" -extldflags "-static"' -o $(PROJ_BIN_PATH)$(BINARY_NAME) .
+build-prod: ## Compile production binary (static, stripped, compressed)
+	CGO_ENABLED=0 go build -trimpath -ldflags='-w -s -X "github.com/rickliujh/loom/cmd.Version=$(VERSION)" -extldflags "-static"' -o $(PROJ_BIN_PATH)$(BINARY_NAME) .
+	@command -v upx >/dev/null 2>&1 && { echo "Compressing with UPX..."; upx -q $(PROJ_BIN_PATH)$(BINARY_NAME); } || echo "Tip: install upx for ~70%% smaller binaries"
 
 .PHONY: tidy
 tidy: ## Update go modules

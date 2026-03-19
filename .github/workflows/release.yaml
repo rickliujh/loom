@@ -43,15 +43,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
         run: |
-          VERSION="${GITHUB_REF_NAME}"
+          make build-prod VERSION="${GITHUB_REF_NAME}"
           BINARY="loom-${GOOS}-${GOARCH}"
-          go build -v -ldflags='-w -s -X "github.com/rickliujh/loom/cmd.Version='"${VERSION}"'" -extldflags "-static"' -o "${BINARY}" .
+          mv bin/loom "${BINARY}"
           sha256sum "${BINARY}" > "${BINARY}.sha256"
 
       - name: Upload artifact

@@ -66,6 +66,20 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 	}
 	logger.Debug("MR metadata fetched", "title", mr.Title, "source", mr.SourceBranch, "target", mr.TargetBranch)
 
+	// Use commit SHAs from DiffRefs instead of branch names — branches may be
+	// deleted after merge, but the commits remain reachable.
+	headRef := mr.DiffRefs.HeadSha
+	baseRef := mr.DiffRefs.BaseSha
+	if headRef == "" {
+		headRef = mr.SourceBranch
+		logger.Debug("DiffRefs.HeadSha empty, falling back to source branch name", "ref", headRef)
+	}
+	if baseRef == "" {
+		baseRef = mr.TargetBranch
+		logger.Debug("DiffRefs.BaseSha empty, falling back to target branch name", "ref", baseRef)
+	}
+	logger.Debug("using refs for file content", "headRef", headRef, "baseRef", baseRef)
+
 	info := &PRInfo{
 		Title:      mr.Title,
 		Body:       mr.Description,
@@ -105,9 +119,9 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 
 		// Fetch file content for added/modified/renamed files.
 		if fc.Type == ChangeAdded || fc.Type == ChangeModified || fc.Type == ChangeRenamed {
-			logger.Debug("fetching file content from head branch", "file", fc.Path, "ref", mr.SourceBranch)
+			logger.Debug("fetching file content at head ref", "file", fc.Path, "ref", headRef)
 			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, fc.Path, &gogitlab.GetRawFileOptions{
-				Ref: gogitlab.Ptr(mr.SourceBranch),
+				Ref: gogitlab.Ptr(headRef),
 			})
 			if err != nil {
 				logger.Warn("failed to fetch file content", "file", fc.Path, "error", err)
@@ -119,9 +133,9 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 
 		// Fetch old content for modified files.
 		if fc.Type == ChangeModified {
-			logger.Debug("fetching file content from base branch", "file", fc.Path, "ref", mr.TargetBranch)
+			logger.Debug("fetching file content at base ref", "file", fc.Path, "ref", baseRef)
 			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, fc.Path, &gogitlab.GetRawFileOptions{
-				Ref: gogitlab.Ptr(mr.TargetBranch),
+				Ref: gogitlab.Ptr(baseRef),
 			})
 			if err != nil {
 				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
@@ -156,10 +170,27 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 		TargetBranch string `json:"target_branch"`
 		SourceBranch string `json:"source_branch"`
 		WebURL       string `json:"web_url"`
+		DiffRefs     struct {
+			HeadSha string `json:"head_sha"`
+			BaseSha string `json:"base_sha"`
+		} `json:"diff_refs"`
 	}
 	if err := json.Unmarshal(mrJSON, &mrMeta); err != nil {
 		return nil, fmt.Errorf("parsing glab output: %w", err)
 	}
+
+	// Use commit SHAs instead of branch names — branches may be deleted after merge.
+	headRef := mrMeta.DiffRefs.HeadSha
+	baseRef := mrMeta.DiffRefs.BaseSha
+	if headRef == "" {
+		headRef = mrMeta.SourceBranch
+		logger.Debug("diff_refs.head_sha empty, falling back to source branch name", "ref", headRef)
+	}
+	if baseRef == "" {
+		baseRef = mrMeta.TargetBranch
+		logger.Debug("diff_refs.base_sha empty, falling back to target branch name", "ref", baseRef)
+	}
+	logger.Debug("using refs for file content (CLI)", "headRef", headRef, "baseRef", baseRef)
 
 	info := &PRInfo{
 		Title:      mrMeta.Title,
@@ -209,7 +240,7 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 			fileEndpoint := fmt.Sprintf("projects/%s/repository/files/%s/raw?ref=%s",
 				encodedProject,
 				url.PathEscape(fc.Path),
-				url.QueryEscape(info.HeadBranch))
+				url.QueryEscape(headRef))
 			logger.Debug("glab api call (file content)", "endpoint", fileEndpoint)
 			content, err := glabAPI(ctx, fileEndpoint)
 			if err != nil {
@@ -224,7 +255,7 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, projectPath string, m
 			baseEndpoint := fmt.Sprintf("projects/%s/repository/files/%s/raw?ref=%s",
 				encodedProject,
 				url.PathEscape(fc.Path),
-				url.QueryEscape(info.BaseBranch))
+				url.QueryEscape(baseRef))
 			logger.Debug("glab api call (base content)", "endpoint", baseEndpoint)
 			content, err := glabAPI(ctx, baseEndpoint)
 			if err != nil {

@@ -171,9 +171,9 @@ func fetchFileAtRef(ctx context.Context, client *github.Client, owner, repo, pat
 func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, number int, logger *slog.Logger) (*PRInfo, error) {
 	nwo := owner + "/" + repo
 
-	// Fetch PR metadata.
+	// Fetch PR metadata including commit SHAs for resilience against branch deletion.
 	prJSON, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(number),
-		"--repo", nwo, "--json", "title,body,baseRefName,headRefName").Output()
+		"--repo", nwo, "--json", "title,body,baseRefName,headRefName,headRefOid,baseRefOid").Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view: %w", err)
 	}
@@ -183,10 +183,25 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 		Body        string `json:"body"`
 		BaseRefName string `json:"baseRefName"`
 		HeadRefName string `json:"headRefName"`
+		HeadRefOid  string `json:"headRefOid"`
+		BaseRefOid  string `json:"baseRefOid"`
 	}
 	if err := json.Unmarshal(prJSON, &prMeta); err != nil {
 		return nil, fmt.Errorf("parsing gh pr output: %w", err)
 	}
+
+	// Use commit SHAs instead of branch names — branches may be deleted after merge.
+	headRef := prMeta.HeadRefOid
+	baseRef := prMeta.BaseRefOid
+	if headRef == "" {
+		headRef = prMeta.HeadRefName
+		logger.Debug("headRefOid empty, falling back to branch name", "ref", headRef)
+	}
+	if baseRef == "" {
+		baseRef = prMeta.BaseRefName
+		logger.Debug("baseRefOid empty, falling back to branch name", "ref", baseRef)
+	}
+	logger.Debug("using refs for file content (gh CLI)", "headRef", headRef, "baseRef", baseRef)
 
 	info := &PRInfo{
 		Title:      prMeta.Title,
@@ -253,7 +268,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 
 		// Fetch content for added/modified files via gh api.
 		if fc.Type == ChangeAdded || fc.Type == ChangeModified || fc.Type == ChangeRenamed {
-			content, err := ghCLIFetchContent(ctx, nwo, fc.Path, info.HeadBranch)
+			content, err := ghCLIFetchContent(ctx, nwo, fc.Path, headRef)
 			if err != nil {
 				logger.Warn("failed to fetch file content", "file", fc.Path, "error", err)
 				continue
@@ -262,7 +277,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 		}
 
 		if fc.Type == ChangeModified {
-			content, err := ghCLIFetchContent(ctx, nwo, fc.Path, info.BaseBranch)
+			content, err := ghCLIFetchContent(ctx, nwo, fc.Path, baseRef)
 			if err != nil {
 				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
 			} else {

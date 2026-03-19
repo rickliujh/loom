@@ -69,14 +69,14 @@ A Loom module is a directory. Inside it, you put:
 onboard-service/
 ├── loom.yaml
 ├── argocd/
-│   ├── application-__serviceName__.yaml   <- file name is templated
-│   └── project.yaml                       <- template, rendered with params
-├── __namespace__/                         <- folder name is templated
+│   ├── application-{{ .serviceName }}.yaml   <- file name is templated
+│   └── project.yaml                          <- template, rendered with params
+├── {{ .namespace }}/                         <- folder name is templated
 │   └── constraints/
 │       └── pod-must-have-label.yaml
 └── __functions/
     └── patches/
-        └── add-app.yaml                   <- used by patch operations, not copied
+        └── add-app.yaml                      <- used by patch operations, not copied
 ```
 
 When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
@@ -294,7 +294,7 @@ Copies template files from the module directory into the target repository, rend
     dest: ""       # relative to target repository root
 ```
 
-Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain template expressions — use the filesystem-friendly `__paramName__` syntax (see [Path Templating](#path-templating)).
+Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](#specexcludes-and-specincludes). By default, `.git`, `README.md`, `loom.yaml`, and `loom.jsonnet` are excluded. Directories like `__functions/` must be explicitly listed in `excludes` to prevent them from being copied. The directory structure is preserved. File and folder names can also contain Go template expressions (see [Path Templating](#path-templating)).
 
 ### `patch` — Patch Existing Files
 
@@ -487,21 +487,21 @@ Templates work in:
 
 ### Path Templating
 
-File and folder names support a filesystem-friendly `__paramName__` placeholder syntax. Loom converts these to Go template expressions before rendering, so you don't need curly braces in filenames.
+File and folder names are rendered as Go templates, just like file contents. You can use `{{ .paramName }}` directly in file and directory names.
 
 | Source path | With `serviceName=payments`, `env=prod` | Result |
 |-------------|------------------------------------------|--------|
-| `__env__/config.yaml` | `{{ .env }}/config.yaml` | `prod/config.yaml` |
-| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` | `application-payments.yaml` |
-| `__env__/__serviceName__-deploy.yaml` | `{{ .env }}/{{ .serviceName }}-deploy.yaml` | `prod/payments-deploy.yaml` |
+| `{{ .env }}/config.yaml` | | `prod/config.yaml` |
+| `application-{{ .serviceName }}.yaml` | | `application-payments.yaml` |
+| `{{ .env }}/{{ .serviceName }}-deploy.yaml` | | `prod/payments-deploy.yaml` |
 
 This means your module directory can look like:
 
 ```
 onboard-service/
 ├── loom.yaml
-├── __env__/
-│   └── __serviceName__-app.yaml
+├── {{ .env }}/
+│   └── {{ .serviceName }}-app.yaml
 └── shared/
     └── config.yaml
 ```
@@ -515,7 +515,12 @@ shared/
 └── config.yaml
 ```
 
-The standard Go template syntax (`{{ .paramName }}`) also works directly in paths if your filesystem and shell handle it — both syntaxes can be mixed freely.
+For convenience, Loom also supports a filesystem-friendly `__paramName__` placeholder syntax. This is useful when your filesystem, shell, or editor has trouble with curly braces in filenames. Loom converts `__paramName__` to `{{ .paramName }}` before rendering. Both syntaxes can be mixed freely.
+
+| `__paramName__` syntax | Equivalent Go template |
+|------------------------|----------------------|
+| `__env__/config.yaml` | `{{ .env }}/config.yaml` |
+| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` |
 
 ## Module Composition
 
@@ -594,6 +599,55 @@ loom run ./onboard-service \
 # Parameters from file
 loom run ./onboard-service --params-file params.yaml
 ```
+
+### `loom generate`
+
+Generate a reusable loom module from an existing GitHub PR or GitLab MR. This is the fastest way to turn a manual change you've already made into repeatable automation.
+
+```
+loom generate <pr-url> [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param key=value` | Concrete value to parameterize (can be repeated). Every occurrence of the literal value is replaced with a template expression. |
+| `-o, --output dir` | Output directory for the generated module (default: derived from PR title) |
+| `-n, --name name` | Module name (default: derived from PR title) |
+| `--token-env VAR` | Env var holding the API token (default: `GITHUB_TOKEN` or `GITLAB_TOKEN`) |
+| `--include-git-ops` | Also generate `commitPush` and `pr` operations |
+
+Supported references:
+
+```
+https://github.com/owner/repo/pull/123
+https://gitlab.com/group/repo/-/merge_requests/123
+github:owner/repo#123
+gitlab:group/repo!123
+```
+
+**Example:** You onboarded a service called "payments" via a PR. Now you want to make that repeatable:
+
+```bash
+loom generate https://github.com/myorg/gitops-repo/pull/42 \
+  -p serviceName=payments \
+  -p namespace=fintech \
+  --include-git-ops
+```
+
+Loom fetches the PR diff and produces a ready-to-use module:
+
+- **Added files** become templates with `{{ .serviceName }}` and `{{ .namespace }}` replacing the concrete values, including in file and folder names.
+- **Modified YAML files** become strategic merge patches under `__functions/patches/`.
+- **Deleted files** become `shell` operations with `rm`.
+- **Renamed files** become `shell` operations with `mv`.
+
+The generated `loom.yaml` declares all parameters as required and wires up the operations in order. You can then customize it, add defaults, compose it with other modules, or run it as-is:
+
+```bash
+loom run ./onboard-service -p serviceName=billing -p namespace=platform
+```
+
+Authentication uses `GITHUB_TOKEN` / `GITLAB_TOKEN` environment variables by default. If the token is not set but the `gh` or `glab` CLI is installed and authenticated, Loom falls back to it automatically.
 
 ### `loom validate`
 

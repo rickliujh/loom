@@ -19,6 +19,8 @@ func FromOperation(op config.Operation) (Action, error) {
 		return &PRAction{Config: *op.PR}, nil
 	case op.Patch != nil:
 		return &PatchAction{Config: *op.Patch}, nil
+	case op.LLM != nil:
+		return &LLMAction{Config: *op.LLM}, nil
 	default:
 		return nil, fmt.Errorf("operation %q has no recognized action type", op.Name)
 	}

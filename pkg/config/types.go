@@ -56,6 +56,7 @@ type Operation struct {
 	Shell      *Shell      `yaml:"shell,omitempty"`
 	CommitPush *CommitPush `yaml:"commitPush,omitempty"`
 	PR         *PR         `yaml:"pr,omitempty"`
+	LLM        *LLM        `yaml:"llm,omitempty"`
 }
 
 type NewFiles struct {
@@ -81,10 +82,24 @@ type CommitPush struct {
 }
 
 type PR struct {
-	Provider  string   `yaml:"provider"`
-	Title     string   `yaml:"title"`
-	Body      string   `yaml:"body,omitempty"`
-	BaseBranch string  `yaml:"baseBranch,omitempty"`
-	Labels    []string `yaml:"labels,omitempty"`
-	TokenEnv  string   `yaml:"tokenEnv,omitempty"`
+	Provider   string   `yaml:"provider"`
+	Title      string   `yaml:"title"`
+	Body       string   `yaml:"body,omitempty"`
+	BaseBranch string   `yaml:"baseBranch,omitempty"`
+	Labels     []string `yaml:"labels,omitempty"`
+	TokenEnv   string   `yaml:"tokenEnv,omitempty"`
+}
+
+// LLM defines an operation that uses LLM inference to generate or modify a file.
+type LLM struct {
+	Provider     string `yaml:"provider"`               // "openai", "anthropic", "vertex", "gemini"
+	Model        string `yaml:"model"`                  // e.g. "gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-flash"
+	Prompt       string `yaml:"prompt"`                 // Templated prompt text
+	SystemPrompt string `yaml:"systemPrompt,omitempty"` // Optional system prompt
+	Target       string `yaml:"target"`                 // File path relative to target dir to write/modify
+	Mode         string `yaml:"mode,omitempty"`          // "generate" (default) or "modify"
+	TokenEnv     string `yaml:"tokenEnv,omitempty"`     // Env var for API key (optional for vertex with ADC)
+	Project      string `yaml:"project,omitempty"`      // GCP project (vertex only)
+	Location     string `yaml:"location,omitempty"`     // GCP location (vertex only, default: "us-central1")
+	MaxTokens    int    `yaml:"maxTokens,omitempty"`    // Max output tokens (optional)
 }

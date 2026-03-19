@@ -463,6 +463,71 @@ Both GitHub and GitLab are fully supported. For GitLab, the same schema applies 
 
 GitLab URLs are parsed automatically, including self-hosted instances and SSH URLs (`git@gitlab.example.com:group/repo.git`).
 
+### `llm` — LLM Inference
+
+Uses an LLM to generate or modify a file. The output is written directly to the target — since the result will be reviewed by a human via PR/MR, this is a practical way to automate content that benefits from AI generation.
+
+```yaml
+- name: generate-docs
+  llm:
+    provider: openai
+    model: "gpt-4o"
+    prompt: "Generate a Kubernetes NetworkPolicy YAML for service {{ .serviceName }} in namespace {{ .namespace }} that allows ingress on port 8080."
+    target: "{{ .namespace }}/networkpolicy-{{ .serviceName }}.yaml"
+```
+
+| Field | Description |
+|-------|-------------|
+| `provider` | `openai`, `anthropic`, `vertex`, or `gemini` |
+| `model` | Model name (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.5-flash`) |
+| `prompt` | The prompt to send, templated with params |
+| `systemPrompt` | Optional system prompt, templated |
+| `target` | File path (relative to target dir) to write the output, templated |
+| `mode` | `generate` (default) creates/overwrites the file. `modify` reads the existing file and includes its content in the prompt for the LLM to modify. |
+| `tokenEnv` | Env var holding the API key (optional for `vertex` — see below) |
+| `project` | GCP project ID (required for `vertex`) |
+| `location` | GCP region (default: `us-central1`, `vertex` only) |
+| `maxTokens` | Maximum output tokens (optional) |
+
+#### Providers and Authentication
+
+| Provider | Auth | Default env var |
+|----------|------|----------------|
+| `openai` | API key | `OPENAI_API_KEY` |
+| `anthropic` | API key | `ANTHROPIC_API_KEY` |
+| `gemini` | API key | `GEMINI_API_KEY` |
+| `vertex` | GCP Application Default Credentials (ADC) | No key needed |
+
+The `vertex` provider uses [ADC](https://cloud.google.com/docs/authentication/application-default-credentials) — if you're authenticated via `gcloud auth application-default login` or running on GCP, no API key is required. Just set `project` and optionally `location`.
+
+#### Modify mode
+
+In `modify` mode, Loom reads the existing file at `target` and includes its content in the prompt automatically. This is useful for having the LLM update or refactor an existing file:
+
+```yaml
+- name: update-readme
+  llm:
+    provider: anthropic
+    model: "claude-sonnet-4-20250514"
+    prompt: "Update this README to document the new {{ .serviceName }} service. Keep the existing structure."
+    systemPrompt: "You are a technical writer. Output only the file content, no markdown fences."
+    target: "docs/README.md"
+    mode: modify
+```
+
+#### Example with Vertex AI (ADC)
+
+```yaml
+- name: generate-policy
+  llm:
+    provider: vertex
+    model: "gemini-2.5-flash"
+    prompt: "Generate a GatekeeperConstraint for {{ .serviceName }}"
+    target: "constraints/{{ .serviceName }}.yaml"
+    project: "my-gcp-project"
+    location: "us-central1"
+```
+
 ## Templates
 
 Loom uses Go's `text/template` syntax. Inside any templatable string, you can reference parameters with `{{ .paramName }}`.

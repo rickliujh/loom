@@ -1,0 +1,85 @@
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: llm-test
+spec:
+  params:
+    - name: serviceName
+      default: "payment-gateway"
+    - name: namespace
+      default: "fintech"
+    - name: port
+      default: "8080"
+    - name: provider
+      default: "openai"
+    - name: model
+      default: "gpt-4o"
+    - name: project
+      default: ""
+    - name: location
+      default: "us-central1"
+
+  excludes:
+    - existing-files
+
+  operations:
+    # Step 1: Copy seed files into target
+    - name: seed-files
+      newFiles:
+        source: "existing-files"
+        dest: ""
+
+    # Step 2: Generate — create a new K8s NetworkPolicy from scratch
+    - name: generate-networkpolicy
+      llm:
+        provider: "{{ .provider }}"
+        model: "{{ .model }}"
+        project: "{{ .project }}"
+        location: "{{ .location }}"
+        prompt: |
+          Generate a Kubernetes NetworkPolicy YAML for a service called "{{ .serviceName }}"
+          in namespace "{{ .namespace }}".
+
+          Requirements:
+          - Allow ingress on port {{ .port }} from any pod in the same namespace
+          - Allow egress to DNS (port 53 UDP/TCP) and to any pod in the same namespace
+          - Deny all other traffic
+
+          Output ONLY the raw YAML, no markdown fences, no explanation.
+        systemPrompt: "You are a Kubernetes infrastructure expert. Output only valid YAML."
+        target: "{{ .namespace }}/networkpolicy-{{ .serviceName }}.yaml"
+        mode: generate
+
+    # Step 3: Modify — update an existing deployment to add resource limits
+    - name: enhance-deployment
+      llm:
+        provider: "{{ .provider }}"
+        model: "{{ .model }}"
+        project: "{{ .project }}"
+        location: "{{ .location }}"
+        prompt: |
+          Update this Kubernetes Deployment to add:
+          1. Resource requests: cpu=100m, memory=128Mi
+          2. Resource limits: cpu=500m, memory=512Mi
+          3. A readiness probe on HTTP GET /healthz port {{ .port }}
+          4. A liveness probe on HTTP GET /healthz port {{ .port }}
+
+          Keep everything else unchanged. Output ONLY the complete updated YAML, no markdown fences.
+        systemPrompt: "You are a Kubernetes infrastructure expert. Output only valid YAML. Preserve existing fields exactly."
+        target: "{{ .namespace }}/deployment-{{ .serviceName }}.yaml"
+        mode: modify
+
+    # Step 4: Generate — create a README for the service
+    - name: generate-readme
+      llm:
+        provider: "{{ .provider }}"
+        model: "{{ .model }}"
+        project: "{{ .project }}"
+        location: "{{ .location }}"
+        prompt: |
+          Write a short README.md for the "{{ .serviceName }}" Kubernetes service in the "{{ .namespace }}" namespace.
+          Include sections: Overview, Deployment, Configuration, Health Checks.
+          Mention it listens on port {{ .port }}.
+          Keep it under 30 lines.
+        target: "{{ .namespace }}/README.md"
+        mode: generate

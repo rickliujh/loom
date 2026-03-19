@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-gateway
+  namespace: fintech
+  labels:
+    app: payment-gateway
+    team: platform
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-gateway
+  template:
+    metadata:
+      labels:
+        app: payment-gateway
+    spec:
+      containers:
+        - name: payment-gateway
+          image: registry.example.com/fintech/payment-gateway:latest
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: LOG_LEVEL
+              value: "info"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: payment-gateway-db
+                  key: host

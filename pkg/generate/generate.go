@@ -31,12 +31,12 @@ type Options struct {
 // Run generates a loom module from a PR/MR.
 func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	// 1. Detect provider and parse reference.
-	provider, diffProvider, err := ParsePRRef(opts.Ref)
+	provider, diffProvider, err := ParsePRRef(opts.Ref, logger)
 	if err != nil {
 		return err
 	}
 
-	token := tokenFromEnv(opts.TokenEnv, provider)
+	token := tokenFromEnv(opts.TokenEnv, provider, logger)
 
 	// 2. Fetch PR/MR diff.
 	logger.Info("fetching PR/MR data", "ref", opts.Ref, "provider", provider)

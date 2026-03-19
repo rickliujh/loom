@@ -23,16 +23,21 @@ func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 	if err != nil {
 		return nil, err
 	}
+	logger.Debug("parsed GitHub PR reference", "owner", owner, "repo", repo, "number", number)
 
 	if token != "" {
+		logger.Debug("attempting GitHub API with token")
 		info, err := p.fetchAPI(ctx, owner, repo, number, token, logger)
 		if err == nil {
 			return info, nil
 		}
 		logger.Warn("GitHub API failed, trying gh CLI", "error", err)
+	} else {
+		logger.Debug("no token available, skipping GitHub API")
 	}
 
-	if hasBinary("gh") {
+	if hasBinary("gh", logger) {
+		logger.Debug("falling back to gh CLI")
 		return p.fetchCLI(ctx, owner, repo, number, logger)
 	}
 
@@ -43,14 +48,17 @@ func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 }
 
 func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, number int, token string, logger *slog.Logger) (*PRInfo, error) {
+	logger.Debug("creating GitHub API client", "owner", owner, "repo", repo)
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
+	logger.Debug("fetching PR metadata", "number", number)
 	pr, _, err := client.PullRequests.Get(ctx, owner, repo, number)
 	if err != nil {
 		return nil, fmt.Errorf("getting PR: %w", err)
 	}
+	logger.Debug("PR metadata fetched", "title", pr.GetTitle(), "head", pr.GetHead().GetRef(), "base", pr.GetBase().GetRef())
 
 	info := &PRInfo{
 		Title:      pr.GetTitle(),
@@ -62,15 +70,18 @@ func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, n
 	}
 
 	// Fetch file list (paginated).
+	logger.Debug("listing PR files")
 	opts := &github.ListOptions{PerPage: 100}
 	for {
 		files, resp, err := client.PullRequests.ListFiles(ctx, owner, repo, number, opts)
 		if err != nil {
 			return nil, fmt.Errorf("listing PR files: %w", err)
 		}
+		logger.Debug("fetched PR files page", "count", len(files), "page", opts.Page)
 
 		for _, f := range files {
 			fc := FileChange{Path: f.GetFilename()}
+			logger.Debug("processing PR file", "path", fc.Path, "status", f.GetStatus())
 
 			switch f.GetStatus() {
 			case "added":

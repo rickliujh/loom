@@ -3,8 +3,10 @@ package module
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/rickliujh/loom/pkg/action"
+	"github.com/rickliujh/loom/pkg/git"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
@@ -34,7 +36,15 @@ func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool) er
 			return fmt.Errorf("loading child module %q: %w", childRef.Name, err)
 		}
 
-		if err := Execute(ctx, childMod, targetDir, dryRun); err != nil {
+		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, childParams, targetDir)
+		if err != nil {
+			return fmt.Errorf("resolving target for child module %q: %w", childRef.Name, err)
+		}
+		if cleanup != nil {
+			defer cleanup()
+		}
+
+		if err := Execute(ctx, childMod, childTargetDir, dryRun); err != nil {
 			return fmt.Errorf("executing child module %q: %w", childRef.Name, err)
 		}
 	}
@@ -54,4 +64,42 @@ func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool) er
 	}
 
 	return nil
+}
+
+// resolveChildTarget resolves the target directory for a child module.
+// If the child module has its own target spec, it clones the target repo
+// and returns the temp directory along with a cleanup function.
+// Otherwise, it falls back to the parent's targetDir.
+func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[string]string, parentTargetDir string) (string, func(), error) {
+	target := childMod.Config.Spec.Target
+	if target == nil {
+		return parentTargetDir, nil, nil
+	}
+
+	tmpDir, err := os.MkdirTemp("", "loom-target-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+
+	repo, err := git.Clone(ctx, target.URL, tmpDir, target.Branch, childMod.Logger)
+	if err != nil {
+		cleanup()
+		return "", nil, err
+	}
+
+	if target.FeatureBranch != "" {
+		branchName, err := tmpl.RenderString(target.FeatureBranch, childParams)
+		if err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("rendering featureBranch: %w", err)
+		}
+		childMod.Logger.Info("creating feature branch", "branch", branchName)
+		if err := repo.CreateBranch(branchName); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("creating feature branch %q: %w", branchName, err)
+		}
+	}
+
+	return tmpDir, cleanup, nil
 }

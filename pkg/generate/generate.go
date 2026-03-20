@@ -64,7 +64,7 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	// 4. Classify files and build module structure.
 	outputDir := opts.OutputDir
 	if outputDir == "" {
-		outputDir = moduleName
+		outputDir = "."
 	}
 
 	module := buildModule(prInfo, moduleName, opts.Params, opts.IncludeGitOps, logger)

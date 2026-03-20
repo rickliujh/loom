@@ -21,6 +21,9 @@ pull request or merge request. Added files become templates, modified YAML files
 become strategic merge patches, and concrete values you specify with -p are
 replaced with template parameters.
 
+By default, files are generated into the current directory. Use -o to specify
+a different output directory.
+
 Supported references:
   https://github.com/owner/repo/pull/123
   https://gitlab.com/group/repo/-/merge_requests/123
@@ -32,7 +35,7 @@ Supported references:
 
 func init() {
 	generateCmd.Flags().StringArrayVarP(&genParams, "param", "p", nil, "Value to parameterize: key=value (can be repeated)")
-	generateCmd.Flags().StringVarP(&genOutput, "output", "o", "", "Output directory (default: derived from PR title)")
+	generateCmd.Flags().StringVarP(&genOutput, "output", "o", "", "Output directory (default: current directory)")
 	generateCmd.Flags().StringVarP(&genName, "name", "n", "", "Module name (default: derived from PR title)")
 	generateCmd.Flags().StringVar(&genTokenEnv, "token-env", "", "Env var holding the API token (default: GITHUB_TOKEN or GITLAB_TOKEN)")
 	generateCmd.Flags().BoolVar(&genIncludeGitOps, "include-git-ops", false, "Include commitPush and pr operations in the generated module")

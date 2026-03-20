@@ -611,7 +611,7 @@ loom generate <pr-url> [flags]
 | Flag | Description |
 |------|-------------|
 | `-p, --param key=value` | Concrete value to parameterize (can be repeated). Every occurrence of the literal value is replaced with a template expression. |
-| `-o, --output dir` | Output directory for the generated module (default: derived from PR title) |
+| `-o, --output dir` | Output directory for the generated module (default: current directory) |
 | `-n, --name name` | Module name (default: derived from PR title) |
 | `--token-env VAR` | Env var holding the API token (default: `GITHUB_TOKEN` or `GITLAB_TOKEN`) |
 | `--include-git-ops` | Also generate `commitPush` and `pr` operations |
@@ -623,6 +623,12 @@ https://github.com/owner/repo/pull/123
 https://gitlab.com/group/repo/-/merge_requests/123
 github:owner/repo#123
 gitlab:group/repo!123
+```
+
+By default, the generated module is written to the current directory. This means you can `cd` into your module's Git repo and run `loom generate` directly — no nested folders. Use `-o` to write to a different directory instead:
+
+```bash
+loom generate <pr-url> -o ./my-module   # writes into ./my-module/
 ```
 
 **Example:** You onboarded a service called "payments" via a PR. Now you want to make that repeatable:

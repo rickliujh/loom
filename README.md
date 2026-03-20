@@ -478,7 +478,7 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 
 | Field | Description |
 |-------|-------------|
-| `provider` | `openai`, `anthropic`, `vertex`, or `gemini` |
+| `provider` | `openai`, `anthropic`, `vertex`, `gemini`, or `openrouter` |
 | `model` | Model name (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.5-flash`) |
 | `prompt` | The prompt to send, templated with params |
 | `systemPrompt` | Optional system prompt, templated |
@@ -497,6 +497,7 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 | `anthropic` | API key | `ANTHROPIC_API_KEY` |
 | `gemini` | API key | `GEMINI_API_KEY` |
 | `vertex` | GCP Application Default Credentials (ADC) | No key needed |
+| `openrouter` | API key | `OPENROUTER_API_KEY` |
 
 The `vertex` provider uses [ADC](https://cloud.google.com/docs/authentication/application-default-credentials) — if you're authenticated via `gcloud auth application-default login` or running on GCP, no API key is required. Just set `project` and optionally `location`.
 

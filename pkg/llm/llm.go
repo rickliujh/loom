@@ -1,5 +1,5 @@
 // Package llm provides a unified interface for LLM inference across
-// multiple providers (OpenAI, Anthropic, Google Vertex AI, Google Gemini).
+// multiple providers (OpenAI, Anthropic, Google Vertex AI, Google Gemini, OpenRouter).
 package llm
 
 import (
@@ -16,7 +16,7 @@ import (
 
 // InferenceOptions holds the configuration for a single LLM inference call.
 type InferenceOptions struct {
-	Provider     string // "openai", "anthropic", "vertex", "gemini"
+	Provider     string // "openai", "anthropic", "vertex", "gemini", "openrouter"
 	Model        string
 	Prompt       string
 	SystemPrompt string
@@ -99,6 +99,14 @@ func newModel(ctx context.Context, opts InferenceOptions) (llms.Model, error) {
 		return googleai.New(ctx,
 			googleai.WithDefaultModel(opts.Model),
 			googleai.WithAPIKey(token),
+		)
+
+	case "openrouter":
+		token := resolveToken(opts.TokenEnv, "OPENROUTER_API_KEY")
+		return openai.New(
+			openai.WithModel(opts.Model),
+			openai.WithToken(token),
+			openai.WithBaseURL("https://openrouter.ai/api/v1"),
 		)
 
 	default:

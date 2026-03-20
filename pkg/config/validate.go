@@ -92,10 +92,10 @@ func Validate(lf *LoomFile) error {
 			// Skip enum validation for templated values (contain "{{").
 			if !isTemplated(op.LLM.Provider) {
 				switch op.LLM.Provider {
-				case "openai", "anthropic", "vertex", "gemini":
+				case "openai", "anthropic", "vertex", "gemini", "openrouter":
 					// valid
 				default:
-					return fmt.Errorf("operation %q: unknown llm provider %q (supported: openai, anthropic, vertex, gemini)", op.Name, op.LLM.Provider)
+					return fmt.Errorf("operation %q: unknown llm provider %q (supported: openai, anthropic, vertex, gemini, openrouter)", op.Name, op.LLM.Provider)
 				}
 			}
 			if op.LLM.Model == "" {

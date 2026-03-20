@@ -173,6 +173,27 @@ func TestValidate_LLMInvalidMode(t *testing.T) {
 	}
 }
 
+func TestValidate_LLMOpenRouterValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "openrouter",
+					Model:    "anthropic/claude-sonnet-4-20250514",
+					Prompt:   "Generate a config file",
+					Target:   "output.yaml",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_LLMVertexRequiresProject(t *testing.T) {
 	lf := &LoomFile{
 		APIVersion: ExpectedAPIVersion,

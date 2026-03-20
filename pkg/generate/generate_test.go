@@ -113,8 +113,11 @@ func TestBuildModule_DeletedFiles(t *testing.T) {
 
 func TestBuildModule_IncludeGitOps(t *testing.T) {
 	pr := &PRInfo{
-		Title:    "Add feature",
-		Provider: "github",
+		Title:      "Add feature",
+		BaseBranch: "main",
+		HeadBranch: "feat/add-feature",
+		RepoURL:    "https://github.com/myorg/myrepo.git",
+		Provider:   "github",
 		Files: []FileChange{
 			{Type: ChangeAdded, Path: "file.yaml", NewContent: []byte("test: true")},
 		},
@@ -131,6 +134,65 @@ func TestBuildModule_IncludeGitOps(t *testing.T) {
 	}
 	if mod.loomFile.Spec.Operations[2].PR == nil {
 		t.Error("expected pr operation")
+	}
+
+	// Target should be populated from PR info.
+	target := mod.loomFile.Spec.Target
+	if target == nil {
+		t.Fatal("expected target to be generated when includeGitOps is true")
+	}
+	if target.URL != "git@github.com:myorg/myrepo.git" {
+		t.Errorf("expected target URL from PR, got %q", target.URL)
+	}
+	if target.Branch != "main" {
+		t.Errorf("expected target branch 'main', got %q", target.Branch)
+	}
+	if target.FeatureBranch != "feat/add-feature" {
+		t.Errorf("expected target featureBranch 'feat/add-feature', got %q", target.FeatureBranch)
+	}
+}
+
+func TestBuildModule_IncludeGitOps_ParameterizesTarget(t *testing.T) {
+	pr := &PRInfo{
+		Title:      "Onboard payments",
+		BaseBranch: "main",
+		HeadBranch: "feat/onboard-payments",
+		RepoURL:    "https://github.com/myorg/myrepo.git",
+		Provider:   "github",
+		Files: []FileChange{
+			{Type: ChangeAdded, Path: "app/payments.yaml", NewContent: []byte("name: payments")},
+		},
+	}
+	params := map[string]string{"serviceName": "payments"}
+
+	mod := buildModule(pr, "test", params, true, testLogger())
+
+	target := mod.loomFile.Spec.Target
+	if target == nil {
+		t.Fatal("expected target to be generated")
+	}
+	// HeadBranch contains "payments" which should be parameterized.
+	if target.FeatureBranch != "feat/onboard-{{ .serviceName }}" {
+		t.Errorf("expected parameterized featureBranch, got %q", target.FeatureBranch)
+	}
+}
+
+func TestBuildModule_NoGitOps_NoTarget(t *testing.T) {
+	pr := &PRInfo{
+		Title:      "Add feature",
+		BaseBranch: "main",
+		HeadBranch: "feat/add-feature",
+		RepoURL:    "https://github.com/myorg/myrepo.git",
+		Provider:   "github",
+		Files: []FileChange{
+			{Type: ChangeAdded, Path: "file.yaml", NewContent: []byte("test: true")},
+		},
+	}
+
+	mod := buildModule(pr, "test", nil, false, testLogger())
+
+	if mod.loomFile.Spec.Target != nil {
+		t.Error("expected no target when includeGitOps is false")
 	}
 }
 
@@ -258,6 +320,29 @@ func TestParseGitLabMRRef(t *testing.T) {
 		if baseURL != tt.baseURL || project != tt.project || num != tt.number {
 			t.Errorf("parseGitLabMRRef(%q) = (%q, %q, %d), want (%q, %q, %d)",
 				tt.ref, baseURL, project, num, tt.baseURL, tt.project, tt.number)
+		}
+	}
+}
+
+func TestToSSHURL(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"https://github.com/myorg/myrepo.git", "git@github.com:myorg/myrepo.git"},
+		{"https://gitlab.com/mygroup/myrepo.git", "git@gitlab.com:mygroup/myrepo.git"},
+		{"https://gitlab.example.com/nested/group/repo.git", "git@gitlab.example.com:nested/group/repo.git"},
+		{"http://github.com/myorg/myrepo.git", "git@github.com:myorg/myrepo.git"},
+		// Already SSH — returned as-is.
+		{"git@github.com:myorg/myrepo.git", "git@github.com:myorg/myrepo.git"},
+		// Empty or unparseable — returned as-is.
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		got := toSSHURL(tt.in)
+		if got != tt.want {
+			t.Errorf("toSSHURL(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }

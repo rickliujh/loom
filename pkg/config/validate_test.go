@@ -106,7 +106,7 @@ func TestValidate_LLMInvalidProvider(t *testing.T) {
 		Spec: Spec{
 			Operations: []Operation{
 				{Name: "gen", LLM: &LLM{
-					Provider: "bedrock",
+					Provider: "cohere",
 					Model:    "model",
 					Prompt:   "prompt",
 					Target:   "out.yaml",
@@ -183,6 +183,27 @@ func TestValidate_LLMOpenRouterValid(t *testing.T) {
 				{Name: "gen", LLM: &LLM{
 					Provider: "openrouter",
 					Model:    "anthropic/claude-sonnet-4-20250514",
+					Prompt:   "Generate a config file",
+					Target:   "output.yaml",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMBedrockValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "bedrock",
+					Model:    "anthropic.claude-sonnet-4-20250514-v1:0",
 					Prompt:   "Generate a config file",
 					Target:   "output.yaml",
 				}},

@@ -92,7 +92,7 @@ type PR struct {
 
 // LLM defines an operation that uses LLM inference to generate or modify a file.
 type LLM struct {
-	Provider     string `yaml:"provider"`               // "openai", "anthropic", "vertex", "gemini"
+	Provider     string `yaml:"provider"`               // "openai", "anthropic", "vertex", "gemini", "openrouter", "bedrock"
 	Model        string `yaml:"model"`                  // e.g. "gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-flash"
 	Prompt       string `yaml:"prompt"`                 // Templated prompt text
 	SystemPrompt string `yaml:"systemPrompt,omitempty"` // Optional system prompt

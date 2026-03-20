@@ -478,7 +478,7 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 
 | Field | Description |
 |-------|-------------|
-| `provider` | `openai`, `anthropic`, `vertex`, `gemini`, or `openrouter` |
+| `provider` | `openai`, `anthropic`, `vertex`, `gemini`, `openrouter`, or `bedrock` |
 | `model` | Model name (e.g. `gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.5-flash`) |
 | `prompt` | The prompt to send, templated with params |
 | `systemPrompt` | Optional system prompt, templated |
@@ -498,8 +498,11 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 | `gemini` | API key | `GEMINI_API_KEY` |
 | `vertex` | GCP Application Default Credentials (ADC) | No key needed |
 | `openrouter` | API key | `OPENROUTER_API_KEY` |
+| `bedrock` | AWS credentials (env vars, shared config, IAM role) | No key needed |
 
 The `vertex` provider uses [ADC](https://cloud.google.com/docs/authentication/application-default-credentials) — if you're authenticated via `gcloud auth application-default login` or running on GCP, no API key is required. Just set `project` and optionally `location`.
+
+The `bedrock` provider uses the [AWS SDK default credential chain](https://docs.aws.amazon.com/sdk-for-go/v1/developer-guide/configuring-sdk.html#specifying-credentials) — environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), shared config (`~/.aws/credentials`), or IAM roles. No API key is needed.
 
 #### Modify mode
 

@@ -1,5 +1,5 @@
 // Package llm provides a unified interface for LLM inference across
-// multiple providers (OpenAI, Anthropic, Google Vertex AI, Google Gemini, OpenRouter).
+// multiple providers (OpenAI, Anthropic, Google Vertex AI, Google Gemini, OpenRouter, AWS Bedrock).
 package llm
 
 import (
@@ -9,6 +9,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
+	"github.com/tmc/langchaingo/llms/bedrock"
 	"github.com/tmc/langchaingo/llms/googleai"
 	"github.com/tmc/langchaingo/llms/googleai/vertex"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -16,7 +17,7 @@ import (
 
 // InferenceOptions holds the configuration for a single LLM inference call.
 type InferenceOptions struct {
-	Provider     string // "openai", "anthropic", "vertex", "gemini", "openrouter"
+	Provider     string // "openai", "anthropic", "vertex", "gemini", "openrouter", "bedrock"
 	Model        string
 	Prompt       string
 	SystemPrompt string
@@ -107,6 +108,13 @@ func newModel(ctx context.Context, opts InferenceOptions) (llms.Model, error) {
 			openai.WithModel(opts.Model),
 			openai.WithToken(token),
 			openai.WithBaseURL("https://openrouter.ai/api/v1"),
+		)
+
+	case "bedrock":
+		// Bedrock uses AWS SDK credentials (env vars, shared config, IAM role).
+		// No API key needed. Location maps to AWS region.
+		return bedrock.New(
+			bedrock.WithModel(opts.Model),
 		)
 
 	default:

@@ -92,14 +92,24 @@ type PR struct {
 
 // LLM defines an operation that uses LLM inference to generate or modify a file.
 type LLM struct {
-	Provider     string `yaml:"provider"`               // "openai", "anthropic", "vertex", "gemini", "openrouter", "bedrock"
-	Model        string `yaml:"model"`                  // e.g. "gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-flash"
-	Prompt       string `yaml:"prompt"`                 // Templated prompt text
-	SystemPrompt string `yaml:"systemPrompt,omitempty"` // Optional system prompt
-	Target       string `yaml:"target"`                 // File path relative to target dir to write/modify
-	Mode         string `yaml:"mode,omitempty"`          // "generate" (default) or "modify"
-	TokenEnv     string `yaml:"tokenEnv,omitempty"`     // Env var for API key (optional for vertex with ADC)
-	Project      string `yaml:"project,omitempty"`      // GCP project (vertex only)
-	Location     string `yaml:"location,omitempty"`     // GCP location (vertex only, default: "us-central1")
-	MaxTokens    int    `yaml:"maxTokens,omitempty"`    // Max output tokens (optional)
+	Provider       string             `yaml:"provider"`                 // "openai", "anthropic", "vertex", "gemini", "openrouter", "bedrock"
+	Model          string             `yaml:"model"`                    // e.g. "gpt-4o", "claude-sonnet-4-20250514", "gemini-2.5-flash"
+	Prompt         string             `yaml:"prompt"`                   // Templated prompt text
+	SystemPrompt   string             `yaml:"systemPrompt,omitempty"`   // Optional system prompt
+	Target         string             `yaml:"target"`                   // File path relative to target dir to write/modify
+	Mode           string             `yaml:"mode,omitempty"`           // "generate" (default) or "modify"
+	MaxTokens      int                `yaml:"maxTokens,omitempty"`      // Max output tokens (optional)
+	ProviderConfig *LLMProviderConfig `yaml:"providerConfig,omitempty"` // Provider-specific configuration
+}
+
+// LLMProviderConfig holds provider-specific settings for the LLM operation.
+// All auth credentials are referenced by env var name — secrets must never appear in loom.yaml.
+type LLMProviderConfig struct {
+	// Auth — env var name holding the API key (openai, anthropic, gemini, openrouter).
+	// Not used by vertex (ADC) or bedrock (AWS credential chain).
+	TokenEnv string `yaml:"tokenEnv,omitempty"`
+
+	// Google Cloud (vertex only)
+	Project  string `yaml:"project,omitempty"`  // GCP project ID (required for vertex)
+	Location string `yaml:"location,omitempty"` // GCP region (default: "us-central1")
 }

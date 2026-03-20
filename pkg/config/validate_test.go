@@ -235,7 +235,32 @@ func TestValidate_LLMVertexRequiresProject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing project")
 	}
-	if !strings.Contains(err.Error(), "project is required") {
+	if !strings.Contains(err.Error(), "providerConfig.project is required") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMVertexWithProviderConfig(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "vertex",
+					Model:    "gemini-2.5-flash",
+					Prompt:   "prompt",
+					Target:   "out.yaml",
+					ProviderConfig: &LLMProviderConfig{
+						Project:  "my-project",
+						Location: "us-central1",
+					},
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -110,8 +110,10 @@ func Validate(lf *LoomFile) error {
 			if op.LLM.Mode != "" && op.LLM.Mode != "generate" && op.LLM.Mode != "modify" {
 				return fmt.Errorf("operation %q: unknown llm mode %q (supported: generate, modify)", op.Name, op.LLM.Mode)
 			}
-			if !isTemplated(op.LLM.Provider) && op.LLM.Provider == "vertex" && op.LLM.Project == "" {
-				return fmt.Errorf("operation %q: llm project is required for vertex provider", op.Name)
+			if !isTemplated(op.LLM.Provider) && op.LLM.Provider == "vertex" {
+				if op.LLM.ProviderConfig == nil || op.LLM.ProviderConfig.Project == "" {
+					return fmt.Errorf("operation %q: llm providerConfig.project is required for vertex provider", op.Name)
+				}
 			}
 		}
 	}

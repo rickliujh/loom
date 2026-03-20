@@ -21,10 +21,12 @@ type InferenceOptions struct {
 	Model        string
 	Prompt       string
 	SystemPrompt string
-	TokenEnv     string // Env var name holding the API key
-	Project      string // GCP project (vertex only)
-	Location     string // GCP location (vertex only)
 	MaxTokens    int
+
+	// Provider-specific
+	TokenEnv string // Env var name holding the API key (openai, anthropic, gemini, openrouter)
+	Project  string // GCP project ID (vertex only)
+	Location string // GCP region (vertex only)
 }
 
 // Infer performs a single LLM inference and returns the text result.

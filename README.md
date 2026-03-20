@@ -484,10 +484,18 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 | `systemPrompt` | Optional system prompt, templated |
 | `target` | File path (relative to target dir) to write the output, templated |
 | `mode` | `generate` (default) creates/overwrites the file. `modify` reads the existing file and includes its content in the prompt for the LLM to modify. |
-| `tokenEnv` | Env var holding the API key (optional for `vertex` — see below) |
+| `maxTokens` | Maximum output tokens (optional) |
+| `providerConfig` | Provider-specific settings (see below) |
+
+#### `providerConfig`
+
+All provider-specific settings live under `providerConfig`. Secrets are referenced by env var name — they must never appear directly in `loom.yaml`.
+
+| Field | Description |
+|-------|-------------|
+| `tokenEnv` | Name of the env var holding the API key (`openai`, `anthropic`, `gemini`, `openrouter`). Not used by `vertex` or `bedrock`. |
 | `project` | GCP project ID (required for `vertex`) |
 | `location` | GCP region (default: `us-central1`, `vertex` only) |
-| `maxTokens` | Maximum output tokens (optional) |
 
 #### Providers and Authentication
 
@@ -528,8 +536,9 @@ In `modify` mode, Loom reads the existing file at `target` and includes its cont
     model: "gemini-2.5-flash"
     prompt: "Generate a GatekeeperConstraint for {{ .serviceName }}"
     target: "constraints/{{ .serviceName }}.yaml"
-    project: "my-gcp-project"
-    location: "us-central1"
+    providerConfig:
+      project: "my-gcp-project"
+      location: "us-central1"
 ```
 
 ## Templates

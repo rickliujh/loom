@@ -46,13 +46,18 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 	if err != nil {
 		return err
 	}
-	project, err := render("project", a.Config.Project)
-	if err != nil {
-		return err
-	}
-	location, err := render("location", a.Config.Location)
-	if err != nil {
-		return err
+
+	var tokenEnv, project, location string
+	if pc := a.Config.ProviderConfig; pc != nil {
+		tokenEnv = pc.TokenEnv
+		project, err = render("providerConfig.project", pc.Project)
+		if err != nil {
+			return err
+		}
+		location, err = render("providerConfig.location", pc.Location)
+		if err != nil {
+			return err
+		}
 	}
 
 	targetPath := filepath.Join(execCtx.TargetDir, targetRel)
@@ -89,10 +94,10 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		Model:        model,
 		Prompt:       prompt,
 		SystemPrompt: systemPrompt,
-		TokenEnv:     a.Config.TokenEnv,
+		MaxTokens:    a.Config.MaxTokens,
+		TokenEnv:     tokenEnv,
 		Project:      project,
 		Location:     location,
-		MaxTokens:    a.Config.MaxTokens,
 	}
 
 	result, err := llm.Infer(ctx, opts)

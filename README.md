@@ -614,7 +614,7 @@ loom generate <pr-url> [flags]
 | `-o, --output dir` | Output directory for the generated module (default: current directory) |
 | `-n, --name name` | Module name (default: derived from PR title) |
 | `--token-env VAR` | Env var holding the API token (default: `GITHUB_TOKEN` or `GITLAB_TOKEN`) |
-| `--include-git-ops` | Also generate `commitPush` and `pr` operations |
+| `--exclude-git-ops` | Skip generating `target`, `commitPush`, and `pr` operations |
 
 Supported references:
 
@@ -636,8 +636,7 @@ loom generate <pr-url> -o ./my-module   # writes into ./my-module/
 ```bash
 loom generate https://github.com/myorg/gitops-repo/pull/42 \
   -p serviceName=payments \
-  -p namespace=fintech \
-  --include-git-ops
+  -p namespace=fintech
 ```
 
 Loom fetches the PR diff and produces a ready-to-use module:

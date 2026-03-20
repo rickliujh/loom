@@ -111,7 +111,7 @@ func TestBuildModule_DeletedFiles(t *testing.T) {
 	}
 }
 
-func TestBuildModule_IncludeGitOps(t *testing.T) {
+func TestBuildModule_DefaultGitOps(t *testing.T) {
 	pr := &PRInfo{
 		Title:      "Add feature",
 		BaseBranch: "main",
@@ -152,7 +152,7 @@ func TestBuildModule_IncludeGitOps(t *testing.T) {
 	}
 }
 
-func TestBuildModule_IncludeGitOps_ParameterizesTarget(t *testing.T) {
+func TestBuildModule_DefaultGitOps_ParameterizesTarget(t *testing.T) {
 	pr := &PRInfo{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
@@ -177,7 +177,7 @@ func TestBuildModule_IncludeGitOps_ParameterizesTarget(t *testing.T) {
 	}
 }
 
-func TestBuildModule_NoGitOps_NoTarget(t *testing.T) {
+func TestBuildModule_ExcludeGitOps(t *testing.T) {
 	pr := &PRInfo{
 		Title:      "Add feature",
 		BaseBranch: "main",

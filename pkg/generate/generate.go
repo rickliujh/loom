@@ -25,8 +25,8 @@ type Options struct {
 	ModuleName string
 	// TokenEnv is the env var name for the API token.
 	TokenEnv string
-	// IncludeGitOps adds commitPush and pr operations to the generated module.
-	IncludeGitOps bool
+	// ExcludeGitOps skips generating target, commitPush, and pr operations.
+	ExcludeGitOps bool
 }
 
 // Run generates a loom module from a PR/MR.
@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		outputDir = "."
 	}
 
-	module := buildModule(prInfo, moduleName, opts.Params, opts.IncludeGitOps, logger)
+	module := buildModule(prInfo, moduleName, opts.Params, !opts.ExcludeGitOps, logger)
 
 	// 5. Emit the module.
 	return emitModule(outputDir, module, logger)
@@ -217,7 +217,7 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 		})
 	}
 
-	// Optionally add target and gitops operations.
+	// Add target and gitops operations (default behavior, since we're generating from a PR/MR).
 	if includeGitOps {
 		mod.loomFile.Spec.Target = &config.TargetSpec{
 			URL:           toSSHURL(pr.RepoURL),

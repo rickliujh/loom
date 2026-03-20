@@ -4,13 +4,15 @@ import (
 	"log/slog"
 	"os"
 
+	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/spf13/cobra"
 )
 
 var (
-	verbose  bool
-	dryRun   bool
-	logLevel string
+	verbose   bool
+	dryRun    bool
+	logLevel  string
+	logFormat string
 )
 
 var rootCmd = &cobra.Command{
@@ -30,6 +32,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Simulate operations without making changes")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "pretty", "Log format (pretty, text, json)")
 }
 
 // newLogger creates a structured logger based on CLI flags.
@@ -50,7 +53,17 @@ func newLogger() *slog.Logger {
 		level = slog.LevelDebug
 	}
 
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: level,
-	}))
+	opts := &slog.HandlerOptions{Level: level}
+
+	var handler slog.Handler
+	switch logFormat {
+	case "json":
+		handler = slog.NewJSONHandler(os.Stderr, opts)
+	case "text":
+		handler = slog.NewTextHandler(os.Stderr, opts)
+	default:
+		handler = prettylog.NewPrettyHandler(os.Stderr, opts)
+	}
+
+	return slog.New(handler)
 }

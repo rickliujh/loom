@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -24,8 +25,8 @@ type Options struct {
 	ModuleName string
 	// TokenEnv is the env var name for the API token.
 	TokenEnv string
-	// IncludeGitOps adds commitPush and pr operations to the generated module.
-	IncludeGitOps bool
+	// ExcludeGitOps skips generating target, commitPush, and pr operations.
+	ExcludeGitOps bool
 }
 
 // Run generates a loom module from a PR/MR.
@@ -63,10 +64,10 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	// 4. Classify files and build module structure.
 	outputDir := opts.OutputDir
 	if outputDir == "" {
-		outputDir = moduleName
+		outputDir = "."
 	}
 
-	module := buildModule(prInfo, moduleName, opts.Params, opts.IncludeGitOps, logger)
+	module := buildModule(prInfo, moduleName, opts.Params, !opts.ExcludeGitOps, logger)
 
 	// 5. Emit the module.
 	return emitModule(outputDir, module, logger)
@@ -216,8 +217,13 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 		})
 	}
 
-	// Optionally add gitops operations.
+	// Add target and gitops operations (default behavior, since we're generating from a PR/MR).
 	if includeGitOps {
+		mod.loomFile.Spec.Target = &config.TargetSpec{
+			URL:           toSSHURL(pr.RepoURL),
+			Branch:        pr.BaseBranch,
+			FeatureBranch: Parameterize(pr.HeadBranch, params),
+		}
 		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations,
 			config.Operation{
 				Name: "commit",
@@ -312,6 +318,22 @@ func slugify(s string) string {
 // sanitizeFilename converts a path to a safe flat filename by replacing / with --.
 func sanitizeFilename(path string) string {
 	return strings.ReplaceAll(path, "/", "--")
+}
+
+// toSSHURL converts an HTTPS git URL to SSH format.
+// e.g. "https://github.com/myorg/myrepo.git" → "git@github.com:myorg/myrepo.git"
+// URLs that are already SSH or cannot be parsed are returned as-is.
+func toSSHURL(repoURL string) string {
+	parsed, err := url.Parse(repoURL)
+	if err != nil || parsed.Scheme == "" {
+		return repoURL
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return repoURL
+	}
+	host := parsed.Hostname()
+	path := strings.TrimPrefix(parsed.Path, "/")
+	return fmt.Sprintf("git@%s:%s", host, path)
 }
 
 // groupByTopDir groups files by their top-level directory.

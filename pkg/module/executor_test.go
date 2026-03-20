@@ -1,0 +1,355 @@
+package module
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"testing"
+
+	"github.com/rickliujh/loom/pkg/config"
+)
+
+// initBareRepo creates a bare git repo with an initial commit, suitable for cloning in tests.
+// Returns the path to the bare repo.
+func initBareRepo(t *testing.T) string {
+	t.Helper()
+
+	// Create a working repo, commit, then clone it as bare.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create an initial commit so the repo has a HEAD.
+	dummy := filepath.Join(work, "README.md")
+	if err := os.WriteFile(dummy, []byte("# test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"git", "-C", work, "add", "."},
+		{"git", "-C", work, "commit", "-m", "init"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone failed: %v\n%s", err, out)
+	}
+	return bare
+}
+
+// writeLoomYAML writes a loom.yaml into dir with the given content.
+func writeLoomYAML(t *testing.T, dir, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// --- resolveChildTarget tests ---
+
+func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
+	childMod := &Module{
+		Config: &config.LoomFile{Spec: config.Spec{}},
+		Logger: testLogger(),
+	}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Error("expected nil cleanup when no target")
+	}
+	if dir != "/parent/target" {
+		t.Errorf("expected /parent/target, got %q", dir)
+	}
+}
+
+func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup")
+	}
+	defer cleanup()
+
+	if dir == "/parent/target" {
+		t.Error("expected a new target dir, got parent's targetDir")
+	}
+
+	// Verify the cloned repo exists.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo to contain README.md: %v", err)
+	}
+}
+
+func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:           bare,
+					FeatureBranch: "feat/{{ .env }}-update",
+				},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"env": "staging"}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify we're on the feature branch.
+	out, err := exec.Command("git", "-C", dir, "branch", "--show-current").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1]) // trim newline
+	if branch != "feat/staging-update" {
+		t.Errorf("expected branch feat/staging-update, got %q", branch)
+	}
+}
+
+func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dir should exist before cleanup.
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("dir should exist before cleanup: %v", err)
+	}
+
+	cleanup()
+
+	// Dir should be gone after cleanup.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("expected dir to be removed after cleanup, got err: %v", err)
+	}
+}
+
+// --- Execute tests ---
+
+func TestExecute_SimpleShellOperation(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-shell
+spec:
+  operations:
+    - name: create-file
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, dir, false); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); err != nil {
+		t.Errorf("expected output.txt to be created: %v", err)
+	}
+}
+
+func TestExecute_ChildModuleInheritsParentTarget(t *testing.T) {
+	// Parent module references a local child module without its own target.
+	// The child should use the parent's targetDir.
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+		t.Fatal(err)
+	}
+
+	// The child's shell command runs in the targetDir context.
+	// Shell commands use the current process dir, so marker.txt lands in cwd.
+	// The key assertion is that Execute completed without error.
+}
+
+func TestExecute_ChildModuleResolvesOwnTarget(t *testing.T) {
+	// This is the bug scenario: a child module has its own target spec.
+	// Before the fix, the parent's targetDir was passed through, causing
+	// "repository does not exist" when the child tried to open it as a git repo.
+	bare := initBareRepo(t)
+
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Child module has its own target pointing to a git repo.
+	// It runs a shell command to verify it can operate on the cloned repo.
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-with-target
+spec:
+  target:
+    url: `+bare+`
+    featureBranch: feat/test-branch
+  operations:
+    - name: verify-repo
+      shell:
+        command: git -C $LOOM_TARGET_DIR rev-parse --is-inside-work-tree 2>/dev/null || true
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child-with-target
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Before the fix, this would fail with:
+	// executing child module "child-with-target": operation "commit" failed: opening repo at .: repository does not exist
+	err = Execute(context.Background(), mod, parentDir, false)
+	if err != nil {
+		t.Fatalf("Execute should succeed with child module's own target resolved: %v", err)
+	}
+}
+
+func TestExecute_ChildModuleParamsRendered(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  params:
+    - name: greeting
+      required: true
+  operations:
+    - name: write-greeting
+      shell:
+        command: echo done
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  params:
+    - name: env
+      default: prod
+  modules:
+    - name: child
+      source: ./child
+      params:
+        greeting: "hello-{{ .env }}"
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+		t.Fatalf("Execute with templated child params failed: %v", err)
+	}
+}

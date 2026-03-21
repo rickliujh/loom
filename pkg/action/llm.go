@@ -67,15 +67,45 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		mode = "generate"
 	}
 
-	execCtx.Logger.Info("invoking LLM",
+	log := execCtx.Logger
+
+	// Log template resolution details at debug level.
+	log.Debug("llm template resolved",
+		"provider", fmt.Sprintf("%s -> %s", a.Config.Provider, provider),
+		"model", fmt.Sprintf("%s -> %s", a.Config.Model, model),
+		"target", fmt.Sprintf("%s -> %s", a.Config.Target, targetRel),
+	)
+	log.Debug("llm prompt rendered",
+		"promptLength", len(prompt),
+		"prompt", prompt,
+	)
+	if systemPrompt != "" {
+		log.Debug("llm systemPrompt rendered",
+			"systemPromptLength", len(systemPrompt),
+			"systemPrompt", systemPrompt,
+		)
+	}
+	if tokenEnv != "" || project != "" || location != "" {
+		log.Debug("llm providerConfig",
+			"tokenEnv", tokenEnv,
+			"project", project,
+			"location", location,
+		)
+	}
+
+	log.Info("invoking LLM",
 		"provider", provider,
 		"model", model,
 		"mode", mode,
 		"target", targetPath,
+		"promptLength", len(prompt),
 	)
 
 	if execCtx.DryRun {
-		execCtx.Logger.Info("dry-run: would invoke LLM and write result", "target", targetPath)
+		log.Info("dry-run: would invoke LLM and write result",
+			"target", targetPath,
+			"promptLength", len(prompt),
+		)
 		return nil
 	}
 
@@ -85,7 +115,14 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		if err != nil {
 			return actionError("llm", fmt.Errorf("reading target for modify: %w", err))
 		}
+		log.Debug("llm modify mode: read existing file",
+			"path", targetPath,
+			"existingSize", len(existing),
+		)
 		prompt = fmt.Sprintf("Here is the existing file content:\n\n```\n%s\n```\n\n%s", string(existing), prompt)
+		log.Debug("llm modify mode: final prompt composed",
+			"finalPromptLength", len(prompt),
+		)
 	}
 
 	// Build provider options.
@@ -105,7 +142,13 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		return actionError("llm", err)
 	}
 
-	execCtx.Logger.Info("writing LLM output", "path", targetPath, "size", len(result))
+	log.Info("LLM inference complete",
+		"provider", provider,
+		"model", model,
+		"outputSize", len(result),
+	)
+	log.Debug("llm output content", "result", result)
+	log.Info("writing LLM output", "path", targetPath, "size", len(result))
 	if err := util.WriteFile(targetPath, []byte(result), 0o644); err != nil {
 		return actionError("llm", fmt.Errorf("writing output: %w", err))
 	}

@@ -11,9 +11,9 @@ spec:
     - name: port
       default: "8080"
     - name: provider
-      default: "openai"
+      default: "openrouter"
     - name: model
-      default: "gpt-4o"
+      default: "qwen/qwen3-coder:free"
     - name: project
       default: ""
     - name: location
@@ -34,8 +34,9 @@ spec:
       llm:
         provider: "{{ .provider }}"
         model: "{{ .model }}"
-        project: "{{ .project }}"
-        location: "{{ .location }}"
+        providerConfig:
+          project: "{{ .project }}"
+          location: "{{ .location }}"
         prompt: |
           Generate a Kubernetes NetworkPolicy YAML for a service called "{{ .serviceName }}"
           in namespace "{{ .namespace }}".
@@ -55,8 +56,9 @@ spec:
       llm:
         provider: "{{ .provider }}"
         model: "{{ .model }}"
-        project: "{{ .project }}"
-        location: "{{ .location }}"
+        providerConfig:
+          project: "{{ .project }}"
+          location: "{{ .location }}"
         prompt: |
           Update this Kubernetes Deployment to add:
           1. Resource requests: cpu=100m, memory=128Mi
@@ -74,8 +76,9 @@ spec:
       llm:
         provider: "{{ .provider }}"
         model: "{{ .model }}"
-        project: "{{ .project }}"
-        location: "{{ .location }}"
+        providerConfig:
+          project: "{{ .project }}"
+          location: "{{ .location }}"
         prompt: |
           Write a short README.md for the "{{ .serviceName }}" Kubernetes service in the "{{ .namespace }}" namespace.
           Include sections: Overview, Deployment, Configuration, Health Checks.

@@ -5,7 +5,9 @@ package llm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"time"
 
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/anthropic"
@@ -23,6 +25,11 @@ type InferenceOptions struct {
 	SystemPrompt string
 	MaxTokens    int
 
+	// Retry
+	Retries    int           // Max retry attempts (0 = no retry)
+	RetryDelay time.Duration // Initial delay between retries (doubles each attempt)
+	Logger     *slog.Logger  // Logger for retry logging (optional)
+
 	// Provider-specific
 	TokenEnv string // Env var name holding the API key (openai, anthropic, gemini, openrouter)
 	Project  string // GCP project ID (vertex only)
@@ -30,12 +37,17 @@ type InferenceOptions struct {
 }
 
 // Infer performs a single LLM inference and returns the text result.
+// If opts.Retries > 0, failed attempts are retried with exponential backoff.
 func Infer(ctx context.Context, opts InferenceOptions) (string, error) {
 	model, err := newModel(ctx, opts)
 	if err != nil {
 		return "", fmt.Errorf("creating %s client: %w", opts.Provider, err)
 	}
 
+	return inferWithModel(ctx, model, opts)
+}
+
+func inferWithModel(ctx context.Context, model llms.Model, opts InferenceOptions) (string, error) {
 	var callOpts []llms.CallOption
 	if opts.MaxTokens > 0 {
 		callOpts = append(callOpts, llms.WithMaxTokens(opts.MaxTokens))
@@ -47,16 +59,66 @@ func Infer(ctx context.Context, opts InferenceOptions) (string, error) {
 	}
 	messages = append(messages, llms.TextParts(llms.ChatMessageTypeHuman, opts.Prompt))
 
-	resp, err := model.GenerateContent(ctx, messages, callOpts...)
-	if err != nil {
-		return "", fmt.Errorf("%s inference failed: %w", opts.Provider, err)
+	log := opts.Logger
+	if log == nil {
+		log = slog.Default()
 	}
 
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("%s returned no content", opts.Provider)
+	maxAttempts := 1 + opts.Retries
+	delay := opts.RetryDelay
+	if delay == 0 {
+		delay = 2 * time.Second
 	}
 
-	return resp.Choices[0].Content, nil
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := model.GenerateContent(ctx, messages, callOpts...)
+		if err != nil {
+			lastErr = fmt.Errorf("%s inference failed: %w", opts.Provider, err)
+			if attempt < maxAttempts {
+				log.Warn("LLM inference failed, retrying",
+					"attempt", attempt,
+					"maxAttempts", maxAttempts,
+					"retryDelay", delay.String(),
+					"error", lastErr,
+				)
+				select {
+				case <-ctx.Done():
+					return "", fmt.Errorf("%s inference cancelled during retry: %w", opts.Provider, ctx.Err())
+				case <-time.After(delay):
+				}
+				delay *= 2
+				continue
+			}
+			return "", lastErr
+		}
+
+		if len(resp.Choices) == 0 {
+			lastErr = fmt.Errorf("%s returned no content", opts.Provider)
+			if attempt < maxAttempts {
+				log.Warn("LLM returned no content, retrying",
+					"attempt", attempt,
+					"maxAttempts", maxAttempts,
+					"retryDelay", delay.String(),
+				)
+				select {
+				case <-ctx.Done():
+					return "", fmt.Errorf("%s inference cancelled during retry: %w", opts.Provider, ctx.Err())
+				case <-time.After(delay):
+				}
+				delay *= 2
+				continue
+			}
+			return "", lastErr
+		}
+
+		if attempt > 1 {
+			log.Info("LLM inference succeeded after retry", "attempt", attempt)
+		}
+		return resp.Choices[0].Content, nil
+	}
+
+	return "", lastErr
 }
 
 // resolveToken reads an API key from the given env var name, falling back

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rickliujh/loom/internal/util"
 	"github.com/rickliujh/loom/pkg/config"
@@ -125,6 +126,21 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		)
 	}
 
+	var retryDelay time.Duration
+	if a.Config.RetryDelay != "" {
+		retryDelay, err = time.ParseDuration(a.Config.RetryDelay)
+		if err != nil {
+			return actionError("llm", fmt.Errorf("parsing retryDelay %q: %w", a.Config.RetryDelay, err))
+		}
+	}
+
+	if a.Config.Retries > 0 {
+		log.Info("retry enabled",
+			"maxRetries", a.Config.Retries,
+			"initialDelay", retryDelay.String(),
+		)
+	}
+
 	// Build provider options.
 	opts := llm.InferenceOptions{
 		Provider:     provider,
@@ -132,6 +148,9 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		Prompt:       prompt,
 		SystemPrompt: systemPrompt,
 		MaxTokens:    a.Config.MaxTokens,
+		Retries:      a.Config.Retries,
+		RetryDelay:   retryDelay,
+		Logger:       log,
 		TokenEnv:     tokenEnv,
 		Project:      project,
 		Location:     location,

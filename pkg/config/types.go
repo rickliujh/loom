@@ -99,6 +99,8 @@ type LLM struct {
 	Target         string             `yaml:"target"`                   // File path relative to target dir to write/modify
 	Mode           string             `yaml:"mode,omitempty"`           // "generate" (default) or "modify"
 	MaxTokens      int                `yaml:"maxTokens,omitempty"`      // Max output tokens (optional)
+	Retries        int                `yaml:"retries,omitempty"`        // Max retry attempts on failure (default: 0, no retry)
+	RetryDelay     string             `yaml:"retryDelay,omitempty"`     // Initial delay between retries (default: "2s"), doubles each attempt
 	ProviderConfig *LLMProviderConfig `yaml:"providerConfig,omitempty"` // Provider-specific configuration
 }
 

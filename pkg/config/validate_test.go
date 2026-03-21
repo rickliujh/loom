@@ -240,6 +240,56 @@ func TestValidate_LLMVertexRequiresProject(t *testing.T) {
 	}
 }
 
+func TestValidate_LLMRetryValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider:   "openai",
+					Model:      "gpt-4o",
+					Prompt:     "prompt",
+					Target:     "out.yaml",
+					Retries:    3,
+					RetryDelay: "5s",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMRetryInvalidDelay(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider:   "openai",
+					Model:      "gpt-4o",
+					Prompt:     "prompt",
+					Target:     "out.yaml",
+					Retries:    3,
+					RetryDelay: "notaduration",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for invalid retryDelay")
+	}
+	if !strings.Contains(err.Error(), "invalid llm retryDelay") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_LLMVertexWithProviderConfig(t *testing.T) {
 	lf := &LoomFile{
 		APIVersion: ExpectedAPIVersion,

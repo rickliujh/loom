@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 const (
@@ -109,6 +110,14 @@ func Validate(lf *LoomFile) error {
 			}
 			if op.LLM.Mode != "" && op.LLM.Mode != "generate" && op.LLM.Mode != "modify" {
 				return fmt.Errorf("operation %q: unknown llm mode %q (supported: generate, modify)", op.Name, op.LLM.Mode)
+			}
+			if op.LLM.Retries < 0 {
+				return fmt.Errorf("operation %q: llm retries must be >= 0", op.Name)
+			}
+			if op.LLM.RetryDelay != "" {
+				if _, err := time.ParseDuration(op.LLM.RetryDelay); err != nil {
+					return fmt.Errorf("operation %q: invalid llm retryDelay %q: %w", op.Name, op.LLM.RetryDelay, err)
+				}
 			}
 			if !isTemplated(op.LLM.Provider) && op.LLM.Provider == "vertex" {
 				if op.LLM.ProviderConfig == nil || op.LLM.ProviderConfig.Project == "" {

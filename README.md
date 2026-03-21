@@ -485,6 +485,8 @@ Uses an LLM to generate or modify a file. The output is written directly to the 
 | `target` | File path (relative to target dir) to write the output, templated |
 | `mode` | `generate` (default) creates/overwrites the file. `modify` reads the existing file and includes its content in the prompt for the LLM to modify. |
 | `maxTokens` | Maximum output tokens (optional) |
+| `retries` | Max retry attempts on failure (default: `0`, no retry) |
+| `retryDelay` | Initial delay between retries (default: `2s`), doubles each attempt (exponential backoff) |
 | `providerConfig` | Provider-specific settings (see below) |
 
 #### `providerConfig`

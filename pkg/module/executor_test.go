@@ -140,6 +140,128 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 	}
 }
 
+func TestResolveChildTarget_TemplatesURL(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: "{{ .repoPath }}"},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"repoPath": bare}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify the cloned repo exists — proves the URL was templated.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo to contain README.md: %v", err)
+	}
+}
+
+func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
+	bare := initBareRepo(t)
+
+	// Create a branch named "release-prod" on the bare repo via a temp working copy.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bare, work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+		{"git", "-C", work, "checkout", "-b", "release-prod"},
+		{"git", "-C", work, "commit", "--allow-empty", "-m", "branch commit"},
+		{"git", "-C", work, "push", "origin", "release-prod"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:    bare,
+					Branch: "release-{{ .env }}",
+				},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"env": "prod"}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify we cloned the templated branch.
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1])
+	if branch != "release-prod" {
+		t.Errorf("expected branch release-prod, got %q", branch)
+	}
+}
+
+func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
+	bare := initBareRepo(t)
+
+	// Create a branch "main-staging" to clone from.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bare, work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+		{"git", "-C", work, "checkout", "-b", "main-staging"},
+		{"git", "-C", work, "commit", "--allow-empty", "-m", "staging branch"},
+		{"git", "-C", work, "push", "origin", "main-staging"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:           "{{ .repoPath }}",
+					Branch:        "main-{{ .env }}",
+					FeatureBranch: "feat/{{ .env }}-deploy",
+				},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"repoPath": bare, "env": "staging"}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify the feature branch was created on top of the templated base branch.
+	out, err := exec.Command("git", "-C", dir, "branch", "--show-current").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1])
+	if branch != "feat/staging-deploy" {
+		t.Errorf("expected branch feat/staging-deploy, got %q", branch)
+	}
+}
+
 func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 	bare := initBareRepo(t)
 

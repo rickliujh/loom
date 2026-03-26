@@ -65,8 +65,15 @@ func cliCommit(dir, message, author, email string) error {
 	return nil
 }
 
-func cliPush(ctx context.Context, dir string) error {
-	cmd := exec.CommandContext(ctx, "git", "push", "origin", "HEAD")
+func cliPush(ctx context.Context, dir, branch string) error {
+	args := []string{"push", "-u", "origin"}
+	if branch != "" {
+		args = append(args, fmt.Sprintf("refs/heads/%s:refs/heads/%s", branch, branch))
+	} else {
+		args = append(args, "HEAD")
+	}
+
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

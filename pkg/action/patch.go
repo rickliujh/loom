@@ -73,7 +73,7 @@ func (a *PatchAction) applySMP(patchContent, targetPath string) error {
 
 	expanded, err := expandScalarLists(string(targetRaw), patchContent)
 	if err != nil {
-		expanded = patchContent
+		return actionError("patch", fmt.Errorf("expanding scalar lists: %w", err))
 	}
 
 	result, err := merge2.MergeStrings(expanded, string(targetRaw), true, kyaml.MergeOptions{

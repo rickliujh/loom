@@ -37,6 +37,9 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	execCtx.Logger.Info("applying patch", "engine", engine, "patch", patchPath, "target", targetPath)
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would apply patch", "engine", engine, "patch", patchPath, "target", targetPath)
+		if execCtx.ShowDiff {
+			return a.showPatchDiff(execCtx, engine, patchPath, targetPath)
+		}
 		return nil
 	}
 
@@ -250,5 +253,60 @@ func (a *PatchAction) applyJSON6902(patchContent, targetPath string) error {
 	if err := os.WriteFile(targetPath, []byte(out), 0o644); err != nil {
 		return actionError("patch", fmt.Errorf("writing patched file %q: %w", targetPath, err))
 	}
+	return nil
+}
+
+// showPatchDiff renders the patch and displays a diff without writing.
+func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath, targetPath string) error {
+	patchRaw, err := os.ReadFile(patchPath)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("reading patch file %q: %w", patchPath, err))
+	}
+
+	rendered, err := tmpl.RenderFile(patchRaw, execCtx.Params)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("rendering patch file %q: %w", patchPath, err))
+	}
+
+	targetRaw, err := os.ReadFile(targetPath)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("reading target file %q: %w", targetPath, err))
+	}
+
+	var result string
+	switch engine {
+	case "smp":
+		expanded, err := expandScalarLists(string(targetRaw), string(rendered))
+		if err != nil {
+			return actionError("patch", fmt.Errorf("expanding scalar lists: %w", err))
+		}
+		result, err = merge2.MergeStrings(expanded, string(targetRaw), true, kyaml.MergeOptions{
+			ListIncreaseDirection: kyaml.MergeOptionsListAppend,
+		})
+		if err != nil {
+			return actionError("patch", fmt.Errorf("strategic merge patch failed: %w", err))
+		}
+	case "json6902":
+		node, err := kyaml.Parse(string(targetRaw))
+		if err != nil {
+			return actionError("patch", fmt.Errorf("parsing target file %q: %w", targetPath, err))
+		}
+		filter := patchjson6902.Filter{Patch: string(rendered)}
+		nodes, err := filter.Filter([]*kyaml.RNode{node})
+		if err != nil {
+			return actionError("patch", fmt.Errorf("json6902 patch failed: %w", err))
+		}
+		if len(nodes) == 0 {
+			return actionError("patch", fmt.Errorf("json6902 patch produced no output"))
+		}
+		result, err = nodes[0].String()
+		if err != nil {
+			return actionError("patch", fmt.Errorf("serializing patched document: %w", err))
+		}
+	default:
+		return actionError("patch", fmt.Errorf("unknown patch engine %q", engine))
+	}
+
+	printDiff(execCtx, a.Config.Target, string(targetRaw), result)
 	return nil
 }

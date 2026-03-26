@@ -10,9 +10,16 @@ import (
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
+// RunOptions holds runtime flags for module execution.
+type RunOptions struct {
+	DryRun    bool
+	LocalOnly bool
+	ShowDiff  bool
+}
+
 // Execute runs all operations in a module sequentially.
-func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool, localOnly bool) error {
-	execCtx := mod.NewExecutionContext(targetDir, dryRun, localOnly)
+func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions) error {
+	execCtx := mod.NewExecutionContext(targetDir, opts)
 
 	// Execute child modules first.
 	for _, childRef := range mod.Config.Spec.Modules {
@@ -44,7 +51,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool, lo
 			defer cleanup()
 		}
 
-		if err := Execute(ctx, childMod, childTargetDir, dryRun, localOnly); err != nil {
+		if err := Execute(ctx, childMod, childTargetDir, opts); err != nil {
 			return fmt.Errorf("executing child module %q: %w", childRef.Name, err)
 		}
 	}

@@ -55,6 +55,9 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 				execCtx.Logger.Warn("dry-run: destination file already exists, would fail", "path", destPath)
 			}
 			execCtx.Logger.Info("dry-run: would write", "path", destPath, "size", len(rendered))
+			if execCtx.ShowDiff {
+				printDiff(execCtx, destRel, "", string(rendered))
+			}
 			continue
 		}
 

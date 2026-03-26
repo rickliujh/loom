@@ -313,7 +313,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, dir, false, false); err != nil {
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -362,7 +362,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -419,7 +419,7 @@ spec:
 
 	// Before the fix, this would fail with:
 	// executing child module "child-with-target": operation "commit" failed: opening repo at .: repository does not exist
-	err = Execute(context.Background(), mod, parentDir, false, false)
+	err = Execute(context.Background(), mod, parentDir, RunOptions{})
 	if err != nil {
 		t.Fatalf("Execute should succeed with child module's own target resolved: %v", err)
 	}
@@ -471,7 +471,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
 		t.Fatalf("Execute with templated child params failed: %v", err)
 	}
 }
@@ -497,7 +497,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, dir, false, true); err != nil {
+	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -526,7 +526,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, dir, false, true); err != nil {
+	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -574,7 +574,7 @@ spec:
 	}
 
 	// localOnly=true should propagate to child module without error.
-	if err := Execute(context.Background(), mod, targetDir, false, true); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{LocalOnly: true}); err != nil {
 		t.Fatalf("Execute with localOnly should succeed: %v", err)
 	}
 }
@@ -586,7 +586,7 @@ func TestNewExecutionContext_SetsLocalOnly(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	ctx := mod.NewExecutionContext("/target", false, true)
+	ctx := mod.NewExecutionContext("/target", RunOptions{LocalOnly: true})
 	if !ctx.LocalOnly {
 		t.Error("expected LocalOnly to be true")
 	}
@@ -594,11 +594,19 @@ func TestNewExecutionContext_SetsLocalOnly(t *testing.T) {
 		t.Error("expected DryRun to be false")
 	}
 
-	ctx2 := mod.NewExecutionContext("/target", true, false)
+	ctx2 := mod.NewExecutionContext("/target", RunOptions{DryRun: true})
 	if ctx2.LocalOnly {
 		t.Error("expected LocalOnly to be false")
 	}
 	if !ctx2.DryRun {
+		t.Error("expected DryRun to be true")
+	}
+
+	ctx3 := mod.NewExecutionContext("/target", RunOptions{DryRun: true, ShowDiff: true})
+	if !ctx3.ShowDiff {
+		t.Error("expected ShowDiff to be true")
+	}
+	if !ctx3.DryRun {
 		t.Error("expected DryRun to be true")
 	}
 }

@@ -11,8 +11,8 @@ import (
 )
 
 // Execute runs all operations in a module sequentially.
-func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool) error {
-	execCtx := mod.NewExecutionContext(targetDir, dryRun)
+func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool, localOnly bool) error {
+	execCtx := mod.NewExecutionContext(targetDir, dryRun, localOnly)
 
 	// Execute child modules first.
 	for _, childRef := range mod.Config.Spec.Modules {
@@ -44,7 +44,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, dryRun bool) er
 			defer cleanup()
 		}
 
-		if err := Execute(ctx, childMod, childTargetDir, dryRun); err != nil {
+		if err := Execute(ctx, childMod, childTargetDir, dryRun, localOnly); err != nil {
 			return fmt.Errorf("executing child module %q: %w", childRef.Name, err)
 		}
 	}

@@ -24,6 +24,10 @@ func (a *CommitPushAction) Execute(ctx context.Context, execCtx *ExecutionContex
 		return nil
 	}
 
-	// Delegate to git package — implemented in Phase 2.
+	if execCtx.LocalOnly {
+		execCtx.Logger.Info("local: committing without push", "message", msg, "author", a.Config.Author)
+		return commitOnly(ctx, execCtx, msg, a.Config.Author, a.Config.Email)
+	}
+
 	return commitAndPush(ctx, execCtx, msg, a.Config.Author, a.Config.Email)
 }

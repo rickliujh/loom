@@ -313,7 +313,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, dir, false); err != nil {
+	if err := Execute(context.Background(), mod, dir, false, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -362,7 +362,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, false, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -419,7 +419,7 @@ spec:
 
 	// Before the fix, this would fail with:
 	// executing child module "child-with-target": operation "commit" failed: opening repo at .: repository does not exist
-	err = Execute(context.Background(), mod, parentDir, false)
+	err = Execute(context.Background(), mod, parentDir, false, false)
 	if err != nil {
 		t.Fatalf("Execute should succeed with child module's own target resolved: %v", err)
 	}
@@ -471,7 +471,134 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, false, false); err != nil {
 		t.Fatalf("Execute with templated child params failed: %v", err)
+	}
+}
+
+// --- LocalOnly tests ---
+
+func TestExecute_LocalOnly_ShellSkippedByDefault(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-local-shell
+spec:
+  operations:
+    - name: create-file
+      shell:
+        command: touch skipped-output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, dir, false, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "skipped-output.txt")); !os.IsNotExist(err) {
+		t.Error("expected shell command to be skipped in local mode by default")
+	}
+}
+
+func TestExecute_LocalOnly_ShellRunsWhenMarkedLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-local-shell
+spec:
+  operations:
+    - name: create-file
+      shell:
+        command: touch local-output.txt
+        local: true
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, dir, false, true); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "local-output.txt")); err != nil {
+		t.Errorf("expected local-output.txt to be created when shell has local: true: %v", err)
+	}
+}
+
+func TestExecute_LocalOnly_ChildModuleInheritsLocalOnly(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch child-marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// localOnly=true should propagate to child module without error.
+	if err := Execute(context.Background(), mod, targetDir, false, true); err != nil {
+		t.Fatalf("Execute with localOnly should succeed: %v", err)
+	}
+}
+
+func TestNewExecutionContext_SetsLocalOnly(t *testing.T) {
+	mod := &Module{
+		Config: &config.LoomFile{Spec: config.Spec{}},
+		Params: map[string]string{"key": "val"},
+		Logger: testLogger(),
+	}
+
+	ctx := mod.NewExecutionContext("/target", false, true)
+	if !ctx.LocalOnly {
+		t.Error("expected LocalOnly to be true")
+	}
+	if ctx.DryRun {
+		t.Error("expected DryRun to be false")
+	}
+
+	ctx2 := mod.NewExecutionContext("/target", true, false)
+	if ctx2.LocalOnly {
+		t.Error("expected LocalOnly to be false")
+	}
+	if !ctx2.DryRun {
+		t.Error("expected DryRun to be true")
 	}
 }

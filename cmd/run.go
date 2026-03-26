@@ -54,6 +54,11 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// In --local mode, require --target-path so the user can inspect results.
+	if localOnly && targetPath == "" {
+		return fmt.Errorf("--local requires --target-path: provide a local directory to write results into")
+	}
+
 	// Resolve target directory.
 	targetDir := targetPath
 	if targetDir == "" && mod.Config.Spec.Target != nil {
@@ -101,7 +106,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	return module.Execute(ctx, mod, targetDir, dryRun)
+	return module.Execute(ctx, mod, targetDir, dryRun, localOnly)
 }
 
 // parseParams merges CLI params and params file into a map.

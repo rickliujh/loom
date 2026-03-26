@@ -8,6 +8,24 @@ import (
 	"github.com/rickliujh/loom/pkg/git"
 )
 
+// commitOnly stages all changes and commits without pushing.
+func commitOnly(_ context.Context, execCtx *ExecutionContext, message, author, email string) error {
+	repo, err := git.Open(execCtx.TargetDir, execCtx.Logger)
+	if err != nil {
+		return err
+	}
+
+	if err := repo.AddAll(); err != nil {
+		return actionError("commitPush", err)
+	}
+
+	if err := repo.Commit(message, author, email); err != nil {
+		return actionError("commitPush", err)
+	}
+
+	return nil
+}
+
 // commitAndPush stages all changes, commits, and pushes.
 func commitAndPush(ctx context.Context, execCtx *ExecutionContext, message, author, email string) error {
 	repo, err := git.Open(execCtx.TargetDir, execCtx.Logger)

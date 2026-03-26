@@ -2,6 +2,7 @@ package action
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -50,8 +51,15 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 
 		execCtx.Logger.Info("writing file", "path", destPath)
 		if execCtx.DryRun {
+			if _, err := os.Stat(destPath); err == nil {
+				execCtx.Logger.Warn("dry-run: destination file already exists, would fail", "path", destPath)
+			}
 			execCtx.Logger.Info("dry-run: would write", "path", destPath, "size", len(rendered))
 			continue
+		}
+
+		if _, err := os.Stat(destPath); err == nil {
+			return actionError("newFiles", fmt.Errorf("destination file already exists: %s", destPath))
 		}
 
 		info, err := os.Stat(srcPath)

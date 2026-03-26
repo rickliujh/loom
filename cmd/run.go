@@ -64,7 +64,16 @@ func runModule(cmd *cobra.Command, args []string) error {
 		}
 		defer os.RemoveAll(tmpDir)
 
-		repo, err := git.Clone(cmd.Context(), mod.Config.Spec.Target.URL, tmpDir, mod.Config.Spec.Target.Branch, logger)
+		targetURL, err := tmpl.RenderString(mod.Config.Spec.Target.URL, paramMap)
+		if err != nil {
+			return fmt.Errorf("rendering target URL: %w", err)
+		}
+		targetBranch, err := tmpl.RenderString(mod.Config.Spec.Target.Branch, paramMap)
+		if err != nil {
+			return fmt.Errorf("rendering target branch: %w", err)
+		}
+
+		repo, err := git.Clone(cmd.Context(), targetURL, tmpDir, targetBranch, logger)
 		if err != nil {
 			return err
 		}

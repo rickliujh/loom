@@ -82,7 +82,18 @@ func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[s
 	}
 	cleanup := func() { os.RemoveAll(tmpDir) }
 
-	repo, err := git.Clone(ctx, target.URL, tmpDir, target.Branch, childMod.Logger)
+	targetURL, err := tmpl.RenderString(target.URL, childParams)
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("rendering target URL: %w", err)
+	}
+	targetBranch, err := tmpl.RenderString(target.Branch, childParams)
+	if err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("rendering target branch: %w", err)
+	}
+
+	repo, err := git.Clone(ctx, targetURL, tmpDir, targetBranch, childMod.Logger)
 	if err != nil {
 		cleanup()
 		return "", nil, err

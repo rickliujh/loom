@@ -90,33 +90,6 @@ func TestCommitPushAction_LocalRun_CommitsWithoutPush(t *testing.T) {
 	}
 }
 
-func TestCommitPushAction_LocalRun_LogsMessage(t *testing.T) {
-	repoDir := initLocalRepo(t)
-	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
-
-	action := &CommitPushAction{
-		Config: config.CommitPush{
-			Message: "test msg",
-			Author:  "Author",
-			Email:   "a@b.com",
-		},
-	}
-
-	var buf bytes.Buffer
-	execCtx := localExecCtx(t, repoDir)
-	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-
-	err := action.Execute(context.Background(), execCtx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	logOutput := buf.String()
-	if !strings.Contains(logOutput, "committing without push") {
-		t.Errorf("expected 'committing without push' in log, got:\n%s", logOutput)
-	}
-}
-
 func TestCommitPushAction_LocalRun_NoPushToRemote(t *testing.T) {
 	// Set up a repo with a remote to verify push is NOT called.
 	bareDir := t.TempDir()

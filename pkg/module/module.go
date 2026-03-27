@@ -35,7 +35,7 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, fmt.Errorf("validating %s: %w", dir, err)
 	}
 
-	params, err := resolveParams(cfg.Spec.Params, providedParams, logger)
+	params, err := resolveParams(cfg.Spec.Params, cfg.Spec.DynamicParams, providedParams, logger)
 	if err != nil {
 		return nil, fmt.Errorf("resolving params for %s: %w", cfg.Metadata.Name, err)
 	}
@@ -53,7 +53,8 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 }
 
 // resolveParams merges provided params with declared defaults, checking required params.
-func resolveParams(declared []config.ParamDef, provided map[string]string, logger *slog.Logger) (map[string]string, error) {
+// Undeclared params (not in declared or dynamicDeclared) are rejected per P3.
+func resolveParams(declared []config.ParamDef, dynamicDeclared []config.DynamicParamDef, provided map[string]string, logger *slog.Logger) (map[string]string, error) {
 	result := make(map[string]string)
 
 	for _, p := range declared {
@@ -66,10 +67,19 @@ func resolveParams(declared []config.ParamDef, provided map[string]string, logge
 		}
 	}
 
-	// Also pass through any extra params not declared (for flexibility).
-	for k, v := range provided {
-		if _, exists := result[k]; !exists {
-			result[k] = v
+	// Build set of all declared names (static + dynamic) for P3 validation.
+	declaredNames := make(map[string]bool, len(declared)+len(dynamicDeclared))
+	for _, p := range declared {
+		declaredNames[p.Name] = true
+	}
+	for _, dp := range dynamicDeclared {
+		declaredNames[dp.Name] = true
+	}
+
+	// P3: Reject undeclared params.
+	for k := range provided {
+		if !declaredNames[k] {
+			return nil, fmt.Errorf("undeclared parameter %q", k)
 		}
 	}
 
@@ -81,8 +91,9 @@ func resolveParams(declared []config.ParamDef, provided map[string]string, logge
 // execution. Provided params override dynamic evaluation.
 func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string]string, provided map[string]string, logger *slog.Logger) error {
 	for _, dp := range declared {
-		// Provided params always take priority.
+		// P6: Provided params always take priority; log warning.
 		if val, ok := provided[dp.Name]; ok {
+			logger.Warn("CLI override skipping dynamic param command", "param", dp.Name)
 			resolved[dp.Name] = val
 			continue
 		}

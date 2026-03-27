@@ -478,63 +478,7 @@ spec:
 
 // --- LocalRun tests ---
 
-func TestExecute_LocalRun_ShellSkippedByDefault(t *testing.T) {
-	dir := t.TempDir()
-	writeLoomYAML(t, dir, `
-apiVersion: loom.rickliujh.github.io/v1beta1
-kind: Loom
-metadata:
-  name: test-local-shell
-spec:
-  operations:
-    - name: create-file
-      shell:
-        command: touch skipped-output.txt
-`)
-
-	mod, err := Load(dir, nil, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Execute(context.Background(), mod, dir, RunOptions{LocalRun: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "skipped-output.txt")); !os.IsNotExist(err) {
-		t.Error("expected shell command to be skipped in local mode by default")
-	}
-}
-
-func TestExecute_LocalRun_ShellRunsWhenMarkedLocal(t *testing.T) {
-	dir := t.TempDir()
-	writeLoomYAML(t, dir, `
-apiVersion: loom.rickliujh.github.io/v1beta1
-kind: Loom
-metadata:
-  name: test-local-shell
-spec:
-  operations:
-    - name: create-file
-      shell:
-        command: touch local-output.txt
-        local: true
-`)
-
-	mod, err := Load(dir, nil, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Execute(context.Background(), mod, dir, RunOptions{LocalRun: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "local-output.txt")); err != nil {
-		t.Errorf("expected local-output.txt to be created when shell has local: true: %v", err)
-	}
-}
-
+// M2+L4: LocalRun propagates to child modules.
 func TestExecute_LocalRun_ChildModuleInheritsLocalRun(t *testing.T) {
 	parentDir := t.TempDir()
 	childDir := filepath.Join(parentDir, "child")

@@ -190,6 +190,72 @@ func TestNewFilesAction_WithTemplating(t *testing.T) {
 	}
 }
 
+// NF3: Existing directory gets files merged; NF2 still applies per-file.
+func TestNewFilesAction_DirectoryMerge(t *testing.T) {
+	moduleDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "templates", "services")
+	os.MkdirAll(srcDir, 0o755)
+	os.WriteFile(filepath.Join(srcDir, "new-service.yaml"), []byte("new"), 0o644)
+
+	targetDir := t.TempDir()
+	// Pre-create the directory with an existing file.
+	os.MkdirAll(filepath.Join(targetDir, "services"), 0o755)
+	os.WriteFile(filepath.Join(targetDir, "services", "existing.yaml"), []byte("old"), 0o644)
+
+	action := &NewFilesAction{
+		Config: configNewFiles("templates", ""),
+	}
+
+	execCtx := testExecCtx(t, moduleDir, targetDir)
+	err := action.Execute(context.Background(), execCtx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// New file should be written.
+	content, err := os.ReadFile(filepath.Join(targetDir, "services", "new-service.yaml"))
+	if err != nil {
+		t.Fatal("expected new-service.yaml to exist")
+	}
+	if string(content) != "new" {
+		t.Errorf("expected 'new', got %q", string(content))
+	}
+
+	// Existing file should be untouched.
+	content, err = os.ReadFile(filepath.Join(targetDir, "services", "existing.yaml"))
+	if err != nil {
+		t.Fatal("expected existing.yaml to still exist")
+	}
+	if string(content) != "old" {
+		t.Errorf("expected 'old', got %q", string(content))
+	}
+}
+
+// NF3: Directory merge + NF2 — fails if individual file already exists.
+func TestNewFilesAction_DirectoryMerge_FailsOnFileConflict(t *testing.T) {
+	moduleDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "templates", "services")
+	os.MkdirAll(srcDir, 0o755)
+	os.WriteFile(filepath.Join(srcDir, "conflict.yaml"), []byte("new"), 0o644)
+
+	targetDir := t.TempDir()
+	os.MkdirAll(filepath.Join(targetDir, "services"), 0o755)
+	os.WriteFile(filepath.Join(targetDir, "services", "conflict.yaml"), []byte("old"), 0o644)
+
+	action := &NewFilesAction{
+		Config: configNewFiles("templates", ""),
+	}
+
+	execCtx := testExecCtx(t, moduleDir, targetDir)
+	err := action.Execute(context.Background(), execCtx)
+	if err == nil {
+		t.Fatal("expected error when file conflicts in merged directory")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("expected 'already exists' error, got: %v", err)
+	}
+}
+
 func TestNewFilesAction_InvalidSource(t *testing.T) {
 	moduleDir := t.TempDir()
 	targetDir := t.TempDir()

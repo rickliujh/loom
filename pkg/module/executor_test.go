@@ -599,7 +599,7 @@ spec:
     - name: create-marker
       shell:
         command: touch marker.txt
-        local: true
+        pure: true
 `)
 
 	writeLoomYAML(t, parentDir, `

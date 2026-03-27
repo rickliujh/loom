@@ -489,16 +489,16 @@ shell:
 # executed: sh -c "echo validating payments"
 ```
 
-##### S3: Local mode — skipped unless marked local
+##### S3: Local mode — skipped unless marked pure
 
-In `--local-run` mode, shell commands are skipped by default. Only commands with `local: true` execute. This prevents remote-only commands (deploy scripts, API calls) from running during local preview.
+In `--local-run` mode, shell commands are skipped by default. Only commands with `pure: true` execute. A pure command has no external side effects — it only reads or modifies local files (e.g., linting, formatting). This prevents remote-only commands (deploy scripts, API calls) from running during local preview.
 
 ```yaml
 operations:
   - name: validate
     shell:
       command: "yamllint ."
-      local: true              # runs in --local-run mode
+      pure: true               # no side effects, runs in --local-run mode
   - name: deploy
     shell:
       command: "kubectl apply -f ."
@@ -650,7 +650,7 @@ Modules without a `spec.target` are not git-related. They run against the module
 |-----------|----------|
 | `newFiles` | Writes to local clone as normal |
 | `patch` | Patches local clone as normal |
-| `shell` | **Skipped** unless `local: true` |
+| `shell` | **Skipped** unless `pure: true` |
 | `commitPush` | Commits locally, **no push** |
 | `pr` | **Skipped entirely** |
 
@@ -792,7 +792,7 @@ spec:
     - name: validate
       shell:
         command: "yamllint ."
-        local: true
+        pure: true
     - name: commit
       commitPush:
         message: "feat: onboard {{ .serviceName }} ({{ .commitHash }})"
@@ -836,7 +836,7 @@ loom run my-module -p serviceName=payments --local-run --target-path ./preview
 3. Create branch `loom/onboard-payments`.
 4. `create-files`: writes to `./preview/00-onboard-service/`.
 5. `patch-app`: patches in `./preview/00-onboard-service/`.
-6. `validate`: runs `yamllint .` (marked `local: true`).
+6. `validate`: runs `yamllint .` (marked `pure: true`).
 7. `commit`: commits locally, **no push**.
 8. `open-pr`: **skipped**.
 9. User inspects `./preview/00-onboard-service/` with `git log`, `git diff`, etc.

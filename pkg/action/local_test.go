@@ -248,13 +248,13 @@ func TestShellAction_LocalRun_SkippedByDefault(t *testing.T) {
 	}
 }
 
-func TestShellAction_LocalRun_RunsWhenMarkedLocal(t *testing.T) {
+func TestShellAction_LocalRun_RunsWhenMarkedPure(t *testing.T) {
 	targetDir := t.TempDir()
 
 	action := &ShellAction{
 		Config: config.Shell{
 			Command: "echo hello > output.txt",
-			Local:   true,
+			Pure:    true,
 		},
 	}
 
@@ -266,7 +266,7 @@ func TestShellAction_LocalRun_RunsWhenMarkedLocal(t *testing.T) {
 
 	content, err := os.ReadFile(filepath.Join(targetDir, "output.txt"))
 	if err != nil {
-		t.Fatal("expected output.txt to exist when local: true")
+		t.Fatal("expected output.txt to exist when pure: true")
 	}
 	if !strings.Contains(string(content), "hello") {
 		t.Errorf("expected 'hello' in output, got %q", string(content))
@@ -274,7 +274,7 @@ func TestShellAction_LocalRun_RunsWhenMarkedLocal(t *testing.T) {
 }
 
 func TestShellAction_LocalFalse_RunsNormally(t *testing.T) {
-	// Without --local, shell commands run regardless of the local field.
+	// Without --local-run, shell commands run regardless of the pure field.
 	targetDir := t.TempDir()
 
 	action := &ShellAction{

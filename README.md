@@ -89,7 +89,7 @@ When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
 
 With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. Add `--diff` to also see the rendered file contents and patch diffs in the output.
 
-With `--local-run`, Loom runs all local operations (rendering templates, writing files, committing) but skips anything that touches a remote — no push, no PR creation. Shell commands are also skipped by default in `--local-run` mode unless explicitly marked with `local: true` in the operation config. `--local-run` requires `--target-path` so you have a persistent directory to inspect the results.
+With `--local-run`, Loom runs all local operations (rendering templates, writing files, committing) but skips anything that touches a remote — no push, no PR creation. Shell commands are also skipped by default in `--local-run` mode unless explicitly marked with `pure: true` in the operation config. `--local-run` requires `--target-path` so you have a persistent directory to inspect the results.
 
 ## The `loom.yaml` File
 
@@ -143,7 +143,7 @@ spec:
       shell:
         command: "kubeval --strict argocd/{{ .serviceName }}.yaml"
         timeout: "30s"
-        local: true
+        pure: true
 
     - name: commit
       commitPush:
@@ -416,22 +416,22 @@ Runs an arbitrary shell command in the target repository directory.
 |-------|-------------|
 | `command` | Shell command to execute (`sh -c`), templated |
 | `timeout` | Maximum duration (e.g. `30s`, `5m`). Operation fails if exceeded |
-| `local` | If `true`, this command runs even in `--local-run` mode. Default: `false` |
+| `pure` | If `true`, this command has no external side effects and runs even in `--local-run` mode. Default: `false` |
 
 The command is rendered as a template, so you can inject parameters. The working directory is the target repository. If the command fails, Loom stops.
 
-In `--local-run` mode, shell commands are **skipped by default** because they may create remote resources (deploy, notify, etc.). Mark a command with `local: true` to indicate it is safe to run locally — for example, formatting or validation commands that only read or modify local files:
+In `--local-run` mode, shell commands are **skipped by default** because they may create remote resources (deploy, notify, etc.). Mark a command with `pure: true` to indicate it has no external side effects — for example, formatting or validation commands that only read or modify local files:
 
 ```yaml
 - name: format
   shell:
     command: "gofmt -w ."
-    local: true     # safe to run in --local-run mode
+    pure: true      # no side effects, safe in --local-run mode
 
 - name: deploy
   shell:
     command: "kubectl apply -f manifests/"
-    # not marked local — skipped in --local-run mode
+    # not marked pure — skipped in --local-run mode
 ```
 
 ### `commitPush` — Commit and Push

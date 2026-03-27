@@ -1,15 +1,15 @@
 # Templates
 
-Loom uses Go's [`text/template`](https://pkg.go.dev/text/template) syntax. Inside any templatable string, you can reference parameters with `{{ .paramName }}`.
+Loom uses Go's [`text/template`](https://pkg.go.dev/text/template) syntax. Inside any templatable string, you can reference parameters with <code v-pre>{{ .paramName }}</code>.
 
 ## Functions
 
 | Function | Example | Result |
 |----------|---------|--------|
-| Parameter access | `{{ .serviceName }}` | `payments` |
-| Default value | `{{ default "prod" .env }}` | `prod` if `.env` is empty |
-| Uppercase | `{{ upper .serviceName }}` | `PAYMENTS` |
-| Lowercase | `{{ lower .serviceName }}` | `payments` |
+| Parameter access | <code v-pre>{{ .serviceName }}</code> | `payments` |
+| Default value | <code v-pre>{{ default "prod" .env }}</code> | `prod` if `.env` is empty |
+| Uppercase | <code v-pre>{{ upper .serviceName }}</code> | `PAYMENTS` |
+| Lowercase | <code v-pre>{{ lower .serviceName }}</code> | `payments` |
 
 ## Where Templates Work
 
@@ -26,13 +26,13 @@ Templates are evaluated in:
 
 ## Path Templating
 
-File and folder names are rendered as Go templates, just like file contents. You can use `{{ .paramName }}` directly in file and directory names.
+File and folder names are rendered as Go templates, just like file contents. You can use <code v-pre>{{ .paramName }}</code> directly in file and directory names.
 
 | Source path | With `serviceName=payments`, `env=prod` | Result |
 |-------------|------------------------------------------|--------|
-| `{{ .env }}/config.yaml` | | `prod/config.yaml` |
-| `application-{{ .serviceName }}.yaml` | | `application-payments.yaml` |
-| `{{ .env }}/{{ .serviceName }}-deploy.yaml` | | `prod/payments-deploy.yaml` |
+| <code v-pre>{{ .env }}/config.yaml</code> | | `prod/config.yaml` |
+| <code v-pre>application-{{ .serviceName }}.yaml</code> | | `application-payments.yaml` |
+| <code v-pre>{{ .env }}/{{ .serviceName }}-deploy.yaml</code> | | `prod/payments-deploy.yaml` |
 
 This means your module directory can look like:
 
@@ -56,9 +56,9 @@ shared/
 
 ### Double-Underscore Syntax
 
-For convenience, Loom also supports a filesystem-friendly `__paramName__` placeholder syntax. This is useful when your filesystem, shell, or editor has trouble with curly braces in filenames. Loom converts `__paramName__` to `{{ .paramName }}` before rendering. Both syntaxes can be mixed freely.
+For convenience, Loom also supports a filesystem-friendly `__paramName__` placeholder syntax. This is useful when your filesystem, shell, or editor has trouble with curly braces in filenames. Loom converts `__paramName__` to <code v-pre>{{ .paramName }}</code> before rendering. Both syntaxes can be mixed freely.
 
 | `__paramName__` syntax | Equivalent Go template |
 |------------------------|----------------------|
-| `__env__/config.yaml` | `{{ .env }}/config.yaml` |
-| `application-__serviceName__.yaml` | `application-{{ .serviceName }}.yaml` |
+| `__env__/config.yaml` | <code v-pre>{{ .env }}/config.yaml</code> |
+| `application-__serviceName__.yaml` | <code v-pre>application-{{ .serviceName }}.yaml</code> |

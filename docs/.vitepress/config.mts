@@ -7,15 +7,6 @@ export default defineConfig({
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
   ],
 
-  vue: {
-    template: {
-      compilerOptions: {
-        // Use different delimiters so Vue doesn't conflict with Go's {{ }}
-        delimiters: ['${', '}$'],
-      },
-    },
-  },
-
   themeConfig: {
     nav: [
       { text: 'Guide', link: '/guide/what-is-loom' },

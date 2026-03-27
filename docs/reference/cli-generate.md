@@ -37,7 +37,7 @@ loom generate <pr-url> -o ./my-module
 
 Loom fetches the PR diff and produces a ready-to-use module:
 
-- **Added files** become templates with `{{ .paramName }}` replacing the concrete values, including in file and folder names.
+- **Added files** become templates with <code v-pre>{{ .paramName }}</code> replacing the concrete values, including in file and folder names.
 - **Modified YAML files** become strategic merge patches under `__functions/patches/`.
 - **Deleted files** become `shell` operations with `rm`.
 - **Renamed files** become `shell` operations with `mv`.

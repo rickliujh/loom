@@ -75,7 +75,7 @@ Parameters are the inputs to your module. They're injected into every template -
 
 | Field | Description |
 |-------|-------------|
-| `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `required` | If `true`, the run fails when this param is not provided |
 | `default` | Fallback value when the param is not provided |
 
@@ -89,7 +89,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 
 | Field | Description |
 |-------|-------------|
-| `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
 | `default` | Fallback value if the command fails |
 

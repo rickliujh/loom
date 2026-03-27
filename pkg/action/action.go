@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 )
 
@@ -24,6 +25,9 @@ type ExecutionContext struct {
 	LocalRun bool
 	// ShowDiff displays file diffs during dry-run.
 	ShowDiff bool
+	// DiffWriter is the destination for diff output (bypasses the logger).
+	// When nil, diff output is suppressed.
+	DiffWriter io.Writer
 	// Logger is the structured logger.
 	Logger *slog.Logger
 }

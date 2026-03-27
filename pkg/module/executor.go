@@ -3,6 +3,7 @@ package module
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -16,6 +17,8 @@ type RunOptions struct {
 	DryRun    bool
 	LocalRun bool
 	ShowDiff  bool
+	// DiffWriter is the destination for diff output. Defaults to os.Stdout.
+	DiffWriter io.Writer
 	// TargetPath is the base directory for --local-run mode.
 	// Each module with a target spec clones into a numbered subdirectory.
 	TargetPath string

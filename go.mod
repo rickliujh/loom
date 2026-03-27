@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/google/go-github/v60 v60.0.0
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.2
 	gitlab.com/gitlab-org/api/client-go v1.46.0
 	golang.org/x/oauth2 v0.35.0

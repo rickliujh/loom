@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -135,15 +136,20 @@ func evalParamCommand(name, command string, logger *slog.Logger) (string, error)
 
 // NewExecutionContext creates an ExecutionContext for this module.
 func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.ExecutionContext {
+	diffWriter := opts.DiffWriter
+	if diffWriter == nil && opts.ShowDiff {
+		diffWriter = os.Stdout
+	}
 	return &action.ExecutionContext{
-		ModuleDir: m.Dir,
-		TargetDir: targetDir,
-		Params:    m.Params,
-		Excludes:  m.Config.Spec.Excludes,
-		Includes:  m.Config.Spec.Includes,
-		DryRun:    opts.DryRun,
-		LocalRun: opts.LocalRun,
-		ShowDiff:  opts.ShowDiff,
-		Logger:    m.Logger,
+		ModuleDir:  m.Dir,
+		TargetDir:  targetDir,
+		Params:     m.Params,
+		Excludes:   m.Config.Spec.Excludes,
+		Includes:   m.Config.Spec.Includes,
+		DryRun:     opts.DryRun,
+		LocalRun:   opts.LocalRun,
+		ShowDiff:   opts.ShowDiff,
+		DiffWriter: diffWriter,
+		Logger:     m.Logger,
 	}
 }

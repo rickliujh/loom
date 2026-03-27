@@ -1,0 +1,74 @@
+# loom run
+
+Execute a module.
+
+```
+loom run [path] [flags]
+```
+
+## Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param key=value` | Set a parameter (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--target-path /path` | Use a local directory as the target (skip git clone) |
+| `--dry-run` | Show what would happen without writing anything |
+| `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
+| `--local-run` | Run all operations locally but skip remote push and PR creation |
+| `-v, --verbose` | Enable debug logging |
+| `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
+| `--log-format format` | Set log format: `pretty` (default), `text`, `json` |
+
+## Examples
+
+### Full run against a remote repo
+
+```bash
+loom run ./onboard-service -p serviceName=payments
+```
+
+### Dry run against a local checkout
+
+```bash
+loom run ./onboard-service \
+  -p serviceName=payments \
+  --target-path ~/repos/gitops \
+  --dry-run
+```
+
+### Dry run with diffs
+
+See exactly what files would be created and changed:
+
+```bash
+loom run ./onboard-service \
+  -p serviceName=payments \
+  --target-path ~/repos/gitops \
+  --diff
+```
+
+### Local mode
+
+Render, write, and commit, but don't push or open a PR. `--target-path` is required so you can inspect the results:
+
+```bash
+loom run ./onboard-service \
+  -p serviceName=payments \
+  --target-path ~/repos/gitops \
+  --local-run
+```
+
+### Parameters from file
+
+```bash
+loom run ./onboard-service --params-file params.yaml
+```
+
+The YAML file should be a flat key-value map:
+
+```yaml
+serviceName: payments
+namespace: fintech
+env: prod
+```

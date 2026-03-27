@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
@@ -15,6 +16,23 @@ type RunOptions struct {
 	DryRun    bool
 	LocalOnly bool
 	ShowDiff  bool
+	// TargetPath is the base directory for --local mode.
+	// Each module with a target spec clones into a numbered subdirectory.
+	TargetPath string
+	// localSeq tracks the execution order for numbered subdirectories.
+	localSeq *int
+}
+
+// NextLocalDir returns the next numbered subdirectory under TargetPath
+// for a module with the given name, e.g. "00-parent-module".
+func (o *RunOptions) NextLocalDir(name string) string {
+	if o.localSeq == nil {
+		seq := 0
+		o.localSeq = &seq
+	}
+	dir := fmt.Sprintf("%02d-%s", *o.localSeq, name)
+	*o.localSeq++
+	return filepath.Join(o.TargetPath, dir)
 }
 
 // Execute runs all operations in a module sequentially.
@@ -43,7 +61,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			return fmt.Errorf("loading child module %q: %w", childRef.Name, err)
 		}
 
-		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, childParams, targetDir)
+		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, childParams, targetDir, &opts)
 		if err != nil {
 			return fmt.Errorf("resolving target for child module %q: %w", childRef.Name, err)
 		}
@@ -74,50 +92,73 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 }
 
 // resolveChildTarget resolves the target directory for a child module.
-// If the child module has its own target spec, it clones the target repo
-// and returns the temp directory along with a cleanup function.
-// Otherwise, it falls back to the parent's targetDir.
-func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[string]string, parentTargetDir string) (string, func(), error) {
+// If the child module has its own target spec, it clones the target repo.
+// In --local mode, it clones into a numbered subdirectory of TargetPath.
+// Otherwise, it clones into a temp directory with a cleanup function.
+// If the child has no target spec, it falls back to the parent's targetDir.
+func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[string]string, parentTargetDir string, opts *RunOptions) (string, func(), error) {
 	target := childMod.Config.Spec.Target
 	if target == nil {
 		return parentTargetDir, nil, nil
 	}
 
-	tmpDir, err := os.MkdirTemp("", "loom-target-*")
-	if err != nil {
-		return "", nil, fmt.Errorf("creating temp dir: %w", err)
+	// Determine clone destination.
+	var cloneDir string
+	var cleanup func()
+	if opts.LocalOnly && opts.TargetPath != "" {
+		// In --local mode, clone into a numbered subdirectory — no cleanup.
+		cloneDir = opts.NextLocalDir(childMod.Config.Metadata.Name)
+		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
+			return "", nil, fmt.Errorf("creating local target dir: %w", err)
+		}
+	} else {
+		tmpDir, err := os.MkdirTemp("", "loom-target-*")
+		if err != nil {
+			return "", nil, fmt.Errorf("creating temp dir: %w", err)
+		}
+		cloneDir = tmpDir
+		cleanup = func() { os.RemoveAll(tmpDir) }
 	}
-	cleanup := func() { os.RemoveAll(tmpDir) }
 
 	targetURL, err := tmpl.RenderString(target.URL, childParams)
 	if err != nil {
-		cleanup()
+		if cleanup != nil {
+			cleanup()
+		}
 		return "", nil, fmt.Errorf("rendering target URL: %w", err)
 	}
 	targetBranch, err := tmpl.RenderString(target.Branch, childParams)
 	if err != nil {
-		cleanup()
+		if cleanup != nil {
+			cleanup()
+		}
 		return "", nil, fmt.Errorf("rendering target branch: %w", err)
 	}
 
-	repo, err := git.Clone(ctx, targetURL, tmpDir, targetBranch, childMod.Logger)
+	repo, err := git.Clone(ctx, targetURL, cloneDir, targetBranch, childMod.Logger)
 	if err != nil {
-		cleanup()
+		if cleanup != nil {
+			cleanup()
+		}
 		return "", nil, err
 	}
 
 	if target.FeatureBranch != "" {
 		branchName, err := tmpl.RenderString(target.FeatureBranch, childParams)
 		if err != nil {
-			cleanup()
+			if cleanup != nil {
+				cleanup()
+			}
 			return "", nil, fmt.Errorf("rendering featureBranch: %w", err)
 		}
 		childMod.Logger.Info("creating feature branch", "branch", branchName)
 		if err := repo.CreateBranch(branchName); err != nil {
-			cleanup()
+			if cleanup != nil {
+				cleanup()
+			}
 			return "", nil, fmt.Errorf("creating feature branch %q: %w", branchName, err)
 		}
 	}
 
-	return tmpDir, cleanup, nil
+	return cloneDir, cleanup, nil
 }

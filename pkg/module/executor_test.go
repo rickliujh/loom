@@ -64,7 +64,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 	}
 	params := map[string]string{"env": "staging"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 	}
 	params := map[string]string{"repoPath": bare}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +196,7 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 	}
 	params := map[string]string{"env": "prod"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +245,7 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 	}
 	params := map[string]string{"repoPath": bare, "env": "staging"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,6 +576,117 @@ spec:
 	// localOnly=true should propagate to child module without error.
 	if err := Execute(context.Background(), mod, targetDir, RunOptions{LocalOnly: true}); err != nil {
 		t.Fatalf("Execute with localOnly should succeed: %v", err)
+	}
+}
+
+func TestResolveChildTarget_LocalOnly_ClonesIntoNumberedSubdir(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "my-child"},
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+
+	opts := &RunOptions{LocalOnly: true, TargetPath: targetPath}
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Error("expected nil cleanup in local mode")
+	}
+
+	// Should be a numbered subdirectory.
+	expected := filepath.Join(targetPath, "00-my-child")
+	if dir != expected {
+		t.Errorf("expected %q, got %q", expected, dir)
+	}
+
+	// Verify the cloned repo exists.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo to contain README.md: %v", err)
+	}
+
+	// Second call should increment the counter.
+	childMod2 := &Module{
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "second-child"},
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+	dir2, _, err := resolveChildTarget(context.Background(), childMod2, nil, "/parent/target", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected2 := filepath.Join(targetPath, "01-second-child")
+	if dir2 != expected2 {
+		t.Errorf("expected %q, got %q", expected2, dir2)
+	}
+}
+
+func TestExecute_LocalOnly_ChildWithTarget_ClonesIntoTargetPath(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-with-target
+spec:
+  target:
+    url: `+bare+`
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+        local: true
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child-with-target
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := RunOptions{LocalOnly: true, TargetPath: targetPath}
+	if err := Execute(context.Background(), mod, parentDir, opts); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Verify the child cloned into a numbered subdir of target path.
+	childCloneDir := filepath.Join(targetPath, "00-child-with-target")
+	if _, err := os.Stat(filepath.Join(childCloneDir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo at %s: %v", childCloneDir, err)
+	}
+	if _, err := os.Stat(filepath.Join(childCloneDir, "marker.txt")); err != nil {
+		t.Errorf("expected marker.txt from shell command: %v", err)
 	}
 }
 

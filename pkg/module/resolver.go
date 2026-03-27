@@ -14,7 +14,7 @@ import (
 // ResolveSource resolves a module source to a local directory.
 // Sources starting with "." or "/" are treated as local paths.
 // Other sources are treated as git URLs and cloned to a temp directory.
-func ResolveSource(source, parentDir string) (string, error) {
+func ResolveSource(source, parentDir string, logger *slog.Logger) (string, error) {
 	if strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") {
 		path := source
 		if strings.HasPrefix(source, ".") {
@@ -31,17 +31,17 @@ func ResolveSource(source, parentDir string) (string, error) {
 	}
 
 	// Git URL — clone to temp directory.
-	return cloneToTemp(source)
+	return cloneToTemp(source, logger)
 }
 
 // cloneToTemp clones a git URL to a temporary directory.
-func cloneToTemp(url string) (string, error) {
+func cloneToTemp(url string, logger *slog.Logger) (string, error) {
 	dir, err := os.MkdirTemp("", "loom-module-*")
 	if err != nil {
 		return "", err
 	}
 
-	_, err = git.Clone(context.Background(), url, dir, "", slog.Default())
+	_, err = git.Clone(context.Background(), url, dir, "", logger)
 	if err != nil {
 		os.RemoveAll(dir)
 		return "", fmt.Errorf("cloning module %q: %w", url, err)

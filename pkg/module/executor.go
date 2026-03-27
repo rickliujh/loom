@@ -44,7 +44,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 
 	// Execute child modules first.
 	for _, childRef := range mod.Config.Spec.Modules {
-		childDir, err := ResolveSource(childRef.Source, mod.Dir)
+		childDir, err := ResolveSource(childRef.Source, mod.Dir, mod.Logger)
 		if err != nil {
 			return fmt.Errorf("resolving child module %q: %w", childRef.Name, err)
 		}

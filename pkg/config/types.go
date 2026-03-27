@@ -73,9 +73,10 @@ type Patch struct {
 type Shell struct {
 	Command string `yaml:"command"`
 	Timeout string `yaml:"timeout,omitempty"`
-	// Local marks this command as safe to run in --local mode.
-	// Shell commands are skipped by default when --local is set.
-	Local bool `yaml:"local,omitempty"`
+	// Pure marks this command as having no external side effects,
+	// making it safe to run in --local-run mode.
+	// Shell commands are skipped by default when --local-run is set.
+	Pure bool `yaml:"pure,omitempty"`
 }
 
 type CommitPush struct {

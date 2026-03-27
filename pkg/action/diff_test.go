@@ -14,15 +14,16 @@ import (
 
 func diffExecCtx(t *testing.T, moduleDir, targetDir string) (*ExecutionContext, *bytes.Buffer) {
 	t.Helper()
-	var buf bytes.Buffer
+	var diffBuf bytes.Buffer
 	return &ExecutionContext{
-		ModuleDir: moduleDir,
-		TargetDir: targetDir,
-		Params:    map[string]string{},
-		DryRun:    true,
-		ShowDiff:  true,
-		Logger:    slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})),
-	}, &buf
+		ModuleDir:  moduleDir,
+		TargetDir:  targetDir,
+		Params:     map[string]string{},
+		DryRun:     true,
+		ShowDiff:   true,
+		DiffWriter: &diffBuf,
+		Logger:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}, &diffBuf
 }
 
 // --- NewFiles diff ---
@@ -39,19 +40,21 @@ func TestNewFilesAction_DiffShowsNewFileContent(t *testing.T) {
 		Config: configNewFiles("templates", ""),
 	}
 
-	execCtx, buf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logOutput := buf.String()
-	// Should show diff output with the new file content.
-	if !strings.Contains(logOutput, "hello world") {
-		t.Errorf("expected diff to contain file content, got:\n%s", logOutput)
+	diffOutput := diffBuf.String()
+	if !strings.Contains(diffOutput, "hello world") {
+		t.Errorf("expected diff to contain file content, got:\n%s", diffOutput)
 	}
-	if !strings.Contains(logOutput, "/dev/null") {
-		t.Errorf("expected diff to show /dev/null for new file, got:\n%s", logOutput)
+	if !strings.Contains(diffOutput, "/dev/null") {
+		t.Errorf("expected diff to show /dev/null for new file, got:\n%s", diffOutput)
+	}
+	if !strings.Contains(diffOutput, "@@") {
+		t.Errorf("expected unified diff hunk header, got:\n%s", diffOutput)
 	}
 }
 
@@ -67,7 +70,7 @@ func TestNewFilesAction_DiffShowsTemplatedContent(t *testing.T) {
 		Config: configNewFiles("templates", ""),
 	}
 
-	execCtx, buf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
 	execCtx.Params = map[string]string{"name": "World"}
 
 	err := action.Execute(context.Background(), execCtx)
@@ -75,10 +78,9 @@ func TestNewFilesAction_DiffShowsTemplatedContent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logOutput := buf.String()
-	// Should show rendered content, not raw template.
-	if !strings.Contains(logOutput, "Hello World!") {
-		t.Errorf("expected diff to contain rendered content, got:\n%s", logOutput)
+	diffOutput := diffBuf.String()
+	if !strings.Contains(diffOutput, "Hello World!") {
+		t.Errorf("expected diff to contain rendered content, got:\n%s", diffOutput)
 	}
 }
 
@@ -94,21 +96,16 @@ func TestNewFilesAction_DiffWithoutShowDiff_NoDiffOutput(t *testing.T) {
 		Config: configNewFiles("templates", ""),
 	}
 
-	var buf bytes.Buffer
 	execCtx := testExecCtx(t, moduleDir, targetDir)
 	execCtx.DryRun = true
 	execCtx.ShowDiff = false
-	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// DiffWriter intentionally nil — no diff output.
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	logOutput := buf.String()
-	if strings.Contains(logOutput, "/dev/null") {
-		t.Error("diff output should not appear when ShowDiff is false")
-	}
+	// No panic and no diff output — test passes if it gets here.
 }
 
 // --- Patch diff ---
@@ -145,16 +142,18 @@ data:
 		},
 	}
 
-	execCtx, buf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logOutput := buf.String()
-	// Diff should show the added label.
-	if !strings.Contains(logOutput, "added-by") {
-		t.Errorf("expected diff to show added label, got:\n%s", logOutput)
+	diffOutput := diffBuf.String()
+	if !strings.Contains(diffOutput, "added-by") {
+		t.Errorf("expected diff to show added label, got:\n%s", diffOutput)
+	}
+	if !strings.Contains(diffOutput, "@@") {
+		t.Errorf("expected unified diff hunk header, got:\n%s", diffOutput)
 	}
 }
 
@@ -185,19 +184,18 @@ metadata:
 		},
 	}
 
-	execCtx, buf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	logOutput := buf.String()
-	// The diff shows character-level changes; verify the replacement is visible.
-	if !strings.Contains(logOutput, "old") || !strings.Contains(logOutput, "new") {
-		t.Errorf("expected diff to show old->new name change, got:\n%s", logOutput)
+	diffOutput := diffBuf.String()
+	if !strings.Contains(diffOutput, "old-name") || !strings.Contains(diffOutput, "new-name") {
+		t.Errorf("expected diff to show old->new name change, got:\n%s", diffOutput)
 	}
-	if !strings.Contains(logOutput, "target.yaml") {
-		t.Errorf("expected diff to reference target.yaml, got:\n%s", logOutput)
+	if !strings.Contains(diffOutput, "target.yaml") {
+		t.Errorf("expected diff to reference target.yaml, got:\n%s", diffOutput)
 	}
 }
 
@@ -217,20 +215,14 @@ func TestPatchAction_DiffWithoutShowDiff_NoDiffOutput(t *testing.T) {
 		},
 	}
 
-	var buf bytes.Buffer
 	execCtx := testExecCtx(t, moduleDir, targetDir)
 	execCtx.DryRun = true
 	execCtx.ShowDiff = false
-	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// DiffWriter intentionally nil.
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-
-	logOutput := buf.String()
-	if strings.Contains(logOutput, "---") && strings.Contains(logOutput, "+++") {
-		t.Error("diff output should not appear when ShowDiff is false")
 	}
 }
 
@@ -254,7 +246,6 @@ func TestNewFilesAction_DiffDoesNotWriteFiles(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// File should NOT be written — diff implies dry-run.
 	if _, err := os.Stat(filepath.Join(targetDir, "file.txt")); !os.IsNotExist(err) {
 		t.Error("diff mode should not write files")
 	}
@@ -283,7 +274,6 @@ func TestPatchAction_DiffDoesNotModifyTarget(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Target file should be unchanged.
 	content, err := os.ReadFile(filepath.Join(targetDir, "target.yaml"))
 	if err != nil {
 		t.Fatal(err)

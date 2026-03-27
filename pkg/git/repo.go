@@ -55,7 +55,7 @@ func Clone(ctx context.Context, url, dir, branch string, logger *slog.Logger) (R
 		return nil, fmt.Errorf("go-git clone failed: %w (git CLI not available for fallback)", libErr)
 	}
 
-	logger.Info("go-git clone failed, falling back to git CLI", "error", libErr)
+	logger.Debug("go-git clone failed, falling back to git CLI", "error", libErr)
 	if err := cliClone(ctx, url, dir, branch); err != nil {
 		return nil, fmt.Errorf("clone failed — go-git: %v, git CLI: %w", libErr, err)
 	}

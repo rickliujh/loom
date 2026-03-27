@@ -3,6 +3,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 )
 
@@ -20,10 +21,13 @@ type ExecutionContext struct {
 	Includes []string
 	// DryRun indicates whether to simulate operations.
 	DryRun bool
-	// LocalOnly runs all operations locally but skips remote push and PR creation.
-	LocalOnly bool
+	// LocalRun runs all operations locally but skips remote push and PR creation.
+	LocalRun bool
 	// ShowDiff displays file diffs during dry-run.
 	ShowDiff bool
+	// DiffWriter is the destination for diff output (bypasses the logger).
+	// When nil, diff output is suppressed.
+	DiffWriter io.Writer
 	// Logger is the structured logger.
 	Logger *slog.Logger
 }

@@ -29,7 +29,7 @@ func (a *PRAction) Execute(ctx context.Context, execCtx *ExecutionContext) error
 		return nil
 	}
 
-	if execCtx.LocalOnly {
+	if execCtx.LocalRun {
 		execCtx.Logger.Info("local: skipping PR creation", "title", title, "provider", a.Config.Provider)
 		return nil
 	}

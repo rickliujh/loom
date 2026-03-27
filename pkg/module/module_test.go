@@ -1,8 +1,10 @@
 package module
 
 import (
+	"bytes"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/rickliujh/loom/pkg/config"
@@ -14,13 +16,14 @@ func testLogger() *slog.Logger {
 
 // --- resolveParams tests ---
 
+// P1: CLI provided value overrides default.
 func TestResolveParams_ProvidedOverridesDefault(t *testing.T) {
 	declared := []config.ParamDef{
 		{Name: "foo", Default: "default-value"},
 	}
 	provided := map[string]string{"foo": "provided-value"}
 
-	result, err := resolveParams(declared, provided, testLogger())
+	result, err := resolveParams(declared, nil, provided, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,12 +32,13 @@ func TestResolveParams_ProvidedOverridesDefault(t *testing.T) {
 	}
 }
 
-func TestResolveParams_DefaultStillWorks(t *testing.T) {
+// P1: Default used when no CLI value provided.
+func TestResolveParams_DefaultUsedWhenNotProvided(t *testing.T) {
 	declared := []config.ParamDef{
 		{Name: "foo", Default: "fallback"},
 	}
 
-	result, err := resolveParams(declared, nil, testLogger())
+	result, err := resolveParams(declared, nil, nil, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,19 +47,56 @@ func TestResolveParams_DefaultStillWorks(t *testing.T) {
 	}
 }
 
-func TestResolveParams_RequiredStillWorks(t *testing.T) {
+// P1: Required param with no value and no default errors.
+func TestResolveParams_RequiredParamErrors(t *testing.T) {
 	declared := []config.ParamDef{
 		{Name: "foo", Required: true},
 	}
 
-	_, err := resolveParams(declared, nil, testLogger())
+	_, err := resolveParams(declared, nil, nil, testLogger())
 	if err == nil {
 		t.Fatal("expected error for missing required param")
+	}
+	if !strings.Contains(err.Error(), `required parameter "foo"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// P3: Undeclared params provided via CLI are rejected.
+func TestResolveParams_UndeclaredParamRejected(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "foo", Default: "x"},
+	}
+	provided := map[string]string{"foo": "x", "bar": "y"}
+
+	_, err := resolveParams(declared, nil, provided, testLogger())
+	if err == nil {
+		t.Fatal("expected error for undeclared param")
+	}
+	if !strings.Contains(err.Error(), `undeclared parameter "bar"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// P3: Params declared in dynamicParams are not rejected.
+func TestResolveParams_DynamicParamNotRejected(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "foo", Default: "x"},
+	}
+	dynamic := []config.DynamicParamDef{
+		{Name: "bar", Command: "echo y"},
+	}
+	provided := map[string]string{"foo": "x", "bar": "override"}
+
+	_, err := resolveParams(declared, dynamic, provided, testLogger())
+	if err != nil {
+		t.Fatalf("dynamic param should not be rejected: %v", err)
 	}
 }
 
 // --- resolveDynamicParams tests ---
 
+// P4: Dynamic param command is evaluated.
 func TestResolveDynamicParams_CommandEvaluated(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "echo hello-dynamic"},
@@ -71,6 +112,7 @@ func TestResolveDynamicParams_CommandEvaluated(t *testing.T) {
 	}
 }
 
+// P4: Trailing newlines are trimmed from command output.
 func TestResolveDynamicParams_CommandTrimsTrailingNewlines(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "printf 'value\\n\\n'"},
@@ -86,23 +128,33 @@ func TestResolveDynamicParams_CommandTrimsTrailingNewlines(t *testing.T) {
 	}
 }
 
-func TestResolveDynamicParams_ProvidedOverridesCommand(t *testing.T) {
+// P6: CLI override skips dynamic command and logs warning.
+func TestResolveDynamicParams_CLIOverrideSkipsCommandWithWarning(t *testing.T) {
 	declared := []config.DynamicParamDef{
-		{Name: "foo", Command: "echo command-value"},
+		{Name: "foo", Command: "echo should-not-run"},
 	}
 	resolved := make(map[string]string)
-	provided := map[string]string{"foo": "provided-value"}
+	provided := map[string]string{"foo": "cli-value"}
 
-	err := resolveDynamicParams(declared, resolved, provided, testLogger())
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	err := resolveDynamicParams(declared, resolved, provided, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved["foo"] != "provided-value" {
-		t.Errorf("expected provided-value, got %q", resolved["foo"])
+	if resolved["foo"] != "cli-value" {
+		t.Errorf("expected cli-value, got %q", resolved["foo"])
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "CLI override skipping dynamic param") {
+		t.Errorf("expected warning about CLI override, got:\n%s", logOutput)
 	}
 }
 
-func TestResolveDynamicParams_CommandFails(t *testing.T) {
+// P4: Dynamic param command failure without default returns error.
+func TestResolveDynamicParams_CommandFailsNoDefault(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1"},
 	}
@@ -114,6 +166,7 @@ func TestResolveDynamicParams_CommandFails(t *testing.T) {
 	}
 }
 
+// P4: Dynamic param command failure with default uses fallback.
 func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1", Default: "fallback"},
@@ -129,6 +182,7 @@ func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// P4: Dynamic param command is templated with already-resolved params.
 func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "greeting", Command: "echo hello-{{ .name }}"},
@@ -144,8 +198,8 @@ func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	}
 }
 
-func TestResolveDynamicParams_EvaluatedAfterParams(t *testing.T) {
-	// Simulate the full flow: resolve params first, then dynamic params reference them.
+// P4: Dynamic params are evaluated after static params are resolved.
+func TestResolveDynamicParams_EvaluatedAfterStaticParams(t *testing.T) {
 	params := []config.ParamDef{
 		{Name: "env", Default: "staging"},
 	}
@@ -153,7 +207,7 @@ func TestResolveDynamicParams_EvaluatedAfterParams(t *testing.T) {
 		{Name: "configPath", Command: "echo /configs/{{ .env }}/app.yaml"},
 	}
 
-	resolved, err := resolveParams(params, nil, testLogger())
+	resolved, err := resolveParams(params, dynamicParams, nil, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,8 +222,8 @@ func TestResolveDynamicParams_EvaluatedAfterParams(t *testing.T) {
 	}
 }
 
+// P5: Later dynamic params can reference earlier ones.
 func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
-	// Dynamic params are evaluated in order; later ones can reference earlier ones.
 	declared := []config.DynamicParamDef{
 		{Name: "first", Command: "echo alpha"},
 		{Name: "second", Command: "echo {{ .first }}-beta"},

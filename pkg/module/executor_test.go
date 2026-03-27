@@ -476,66 +476,10 @@ spec:
 	}
 }
 
-// --- LocalOnly tests ---
+// --- LocalRun tests ---
 
-func TestExecute_LocalOnly_ShellSkippedByDefault(t *testing.T) {
-	dir := t.TempDir()
-	writeLoomYAML(t, dir, `
-apiVersion: loom.rickliujh.github.io/v1beta1
-kind: Loom
-metadata:
-  name: test-local-shell
-spec:
-  operations:
-    - name: create-file
-      shell:
-        command: touch skipped-output.txt
-`)
-
-	mod, err := Load(dir, nil, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "skipped-output.txt")); !os.IsNotExist(err) {
-		t.Error("expected shell command to be skipped in local mode by default")
-	}
-}
-
-func TestExecute_LocalOnly_ShellRunsWhenMarkedLocal(t *testing.T) {
-	dir := t.TempDir()
-	writeLoomYAML(t, dir, `
-apiVersion: loom.rickliujh.github.io/v1beta1
-kind: Loom
-metadata:
-  name: test-local-shell
-spec:
-  operations:
-    - name: create-file
-      shell:
-        command: touch local-output.txt
-        local: true
-`)
-
-	mod, err := Load(dir, nil, testLogger())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := os.Stat(filepath.Join(dir, "local-output.txt")); err != nil {
-		t.Errorf("expected local-output.txt to be created when shell has local: true: %v", err)
-	}
-}
-
-func TestExecute_LocalOnly_ChildModuleInheritsLocalOnly(t *testing.T) {
+// M2+L4: LocalRun propagates to child modules.
+func TestExecute_LocalRun_ChildModuleInheritsLocalRun(t *testing.T) {
 	parentDir := t.TempDir()
 	childDir := filepath.Join(parentDir, "child")
 	if err := os.Mkdir(childDir, 0o755); err != nil {
@@ -573,13 +517,13 @@ spec:
 		t.Fatal(err)
 	}
 
-	// localOnly=true should propagate to child module without error.
-	if err := Execute(context.Background(), mod, targetDir, RunOptions{LocalOnly: true}); err != nil {
-		t.Fatalf("Execute with localOnly should succeed: %v", err)
+	// localRun=true should propagate to child module without error.
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{LocalRun: true}); err != nil {
+		t.Fatalf("Execute with localRun should succeed: %v", err)
 	}
 }
 
-func TestResolveChildTarget_LocalOnly_ClonesIntoNumberedSubdir(t *testing.T) {
+func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 	bare := initBareRepo(t)
 	targetPath := t.TempDir()
 
@@ -593,7 +537,7 @@ func TestResolveChildTarget_LocalOnly_ClonesIntoNumberedSubdir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	opts := &RunOptions{LocalOnly: true, TargetPath: targetPath}
+	opts := &RunOptions{LocalRun: true, TargetPath: targetPath}
 	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", opts)
 	if err != nil {
 		t.Fatal(err)
@@ -633,7 +577,7 @@ func TestResolveChildTarget_LocalOnly_ClonesIntoNumberedSubdir(t *testing.T) {
 	}
 }
 
-func TestExecute_LocalOnly_ChildWithTarget_ClonesIntoTargetPath(t *testing.T) {
+func TestExecute_LocalRun_ChildWithTarget_ClonesIntoTargetPath(t *testing.T) {
 	bare := initBareRepo(t)
 	targetPath := t.TempDir()
 
@@ -655,7 +599,7 @@ spec:
     - name: create-marker
       shell:
         command: touch marker.txt
-        local: true
+        pure: true
 `)
 
 	writeLoomYAML(t, parentDir, `
@@ -675,7 +619,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	opts := RunOptions{LocalOnly: true, TargetPath: targetPath}
+	opts := RunOptions{LocalRun: true, TargetPath: targetPath}
 	if err := Execute(context.Background(), mod, parentDir, opts); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -690,24 +634,24 @@ spec:
 	}
 }
 
-func TestNewExecutionContext_SetsLocalOnly(t *testing.T) {
+func TestNewExecutionContext_SetsLocalRun(t *testing.T) {
 	mod := &Module{
 		Config: &config.LoomFile{Spec: config.Spec{}},
 		Params: map[string]string{"key": "val"},
 		Logger: testLogger(),
 	}
 
-	ctx := mod.NewExecutionContext("/target", RunOptions{LocalOnly: true})
-	if !ctx.LocalOnly {
-		t.Error("expected LocalOnly to be true")
+	ctx := mod.NewExecutionContext("/target", RunOptions{LocalRun: true})
+	if !ctx.LocalRun {
+		t.Error("expected LocalRun to be true")
 	}
 	if ctx.DryRun {
 		t.Error("expected DryRun to be false")
 	}
 
 	ctx2 := mod.NewExecutionContext("/target", RunOptions{DryRun: true})
-	if ctx2.LocalOnly {
-		t.Error("expected LocalOnly to be false")
+	if ctx2.LocalRun {
+		t.Error("expected LocalRun to be false")
 	}
 	if !ctx2.DryRun {
 		t.Error("expected DryRun to be true")

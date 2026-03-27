@@ -27,8 +27,8 @@ func (a *ShellAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		return nil
 	}
 
-	if execCtx.LocalOnly && !a.Config.Local {
-		execCtx.Logger.Info("local: skipping shell command (not marked local)", "command", cmdStr)
+	if execCtx.LocalRun && !a.Config.Pure {
+		execCtx.Logger.Info("local: skipping shell command (not marked pure)", "command", cmdStr)
 		return nil
 	}
 

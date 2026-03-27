@@ -60,14 +60,14 @@ func runModule(cmd *cobra.Command, args []string) error {
 		dryRun = true
 	}
 
-	// In --local mode, require --target-path so the user can inspect results.
-	if localOnly && targetPath == "" {
-		return fmt.Errorf("--local requires --target-path: provide a local directory to write results into")
+	// In --local-run mode, require --target-path so the user can inspect results.
+	if localRun && targetPath == "" {
+		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
 	}
 
 	opts := module.RunOptions{
-		DryRun:     dryRun,
-		LocalOnly:  localOnly,
+		DryRun:    dryRun,
+		LocalRun:  localRun,
 		ShowDiff:   showDiff,
 		TargetPath: targetPath,
 	}
@@ -100,7 +100,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 	return module.Execute(ctx, mod, targetDir, opts)
 }
 
-// cloneTarget clones the module's target repo. In --local mode, it clones into
+// cloneTarget clones the module's target repo. In --local-run mode, it clones into
 // a numbered subdirectory of TargetPath (no cleanup). Otherwise, it clones into
 // a temp directory and returns a cleanup function.
 func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]string, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
@@ -109,7 +109,7 @@ func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]st
 	// Determine clone destination.
 	var cloneDir string
 	var cleanup func()
-	if opts.LocalOnly && opts.TargetPath != "" {
+	if opts.LocalRun && opts.TargetPath != "" {
 		cloneDir = opts.NextLocalDir(mod.Config.Metadata.Name)
 		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 			return "", nil, fmt.Errorf("creating local target dir: %w", err)

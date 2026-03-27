@@ -24,7 +24,7 @@ func (a *CommitPushAction) Execute(ctx context.Context, execCtx *ExecutionContex
 		return nil
 	}
 
-	if execCtx.LocalOnly {
+	if execCtx.LocalRun {
 		execCtx.Logger.Info("local: committing without push", "message", msg, "author", a.Config.Author)
 		return commitOnly(ctx, execCtx, msg, a.Config.Author, a.Config.Email)
 	}

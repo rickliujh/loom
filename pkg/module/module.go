@@ -131,7 +131,7 @@ func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.
 		Excludes:  m.Config.Spec.Excludes,
 		Includes:  m.Config.Spec.Includes,
 		DryRun:    opts.DryRun,
-		LocalOnly: opts.LocalOnly,
+		LocalRun: opts.LocalRun,
 		ShowDiff:  opts.ShowDiff,
 		Logger:    m.Logger,
 	}

@@ -56,14 +56,14 @@ func localExecCtx(t *testing.T, targetDir string) *ExecutionContext {
 		ModuleDir: t.TempDir(),
 		TargetDir: targetDir,
 		Params:    map[string]string{},
-		LocalOnly: true,
+		LocalRun: true,
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
 }
 
 // --- CommitPush ---
 
-func TestCommitPushAction_LocalOnly_CommitsWithoutPush(t *testing.T) {
+func TestCommitPushAction_LocalRun_CommitsWithoutPush(t *testing.T) {
 	repoDir := initLocalRepo(t)
 
 	// Create a new file to commit.
@@ -90,7 +90,7 @@ func TestCommitPushAction_LocalOnly_CommitsWithoutPush(t *testing.T) {
 	}
 }
 
-func TestCommitPushAction_LocalOnly_LogsMessage(t *testing.T) {
+func TestCommitPushAction_LocalRun_LogsMessage(t *testing.T) {
 	repoDir := initLocalRepo(t)
 	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
 
@@ -117,7 +117,7 @@ func TestCommitPushAction_LocalOnly_LogsMessage(t *testing.T) {
 	}
 }
 
-func TestCommitPushAction_LocalOnly_NoPushToRemote(t *testing.T) {
+func TestCommitPushAction_LocalRun_NoPushToRemote(t *testing.T) {
 	// Set up a repo with a remote to verify push is NOT called.
 	bareDir := t.TempDir()
 	if out, err := exec.Command("git", "init", "--bare", bareDir).CombinedOutput(); err != nil {
@@ -168,7 +168,7 @@ func TestCommitPushAction_LocalOnly_NoPushToRemote(t *testing.T) {
 	}
 }
 
-func TestCommitPushAction_LocalOnly_TemplatesMessage(t *testing.T) {
+func TestCommitPushAction_LocalRun_TemplatesMessage(t *testing.T) {
 	repoDir := initLocalRepo(t)
 	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
 
@@ -195,7 +195,7 @@ func TestCommitPushAction_LocalOnly_TemplatesMessage(t *testing.T) {
 
 // --- PR ---
 
-func TestPRAction_LocalOnly_SkipsPRCreation(t *testing.T) {
+func TestPRAction_LocalRun_SkipsPRCreation(t *testing.T) {
 	action := &PRAction{
 		Config: config.PR{
 			Provider: "github",
@@ -219,7 +219,7 @@ func TestPRAction_LocalOnly_SkipsPRCreation(t *testing.T) {
 	}
 }
 
-func TestPRAction_LocalOnly_TemplatesBeforeSkipping(t *testing.T) {
+func TestPRAction_LocalRun_TemplatesBeforeSkipping(t *testing.T) {
 	action := &PRAction{
 		Config: config.PR{
 			Provider: "github",
@@ -246,7 +246,7 @@ func TestPRAction_LocalOnly_TemplatesBeforeSkipping(t *testing.T) {
 
 // --- Shell ---
 
-func TestShellAction_LocalOnly_SkippedByDefault(t *testing.T) {
+func TestShellAction_LocalRun_SkippedByDefault(t *testing.T) {
 	targetDir := t.TempDir()
 
 	action := &ShellAction{
@@ -275,7 +275,7 @@ func TestShellAction_LocalOnly_SkippedByDefault(t *testing.T) {
 	}
 }
 
-func TestShellAction_LocalOnly_RunsWhenMarkedLocal(t *testing.T) {
+func TestShellAction_LocalRun_RunsWhenMarkedLocal(t *testing.T) {
 	targetDir := t.TempDir()
 
 	action := &ShellAction{
@@ -327,7 +327,7 @@ func TestShellAction_LocalFalse_RunsNormally(t *testing.T) {
 
 // --- NewFiles ---
 
-func TestNewFilesAction_LocalOnly_StillWritesFiles(t *testing.T) {
+func TestNewFilesAction_LocalRun_StillWritesFiles(t *testing.T) {
 	moduleDir := t.TempDir()
 	srcDir := filepath.Join(moduleDir, "templates")
 	os.MkdirAll(srcDir, 0o755)
@@ -356,7 +356,7 @@ func TestNewFilesAction_LocalOnly_StillWritesFiles(t *testing.T) {
 	}
 }
 
-// --- DryRun takes precedence over LocalOnly ---
+// --- DryRun takes precedence over LocalRun ---
 
 func TestCommitPushAction_DryRunTakesPrecedenceOverLocal(t *testing.T) {
 	repoDir := initLocalRepo(t)

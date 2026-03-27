@@ -45,7 +45,7 @@ func initGitRepo(t *testing.T, dir string) {
 // since cobra flag parsing mutates them.
 func resetFlags() {
 	dryRun = false
-	localOnly = false
+	localRun = false
 	showDiff = false
 	targetPath = ""
 	params = nil
@@ -70,13 +70,13 @@ spec:
   operations: []
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local"})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run"})
 	err := rootCmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when --local is used without --target-path")
+		t.Fatal("expected error when --local-run is used without --target-path")
 	}
-	if !strings.Contains(err.Error(), "--local requires --target-path") {
-		t.Errorf("expected '--local requires --target-path' error, got: %v", err)
+	if !strings.Contains(err.Error(), "--local-run requires --target-path") {
+		t.Errorf("expected '--local-run requires --target-path' error, got: %v", err)
 	}
 }
 
@@ -95,13 +95,13 @@ spec:
   operations: []
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local"})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run"})
 	err := rootCmd.Execute()
 	if err == nil {
-		t.Fatal("expected error when --local is used without --target-path")
+		t.Fatal("expected error when --local-run is used without --target-path")
 	}
-	if !strings.Contains(err.Error(), "--local requires --target-path") {
-		t.Errorf("expected '--local requires --target-path' error, got: %v", err)
+	if !strings.Contains(err.Error(), "--local-run requires --target-path") {
+		t.Errorf("expected '--local-run requires --target-path' error, got: %v", err)
 	}
 }
 
@@ -130,7 +130,7 @@ spec:
         dest: ""
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local", "--target-path", targetDir})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run", "--target-path", targetDir})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -164,14 +164,14 @@ spec:
         command: touch should-not-exist.txt
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local", "--target-path", targetDir})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run", "--target-path", targetDir})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(targetDir, "should-not-exist.txt")); !os.IsNotExist(err) {
-		t.Error("shell command should be skipped in --local mode by default")
+		t.Error("shell command should be skipped in --local-run mode by default")
 	}
 }
 
@@ -194,14 +194,14 @@ spec:
         local: true
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local", "--target-path", targetDir})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run", "--target-path", targetDir})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, err := os.Stat(filepath.Join(targetDir, "local-output.txt")); err != nil {
-		t.Error("shell command with local: true should run in --local mode")
+		t.Error("shell command with local: true should run in --local-run mode")
 	}
 }
 
@@ -234,7 +234,7 @@ spec:
         email: "bot@test.com"
 `)
 
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local", "--target-path", targetDir})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run", "--target-path", targetDir})
 	err := rootCmd.Execute()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -271,10 +271,10 @@ spec:
 `)
 
 	// PR action with --local should succeed (skip) without needing a real token or remote.
-	rootCmd.SetArgs([]string{"run", moduleDir, "--local", "--target-path", targetDir})
+	rootCmd.SetArgs([]string{"run", moduleDir, "--local-run", "--target-path", targetDir})
 	err := rootCmd.Execute()
 	if err != nil {
-		t.Fatalf("expected PR to be skipped in --local mode, got error: %v", err)
+		t.Fatalf("expected PR to be skipped in --local-run mode, got error: %v", err)
 	}
 }
 
@@ -304,7 +304,7 @@ spec:
 	}
 
 	if _, err := os.Stat(filepath.Join(targetDir, "normal-output.txt")); err != nil {
-		t.Error("shell command should run normally without --local")
+		t.Error("shell command should run normally without --local-run")
 	}
 }
 

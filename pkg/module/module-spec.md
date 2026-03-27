@@ -258,7 +258,7 @@ In normal mode, the clone target is a temp directory (`loom-target-*`). It is cl
 
 #### TG5: Local mode — numbered subdirectory, no cleanup
 
-In `--local` mode, the clone target is `<target-path>/NN-<moduleName>/`. It is **not** cleaned up — the user inspects it after the run. See Local Mode.
+In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It is **not** cleaned up — the user inspects it after the run. See Local Mode.
 
 ---
 
@@ -470,7 +470,7 @@ Same as B7 — patch content is templated before being applied.
 |-------|-------------|
 | `shell.command` | Shell command string. Templatable. Executed via `sh -c`. |
 | `shell.timeout` | Optional. Go duration format (e.g. `"30s"`, `"5m"`). Creates a context deadline. |
-| `shell.local` | Optional. Default `false`. When `true`, this command runs even in `--local` mode. |
+| `shell.local` | Optional. Default `false`. When `true`, this command runs even in `--local-run` mode. |
 
 #### Behaviors
 
@@ -491,18 +491,18 @@ shell:
 
 ##### S3: Local mode — skipped unless marked local
 
-In `--local` mode, shell commands are skipped by default. Only commands with `local: true` execute. This prevents remote-only commands (deploy scripts, API calls) from running during local preview.
+In `--local-run` mode, shell commands are skipped by default. Only commands with `local: true` execute. This prevents remote-only commands (deploy scripts, API calls) from running during local preview.
 
 ```yaml
 operations:
   - name: validate
     shell:
       command: "yamllint ."
-      local: true              # runs in --local mode
+      local: true              # runs in --local-run mode
   - name: deploy
     shell:
       command: "kubectl apply -f ."
-                                # skipped in --local mode
+                                # skipped in --local-run mode
 ```
 
 ##### S4: Dry-run — logged, not executed
@@ -542,7 +542,7 @@ Pushes to the remote. Uses the `LOOM_GIT_TOKEN` environment variable for authent
 
 ##### CP3: Local mode — commit only, no push
 
-In `--local` mode, changes are committed but not pushed. The commit is visible in the local clone for inspection.
+In `--local-run` mode, changes are committed but not pushed. The commit is visible in the local clone for inspection.
 
 ##### CP4: Dry-run — logged, not executed
 
@@ -577,7 +577,7 @@ Reads the current branch and remote URL from the target repo, then creates a PR 
 
 ##### PR2: Local mode — entirely skipped
 
-In `--local` mode, the PR action is skipped entirely. Logged but no API call is made.
+In `--local-run` mode, the PR action is skipped entirely. Logged but no API call is made.
 
 ##### PR3: Dry-run — logged, not executed
 
@@ -591,7 +591,7 @@ In `--local` mode, the PR action is skipped entirely. Logged but no API call is 
 |------|------|---------|-------------|
 | `--verbose`, `-v` | bool | `false` | Enable verbose output (sets log level to debug) |
 | `--dry-run` | bool | `false` | Simulate operations without making changes |
-| `--local` | bool | `false` | Run locally: skip push and PR, clone into `--target-path` |
+| `--local-run` | bool | `false` | Run locally: skip push and PR, clone into `--target-path` |
 | `--diff` | bool | `false` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--log-level` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error` |
 | `--log-format` | string | `"pretty"` | Log format: `pretty`, `text`, `json` |
@@ -606,7 +606,7 @@ In `--local` mode, the PR action is skipped entirely. Logged but no API call is 
 
 ---
 
-## Local Mode (`--local`)
+## Local Mode (`--local-run`)
 
 Local mode lets users preview the results of a loom run without pushing to any remote.
 
@@ -614,17 +614,17 @@ Local mode lets users preview the results of a loom run without pushing to any r
 
 | Input | Description |
 |-------|-------------|
-| `--local` | Enables local mode. |
-| `--target-path` | Required when `--local` is set. Base directory for cloned repos. |
+| `--local-run` | Enables local mode. |
+| `--target-path` | Required when `--local-run` is set. Base directory for cloned repos. |
 
 ### Behaviors
 
 #### L1: Requires `--target-path`
 
-`--local` without `--target-path` fails immediately.
+`--local-run` without `--target-path` fails immediately.
 
 ```
-Error: --local requires --target-path: provide a local directory to write results into
+Error: --local-run requires --target-path: provide a local directory to write results into
 ```
 
 #### L2: Modules with target spec — clone into numbered subdirectory
@@ -827,7 +827,7 @@ loom run my-module -p serviceName=payments
 ### Local mode
 
 ```bash
-loom run my-module -p serviceName=payments --local --target-path ./preview
+loom run my-module -p serviceName=payments --local-run --target-path ./preview
 ```
 
 **What happens:**

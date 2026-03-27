@@ -14,9 +14,9 @@ import (
 // RunOptions holds runtime flags for module execution.
 type RunOptions struct {
 	DryRun    bool
-	LocalOnly bool
+	LocalRun bool
 	ShowDiff  bool
-	// TargetPath is the base directory for --local mode.
+	// TargetPath is the base directory for --local-run mode.
 	// Each module with a target spec clones into a numbered subdirectory.
 	TargetPath string
 	// localSeq tracks the execution order for numbered subdirectories.
@@ -93,7 +93,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 
 // resolveChildTarget resolves the target directory for a child module.
 // If the child module has its own target spec, it clones the target repo.
-// In --local mode, it clones into a numbered subdirectory of TargetPath.
+// In --local-run mode, it clones into a numbered subdirectory of TargetPath.
 // Otherwise, it clones into a temp directory with a cleanup function.
 // If the child has no target spec, it falls back to the parent's targetDir.
 func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[string]string, parentTargetDir string, opts *RunOptions) (string, func(), error) {
@@ -105,8 +105,8 @@ func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[s
 	// Determine clone destination.
 	var cloneDir string
 	var cleanup func()
-	if opts.LocalOnly && opts.TargetPath != "" {
-		// In --local mode, clone into a numbered subdirectory — no cleanup.
+	if opts.LocalRun && opts.TargetPath != "" {
+		// In --local-run mode, clone into a numbered subdirectory — no cleanup.
 		cloneDir = opts.NextLocalDir(childMod.Config.Metadata.Name)
 		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 			return "", nil, fmt.Errorf("creating local target dir: %w", err)

@@ -20,6 +20,10 @@ type ExecutionContext struct {
 	Includes []string
 	// DryRun indicates whether to simulate operations.
 	DryRun bool
+	// LocalOnly runs all operations locally but skips remote push and PR creation.
+	LocalOnly bool
+	// ShowDiff displays file diffs during dry-run.
+	ShowDiff bool
 	// Logger is the structured logger.
 	Logger *slog.Logger
 }

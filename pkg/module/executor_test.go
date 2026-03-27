@@ -64,7 +64,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 	}
 	params := map[string]string{"env": "staging"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,6 +140,128 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 	}
 }
 
+func TestResolveChildTarget_TemplatesURL(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: "{{ .repoPath }}"},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"repoPath": bare}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify the cloned repo exists — proves the URL was templated.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo to contain README.md: %v", err)
+	}
+}
+
+func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
+	bare := initBareRepo(t)
+
+	// Create a branch named "release-prod" on the bare repo via a temp working copy.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bare, work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+		{"git", "-C", work, "checkout", "-b", "release-prod"},
+		{"git", "-C", work, "commit", "--allow-empty", "-m", "branch commit"},
+		{"git", "-C", work, "push", "origin", "release-prod"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:    bare,
+					Branch: "release-{{ .env }}",
+				},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"env": "prod"}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify we cloned the templated branch.
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1])
+	if branch != "release-prod" {
+		t.Errorf("expected branch release-prod, got %q", branch)
+	}
+}
+
+func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
+	bare := initBareRepo(t)
+
+	// Create a branch "main-staging" to clone from.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "clone", bare, work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+		{"git", "-C", work, "checkout", "-b", "main-staging"},
+		{"git", "-C", work, "commit", "--allow-empty", "-m", "staging branch"},
+		{"git", "-C", work, "push", "origin", "main-staging"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:           "{{ .repoPath }}",
+					Branch:        "main-{{ .env }}",
+					FeatureBranch: "feat/{{ .env }}-deploy",
+				},
+			},
+		},
+		Logger: testLogger(),
+	}
+	params := map[string]string{"repoPath": bare, "env": "staging"}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	// Verify the feature branch was created on top of the templated base branch.
+	out, err := exec.Command("git", "-C", dir, "branch", "--show-current").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1])
+	if branch != "feat/staging-deploy" {
+		t.Errorf("expected branch feat/staging-deploy, got %q", branch)
+	}
+}
+
 func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 	bare := initBareRepo(t)
 
@@ -152,7 +274,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent")
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +313,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, dir, false); err != nil {
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,7 +362,7 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -297,7 +419,7 @@ spec:
 
 	// Before the fix, this would fail with:
 	// executing child module "child-with-target": operation "commit" failed: opening repo at .: repository does not exist
-	err = Execute(context.Background(), mod, parentDir, false)
+	err = Execute(context.Background(), mod, parentDir, RunOptions{})
 	if err != nil {
 		t.Fatalf("Execute should succeed with child module's own target resolved: %v", err)
 	}
@@ -349,7 +471,253 @@ spec:
 		t.Fatal(err)
 	}
 
-	if err := Execute(context.Background(), mod, targetDir, false); err != nil {
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
 		t.Fatalf("Execute with templated child params failed: %v", err)
+	}
+}
+
+// --- LocalOnly tests ---
+
+func TestExecute_LocalOnly_ShellSkippedByDefault(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-local-shell
+spec:
+  operations:
+    - name: create-file
+      shell:
+        command: touch skipped-output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "skipped-output.txt")); !os.IsNotExist(err) {
+		t.Error("expected shell command to be skipped in local mode by default")
+	}
+}
+
+func TestExecute_LocalOnly_ShellRunsWhenMarkedLocal(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-local-shell
+spec:
+  operations:
+    - name: create-file
+      shell:
+        command: touch local-output.txt
+        local: true
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, dir, RunOptions{LocalOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "local-output.txt")); err != nil {
+		t.Errorf("expected local-output.txt to be created when shell has local: true: %v", err)
+	}
+}
+
+func TestExecute_LocalOnly_ChildModuleInheritsLocalOnly(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch child-marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// localOnly=true should propagate to child module without error.
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{LocalOnly: true}); err != nil {
+		t.Fatalf("Execute with localOnly should succeed: %v", err)
+	}
+}
+
+func TestResolveChildTarget_LocalOnly_ClonesIntoNumberedSubdir(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "my-child"},
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+
+	opts := &RunOptions{LocalOnly: true, TargetPath: targetPath}
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Error("expected nil cleanup in local mode")
+	}
+
+	// Should be a numbered subdirectory.
+	expected := filepath.Join(targetPath, "00-my-child")
+	if dir != expected {
+		t.Errorf("expected %q, got %q", expected, dir)
+	}
+
+	// Verify the cloned repo exists.
+	if _, err := os.Stat(filepath.Join(dir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo to contain README.md: %v", err)
+	}
+
+	// Second call should increment the counter.
+	childMod2 := &Module{
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "second-child"},
+			Spec: config.Spec{
+				Target: &config.TargetSpec{URL: bare},
+			},
+		},
+		Logger: testLogger(),
+	}
+	dir2, _, err := resolveChildTarget(context.Background(), childMod2, nil, "/parent/target", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected2 := filepath.Join(targetPath, "01-second-child")
+	if dir2 != expected2 {
+		t.Errorf("expected %q, got %q", expected2, dir2)
+	}
+}
+
+func TestExecute_LocalOnly_ChildWithTarget_ClonesIntoTargetPath(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-with-target
+spec:
+  target:
+    url: `+bare+`
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+        local: true
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child-with-target
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := RunOptions{LocalOnly: true, TargetPath: targetPath}
+	if err := Execute(context.Background(), mod, parentDir, opts); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	// Verify the child cloned into a numbered subdir of target path.
+	childCloneDir := filepath.Join(targetPath, "00-child-with-target")
+	if _, err := os.Stat(filepath.Join(childCloneDir, "README.md")); err != nil {
+		t.Errorf("expected cloned repo at %s: %v", childCloneDir, err)
+	}
+	if _, err := os.Stat(filepath.Join(childCloneDir, "marker.txt")); err != nil {
+		t.Errorf("expected marker.txt from shell command: %v", err)
+	}
+}
+
+func TestNewExecutionContext_SetsLocalOnly(t *testing.T) {
+	mod := &Module{
+		Config: &config.LoomFile{Spec: config.Spec{}},
+		Params: map[string]string{"key": "val"},
+		Logger: testLogger(),
+	}
+
+	ctx := mod.NewExecutionContext("/target", RunOptions{LocalOnly: true})
+	if !ctx.LocalOnly {
+		t.Error("expected LocalOnly to be true")
+	}
+	if ctx.DryRun {
+		t.Error("expected DryRun to be false")
+	}
+
+	ctx2 := mod.NewExecutionContext("/target", RunOptions{DryRun: true})
+	if ctx2.LocalOnly {
+		t.Error("expected LocalOnly to be false")
+	}
+	if !ctx2.DryRun {
+		t.Error("expected DryRun to be true")
+	}
+
+	ctx3 := mod.NewExecutionContext("/target", RunOptions{DryRun: true, ShowDiff: true})
+	if !ctx3.ShowDiff {
+		t.Error("expected ShowDiff to be true")
+	}
+	if !ctx3.DryRun {
+		t.Error("expected DryRun to be true")
 	}
 }

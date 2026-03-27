@@ -123,14 +123,16 @@ func evalParamCommand(name, command string, logger *slog.Logger) (string, error)
 }
 
 // NewExecutionContext creates an ExecutionContext for this module.
-func (m *Module) NewExecutionContext(targetDir string, dryRun bool) *action.ExecutionContext {
+func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.ExecutionContext {
 	return &action.ExecutionContext{
 		ModuleDir: m.Dir,
 		TargetDir: targetDir,
 		Params:    m.Params,
 		Excludes:  m.Config.Spec.Excludes,
 		Includes:  m.Config.Spec.Includes,
-		DryRun:    dryRun,
+		DryRun:    opts.DryRun,
+		LocalOnly: opts.LocalOnly,
+		ShowDiff:  opts.ShowDiff,
 		Logger:    m.Logger,
 	}
 }

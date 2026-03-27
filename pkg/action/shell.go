@@ -27,6 +27,11 @@ func (a *ShellAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		return nil
 	}
 
+	if execCtx.LocalOnly && !a.Config.Local {
+		execCtx.Logger.Info("local: skipping shell command (not marked local)", "command", cmdStr)
+		return nil
+	}
+
 	if a.Config.Timeout != "" {
 		dur, err := time.ParseDuration(a.Config.Timeout)
 		if err != nil {

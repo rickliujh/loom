@@ -87,7 +87,9 @@ When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
 4. Walks through operations in order — rendering templates, running shell commands, committing, pushing, opening a PR
 5. Reports what it did
 
-With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen.
+With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. Add `--diff` to also see the rendered file contents and patch diffs in the output.
+
+With `--local`, Loom runs all local operations (rendering templates, writing files, committing) but skips anything that touches a remote — no push, no PR creation. Shell commands are also skipped by default in `--local` mode unless explicitly marked with `local: true` in the operation config. `--local` requires `--target-path` so you have a persistent directory to inspect the results.
 
 ## The `loom.yaml` File
 
@@ -141,6 +143,7 @@ spec:
       shell:
         command: "kubeval --strict argocd/{{ .serviceName }}.yaml"
         timeout: "30s"
+        local: true
 
     - name: commit
       commitPush:
@@ -409,7 +412,27 @@ Runs an arbitrary shell command in the target repository directory.
     timeout: "30s"
 ```
 
+| Field | Description |
+|-------|-------------|
+| `command` | Shell command to execute (`sh -c`), templated |
+| `timeout` | Maximum duration (e.g. `30s`, `5m`). Operation fails if exceeded |
+| `local` | If `true`, this command runs even in `--local` mode. Default: `false` |
+
 The command is rendered as a template, so you can inject parameters. The working directory is the target repository. If the command fails, Loom stops.
+
+In `--local` mode, shell commands are **skipped by default** because they may create remote resources (deploy, notify, etc.). Mark a command with `local: true` to indicate it is safe to run locally — for example, formatting or validation commands that only read or modify local files:
+
+```yaml
+- name: format
+  shell:
+    command: "gofmt -w ."
+    local: true     # safe to run in --local mode
+
+- name: deploy
+  shell:
+    command: "kubectl apply -f manifests/"
+    # not marked local — skipped in --local mode
+```
 
 ### `commitPush` — Commit and Push
 
@@ -424,6 +447,8 @@ Stages all changes, creates a commit, and pushes to the remote.
 ```
 
 Push authentication uses the `LOOM_GIT_TOKEN` environment variable when using the Go library. If the library push fails, Loom falls back to the system `git` binary, which uses your existing credential helpers and SSH configuration.
+
+In `--local` mode, the commit is created locally but the push is skipped.
 
 ### `pr` — Open a Pull Request
 
@@ -448,6 +473,8 @@ Opens a pull request on the target repository.
 | `baseBranch` | Branch to merge into (default: `main`) |
 | `labels` | Labels to apply |
 | `tokenEnv` | Name of the environment variable holding the API token |
+
+In `--local` mode, PR creation is skipped entirely.
 
 Both GitHub and GitLab are fully supported. For GitLab, the same schema applies — Loom creates a merge request instead of a pull request:
 
@@ -663,6 +690,8 @@ loom run [path] [flags]
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Use a local directory as the target (skip git clone) |
 | `--dry-run` | Show what would happen without writing anything |
+| `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
+| `--local` | Run all operations locally but skip remote push and PR creation |
 | `-v, --verbose` | Enable debug logging |
 | `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
 
@@ -675,6 +704,19 @@ loom run ./onboard-service \
   -p serviceName=payments \
   --target-path ~/repos/gitops \
   --dry-run
+
+# Dry run with diffs — see exactly what files would be created and changed
+loom run ./onboard-service \
+  -p serviceName=payments \
+  --target-path ~/repos/gitops \
+  --diff
+
+# Local mode — render, write, and commit, but don't push or open a PR
+# --target-path is required with --local so you can inspect the results
+loom run ./onboard-service \
+  -p serviceName=payments \
+  --target-path ~/repos/gitops \
+  --local
 
 # Parameters from file
 loom run ./onboard-service --params-file params.yaml

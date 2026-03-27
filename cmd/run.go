@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -54,36 +55,40 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Resolve target directory.
-	targetDir := targetPath
-	if targetDir == "" && mod.Config.Spec.Target != nil {
-		// Clone the target repo.
-		tmpDir, err := os.MkdirTemp("", "loom-target-*")
-		if err != nil {
-			return fmt.Errorf("creating temp dir: %w", err)
-		}
-		defer os.RemoveAll(tmpDir)
+	// --diff implies --dry-run.
+	if showDiff {
+		dryRun = true
+	}
 
-		repo, err := git.Clone(cmd.Context(), mod.Config.Spec.Target.URL, tmpDir, mod.Config.Spec.Target.Branch, logger)
+	// In --local mode, require --target-path so the user can inspect results.
+	if localOnly && targetPath == "" {
+		return fmt.Errorf("--local requires --target-path: provide a local directory to write results into")
+	}
+
+	opts := module.RunOptions{
+		DryRun:     dryRun,
+		LocalOnly:  localOnly,
+		ShowDiff:   showDiff,
+		TargetPath: targetPath,
+	}
+
+	// Resolve target directory.
+	var targetDir string
+	if mod.Config.Spec.Target != nil {
+		cloneDir, cleanup, err := cloneTarget(cmd.Context(), mod, paramMap, &opts, logger)
 		if err != nil {
 			return err
 		}
-
-		// Create and checkout a feature branch if configured.
-		if mod.Config.Spec.Target.FeatureBranch != "" {
-			branchName, err := tmpl.RenderString(mod.Config.Spec.Target.FeatureBranch, paramMap)
-			if err != nil {
-				return fmt.Errorf("rendering featureBranch: %w", err)
-			}
-			logger.Info("creating feature branch", "branch", branchName)
-			if err := repo.CreateBranch(branchName); err != nil {
-				return fmt.Errorf("creating feature branch %q: %w", branchName, err)
-			}
+		if cleanup != nil {
+			defer cleanup()
 		}
-
-		targetDir = tmpDir
+		targetDir = cloneDir
 	}
 
+	if targetDir == "" && targetPath != "" {
+		// No target spec but --target-path provided — use it directly.
+		targetDir = targetPath
+	}
 	if targetDir == "" {
 		// No target specified — default to the module directory.
 		// This supports modules that only use local operations (shell, newFiles)
@@ -92,7 +97,73 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	return module.Execute(ctx, mod, targetDir, dryRun)
+	return module.Execute(ctx, mod, targetDir, opts)
+}
+
+// cloneTarget clones the module's target repo. In --local mode, it clones into
+// a numbered subdirectory of TargetPath (no cleanup). Otherwise, it clones into
+// a temp directory and returns a cleanup function.
+func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]string, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
+	target := mod.Config.Spec.Target
+
+	// Determine clone destination.
+	var cloneDir string
+	var cleanup func()
+	if opts.LocalOnly && opts.TargetPath != "" {
+		cloneDir = opts.NextLocalDir(mod.Config.Metadata.Name)
+		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
+			return "", nil, fmt.Errorf("creating local target dir: %w", err)
+		}
+	} else {
+		tmpDir, err := os.MkdirTemp("", "loom-target-*")
+		if err != nil {
+			return "", nil, fmt.Errorf("creating temp dir: %w", err)
+		}
+		cloneDir = tmpDir
+		cleanup = func() { os.RemoveAll(tmpDir) }
+	}
+
+	targetURL, err := tmpl.RenderString(target.URL, paramMap)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, fmt.Errorf("rendering target URL: %w", err)
+	}
+	targetBranch, err := tmpl.RenderString(target.Branch, paramMap)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, fmt.Errorf("rendering target branch: %w", err)
+	}
+
+	repo, err := git.Clone(ctx, targetURL, cloneDir, targetBranch, logger)
+	if err != nil {
+		if cleanup != nil {
+			cleanup()
+		}
+		return "", nil, err
+	}
+
+	if target.FeatureBranch != "" {
+		branchName, err := tmpl.RenderString(target.FeatureBranch, paramMap)
+		if err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, fmt.Errorf("rendering featureBranch: %w", err)
+		}
+		logger.Info("creating feature branch", "branch", branchName)
+		if err := repo.CreateBranch(branchName); err != nil {
+			if cleanup != nil {
+				cleanup()
+			}
+			return "", nil, fmt.Errorf("creating feature branch %q: %w", branchName, err)
+		}
+	}
+
+	return cloneDir, cleanup, nil
 }
 
 // parseParams merges CLI params and params file into a map.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	gogit "github.com/go-git/go-git/v5"
+	gogitcfg "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
@@ -162,8 +163,20 @@ func (r *Repo) Commit(message, author, email string) error {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) Push(ctx context.Context, token string) error {
+	// Resolve branch name up front so we can use an explicit refspec in both
+	// go-git and CLI paths.  This avoids the "src refspec HEAD does not match
+	// any" error that occurs when a feature branch created by one go-git
+	// instance is pushed from another.
+	branch, _ := r.CurrentBranch()
+
 	if r.gg != nil {
 		opts := &gogit.PushOptions{}
+		if branch != "" {
+			ref := plumbing.NewBranchReferenceName(branch)
+			opts.RefSpecs = []gogitcfg.RefSpec{
+				gogitcfg.RefSpec(ref + ":" + ref),
+			}
+		}
 		if token != "" {
 			opts.Auth = &http.BasicAuth{
 				Username: "loom",
@@ -179,7 +192,7 @@ func (r *Repo) Push(ctx context.Context, token string) error {
 		}
 		r.logger.Info("go-git push failed, falling back to git CLI", "error", err)
 	}
-	return cliPush(ctx, r.dir)
+	return cliPush(ctx, r.dir, branch)
 }
 
 // ---------------------------------------------------------------------------

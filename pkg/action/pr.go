@@ -29,6 +29,10 @@ func (a *PRAction) Execute(ctx context.Context, execCtx *ExecutionContext) error
 		return nil
 	}
 
-	// Delegate to git/provider — implemented in Phase 3.
+	if execCtx.LocalOnly {
+		execCtx.Logger.Info("local: skipping PR creation", "title", title, "provider", a.Config.Provider)
+		return nil
+	}
+
 	return openPR(ctx, execCtx, a.Config, title, body)
 }

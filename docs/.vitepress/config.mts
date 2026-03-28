@@ -3,8 +3,9 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Loom',
   description: 'Automate the last mile of your GitOps',
+  base: '/loom/',
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/loom/logo.svg' }],
   ],
 
   themeConfig: {

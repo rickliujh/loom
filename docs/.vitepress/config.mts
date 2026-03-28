@@ -35,6 +35,7 @@ export default defineConfig({
             { text: 'How It Works', link: '/guide/how-it-works' },
             { text: 'Templates', link: '/guide/templates' },
             { text: 'Module Composition', link: '/guide/module-composition' },
+            { text: 'Generate', link: '/guide/generate' },
           ],
         },
         {

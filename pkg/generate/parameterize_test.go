@@ -51,6 +51,36 @@ func TestParameterize(t *testing.T) {
 	}
 }
 
+func TestParameterize_MultipleOccurrences(t *testing.T) {
+	content := "name: payments\nlabel: payments-app\ntag: payments"
+	params := map[string]string{"svc": "payments"}
+	got := Parameterize(content, params)
+	want := "name: {{ .svc }}\nlabel: {{ .svc }}-app\ntag: {{ .svc }}"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestParameterize_NilParams(t *testing.T) {
+	content := "name: payments"
+	got := Parameterize(content, nil)
+	if got != content {
+		t.Errorf("expected unchanged content with nil params, got %q", got)
+	}
+}
+
+func TestParameterize_OverlappingValues(t *testing.T) {
+	// "prod-east" contains "prod" — longer value should be replaced first.
+	content := "region: prod-east, env: prod"
+	params := map[string]string{"region": "prod-east", "env": "prod"}
+	got := Parameterize(content, params)
+	// "prod-east" replaced first, then "prod" replaces remaining occurrence.
+	want := "region: {{ .region }}, env: {{ .env }}"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestParameterizePath(t *testing.T) {
 	tests := []struct {
 		name   string

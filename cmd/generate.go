@@ -6,11 +6,10 @@ import (
 )
 
 var (
-	genParams        []string
-	genOutput        string
-	genName          string
-	genTokenEnv      string
-	genExcludeGitOps bool
+	genParams   []string
+	genOutput   string
+	genName     string
+	genTokenEnv string
 )
 
 var generateCmd = &cobra.Command{
@@ -38,7 +37,6 @@ func init() {
 	generateCmd.Flags().StringVarP(&genOutput, "output", "o", "", "Output directory (default: current directory)")
 	generateCmd.Flags().StringVarP(&genName, "name", "n", "", "Module name (default: derived from PR title)")
 	generateCmd.Flags().StringVar(&genTokenEnv, "token-env", "", "Env var holding the API token (default: GITHUB_TOKEN or GITLAB_TOKEN)")
-	generateCmd.Flags().BoolVar(&genExcludeGitOps, "exclude-git-ops", false, "Skip generating target, commitPush, and pr operations")
 	rootCmd.AddCommand(generateCmd)
 }
 
@@ -51,12 +49,11 @@ func runGenerate(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := generate.Options{
-		Ref:           args[0],
-		Params:        paramMap,
-		OutputDir:     genOutput,
-		ModuleName:    genName,
-		TokenEnv:      genTokenEnv,
-		ExcludeGitOps: genExcludeGitOps,
+		Ref:        args[0],
+		Params:     paramMap,
+		OutputDir:  genOutput,
+		ModuleName: genName,
+		TokenEnv:   genTokenEnv,
 	}
 
 	return generate.Run(cmd.Context(), opts, logger)

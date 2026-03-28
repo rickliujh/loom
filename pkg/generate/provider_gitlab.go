@@ -131,16 +131,21 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 			fc.NewContent = content
 		}
 
-		// Fetch old content for modified files.
-		if fc.Type == ChangeModified {
-			logger.Debug("fetching file content at base ref", "file", fc.Path, "ref", baseRef)
-			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, fc.Path, &gogitlab.GetRawFileOptions{
+		// Fetch old content for modified/renamed files.
+		if fc.Type == ChangeModified || fc.Type == ChangeRenamed {
+			// For renamed files, the old content lives at the previous path.
+			oldPath := fc.Path
+			if fc.Type == ChangeRenamed {
+				oldPath = fc.OldPath
+			}
+			logger.Debug("fetching file content at base ref", "file", oldPath, "ref", baseRef)
+			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, oldPath, &gogitlab.GetRawFileOptions{
 				Ref: gogitlab.Ptr(baseRef),
 			})
 			if err != nil {
-				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
+				logger.Warn("failed to fetch base content", "file", oldPath, "error", err)
 			} else {
-				logger.Debug("fetched base content", "file", fc.Path, "size", len(content))
+				logger.Debug("fetched base content", "file", oldPath, "size", len(content))
 				fc.OldContent = content
 			}
 		}
@@ -267,17 +272,22 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath 
 			fc.NewContent = content
 		}
 
-		if fc.Type == ChangeModified {
+		if fc.Type == ChangeModified || fc.Type == ChangeRenamed {
+			// For renamed files, the old content lives at the previous path.
+			oldPath := fc.Path
+			if fc.Type == ChangeRenamed {
+				oldPath = fc.OldPath
+			}
 			baseEndpoint := fmt.Sprintf("projects/%s/repository/files/%s/raw?ref=%s",
 				projectID,
-				url.PathEscape(fc.Path),
+				url.PathEscape(oldPath),
 				url.QueryEscape(baseRef))
 			logger.Debug("glab api call (base content)", "endpoint", baseEndpoint)
 			content, err := glabCall(ctx, baseEndpoint)
 			if err != nil {
-				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
+				logger.Warn("failed to fetch base content", "file", oldPath, "error", err)
 			} else {
-				logger.Debug("fetched base content (CLI)", "file", fc.Path, "size", len(content))
+				logger.Debug("fetched base content (CLI)", "file", oldPath, "size", len(content))
 				fc.OldContent = content
 			}
 		}

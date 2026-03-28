@@ -23,10 +23,10 @@ type Options struct {
 	OutputDir string
 	// ModuleName overrides the auto-derived module name.
 	ModuleName string
-	// TokenEnv is the env var name for the API token.
+	// TokenEnv is the name of the environment variable that holds the
+	// GitHub personal access token or GitLab private token used to
+	// authenticate API requests when fetching PR/MR data.
 	TokenEnv string
-	// ExcludeGitOps skips generating target, commitPush, and pr operations.
-	ExcludeGitOps bool
 }
 
 // Run generates a loom module from a PR/MR.
@@ -67,7 +67,7 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 		outputDir = "."
 	}
 
-	module := buildModule(prInfo, moduleName, opts.Params, !opts.ExcludeGitOps, logger)
+	module := buildModule(prInfo, moduleName, opts.Params, logger)
 
 	// 5. Emit the module.
 	return emitModule(outputDir, module, logger)
@@ -80,7 +80,7 @@ type generatedModule struct {
 	patchFiles    map[string][]byte // relative path (under __functions/patches/) -> content
 }
 
-func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOps bool, logger *slog.Logger) *generatedModule {
+func buildModule(pr *PRInfo, name string, params map[string]string, logger *slog.Logger) *generatedModule {
 	mod := &generatedModule{
 		loomFile: config.LoomFile{
 			APIVersion: "loom.rickliujh.github.io/v1beta1",
@@ -94,7 +94,7 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 		patchFiles:    make(map[string][]byte),
 	}
 
-	// Group added files by common parent directory for newFiles operations.
+	// Classify file changes.
 	var addedFiles []FileChange
 	var modifiedFiles []FileChange
 	var deletedFiles []FileChange
@@ -110,53 +110,31 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 			deletedFiles = append(deletedFiles, f)
 		case ChangeRenamed:
 			renamedFiles = append(renamedFiles, f)
-			// Also treat renamed files with new content like added files.
-			addedFiles = append(addedFiles, FileChange{
-				Type:       ChangeAdded,
-				Path:       f.Path,
-				NewContent: f.NewContent,
-			})
 		}
 	}
 
-	// Process added files.
-	if len(addedFiles) > 0 {
-		groups := groupByTopDir(addedFiles)
-		opIdx := 0
-		for topDir, files := range groups {
-			for _, f := range files {
-				if f.NewContent == nil {
-					continue
-				}
-				content := string(f.NewContent)
-				destPath := f.Path
-
-				// Parameterize content and path.
-				content = Parameterize(content, params)
-				destPath = ParameterizePath(destPath, params)
-
-				mod.templateFiles[destPath] = []byte(content)
-			}
-
-			opName := fmt.Sprintf("create-files-%d", opIdx)
-			source := topDir
-			dest := topDir
-			if topDir == "." {
-				source = "."
-				dest = ""
-			}
-			mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
-				Name: opName,
-				NewFiles: &config.NewFiles{
-					Source: source,
-					Dest:   dest,
-				},
-			})
-			opIdx++
+	// Process added files — single newFiles operation from root.
+	hasTemplateFiles := false
+	for _, f := range addedFiles {
+		if f.NewContent == nil {
+			continue
 		}
+		hasTemplateFiles = true
+		content := Parameterize(string(f.NewContent), params)
+		destPath := ParameterizePath(f.Path, params)
+		mod.templateFiles[destPath] = []byte(content)
+	}
+	if hasTemplateFiles {
+		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
+			Name: "create-files",
+			NewFiles: &config.NewFiles{
+				Source: ".",
+				Dest:   "",
+			},
+		})
 	}
 
-	// Process modified YAML files as SMP patches.
+	// Process modified files — YAML with SMP only; skip others with warning.
 	for i, f := range modifiedFiles {
 		if f.NewContent == nil {
 			continue
@@ -164,35 +142,38 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 
 		isYAML := strings.HasSuffix(f.Path, ".yaml") || strings.HasSuffix(f.Path, ".yml")
 
-		if isYAML && f.OldContent != nil {
-			smpContent := ComputeSMP(f.OldContent, f.NewContent)
-			if smpContent != nil {
-				// Parameterize the SMP patch.
-				patchStr := Parameterize(string(smpContent), params)
-
-				patchName := sanitizeFilename(f.Path) + ".patch.yaml"
-				mod.patchFiles[patchName] = []byte(patchStr)
-
-				patchTarget := ParameterizePath(f.Path, params)
-
-				mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
-					Name: fmt.Sprintf("patch-%d", i),
-					Patch: &config.Patch{
-						Engine: "smp",
-						Path:   filepath.Join(util.FunctionsDir, "patches", patchName),
-						Target: patchTarget,
-					},
-				})
-				continue
-			}
+		if !isYAML {
+			logger.Warn("modified non-YAML file skipped (manual review needed)", "file", f.Path)
+			continue
 		}
 
-		// Non-YAML modified file or SMP computation failed: treat as full replacement.
-		content := Parameterize(string(f.NewContent), params)
-		destPath := ParameterizePath(f.Path, params)
-		mod.templateFiles[destPath] = []byte(content)
+		if f.OldContent == nil {
+			logger.Warn("modified YAML file skipped (old content unavailable for SMP)", "file", f.Path)
+			continue
+		}
 
-		logger.Info("modified file treated as full replacement (not YAML or SMP failed)", "file", f.Path)
+		smpContent := ComputeSMP(f.OldContent, f.NewContent)
+		if smpContent == nil {
+			logger.Warn("SMP computation failed or no changes detected (manual review needed)", "file", f.Path)
+			continue
+		}
+
+		// Parameterize the SMP patch.
+		patchStr := Parameterize(string(smpContent), params)
+
+		patchName := sanitizeFilename(f.Path) + ".patch.yaml"
+		mod.patchFiles[patchName] = []byte(patchStr)
+
+		patchTarget := ParameterizePath(f.Path, params)
+
+		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
+			Name: fmt.Sprintf("patch-%d", i),
+			Patch: &config.Patch{
+				Engine: "smp",
+				Path:   filepath.Join(util.FunctionsDir, "patches", patchName),
+				Target: patchTarget,
+			},
+		})
 	}
 
 	// Process deleted files.
@@ -206,42 +187,66 @@ func buildModule(pr *PRInfo, name string, params map[string]string, includeGitOp
 		})
 	}
 
-	// Process renamed files (the move part; content was handled above).
+	// Process renamed files — patch first (built-in, more stable), then mv.
 	for i, f := range renamedFiles {
 		oldPath := ParameterizePath(f.OldPath, params)
+		newPath := ParameterizePath(f.Path, params)
+
+		// If content also changed, produce an SMP patch targeting the old path (before mv).
+		if f.NewContent != nil && f.OldContent != nil {
+			isYAML := strings.HasSuffix(f.Path, ".yaml") || strings.HasSuffix(f.Path, ".yml")
+			if !isYAML {
+				logger.Warn("renamed non-YAML file has content changes (manual review needed)", "file", f.Path, "oldPath", f.OldPath)
+			} else {
+				smpContent := ComputeSMP(f.OldContent, f.NewContent)
+				if smpContent != nil {
+					patchStr := Parameterize(string(smpContent), params)
+					patchName := sanitizeFilename(f.OldPath) + ".patch.yaml"
+					mod.patchFiles[patchName] = []byte(patchStr)
+
+					mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
+						Name: fmt.Sprintf("rename-patch-%d", i),
+						Patch: &config.Patch{
+							Engine: "smp",
+							Path:   filepath.Join(util.FunctionsDir, "patches", patchName),
+							Target: oldPath,
+						},
+					})
+				}
+			}
+		}
+
 		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations, config.Operation{
 			Name: fmt.Sprintf("rename-%d", i),
 			Shell: &config.Shell{
-				Command: fmt.Sprintf("mv %q %q", oldPath, ParameterizePath(f.Path, params)),
+				Command: fmt.Sprintf("mv %q %q", oldPath, newPath),
 			},
 		})
 	}
 
-	// Add target and gitops operations (default behavior, since we're generating from a PR/MR).
-	if includeGitOps {
-		mod.loomFile.Spec.Target = &config.TargetSpec{
-			URL:           toSSHURL(pr.RepoURL),
-			Branch:        pr.BaseBranch,
-			FeatureBranch: Parameterize(pr.HeadBranch, params),
-		}
-		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations,
-			config.Operation{
-				Name: "commit",
-				CommitPush: &config.CommitPush{
-					Message: Parameterize(pr.Title, params),
-				},
-			},
-			config.Operation{
-				Name: "open-pr",
-				PR: &config.PR{
-					Provider:   pr.Provider,
-					Title:      Parameterize(pr.Title, params),
-					Body:       Parameterize(pr.Body, params),
-					BaseBranch: pr.BaseBranch,
-				},
-			},
-		)
+	// Add target and gitops operations.
+	mod.loomFile.Spec.Target = &config.TargetSpec{
+		URL:           toSSHURL(pr.RepoURL),
+		Branch:        pr.BaseBranch,
+		FeatureBranch: Parameterize(pr.HeadBranch, params),
 	}
+	mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations,
+		config.Operation{
+			Name: "commit",
+			CommitPush: &config.CommitPush{
+				Message: Parameterize(pr.Title, params),
+			},
+		},
+		config.Operation{
+			Name: "open-pr",
+			PR: &config.PR{
+				Provider:   pr.Provider,
+				Title:      Parameterize(pr.Title, params),
+				Body:       Parameterize(pr.Body, params),
+				BaseBranch: pr.BaseBranch,
+			},
+		},
+	)
 
 	return mod
 }
@@ -336,16 +341,3 @@ func toSSHURL(repoURL string) string {
 	return fmt.Sprintf("git@%s:%s", host, path)
 }
 
-// groupByTopDir groups files by their top-level directory.
-func groupByTopDir(files []FileChange) map[string][]FileChange {
-	groups := make(map[string][]FileChange)
-	for _, f := range files {
-		dir := filepath.Dir(f.Path)
-		topDir := strings.Split(dir, string(filepath.Separator))[0]
-		if topDir == "" || topDir == "." {
-			topDir = "."
-		}
-		groups[topDir] = append(groups[topDir], f)
-	}
-	return groups
-}

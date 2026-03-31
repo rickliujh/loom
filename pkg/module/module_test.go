@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -240,5 +241,37 @@ func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
 	}
 	if resolved["second"] != "alpha-beta" {
 		t.Errorf("expected alpha-beta, got %q", resolved["second"])
+	}
+}
+
+// Load produces Params containing both static and dynamic resolved values.
+func TestLoad_ParamsContainStaticAndDynamic(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(`
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: test-both
+spec:
+  params:
+    - name: env
+      default: "staging"
+  dynamicParams:
+    - name: hash
+      command: "echo abc123"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if mod.Params["env"] != "staging" {
+		t.Errorf("expected static param env=staging, got %q", mod.Params["env"])
+	}
+	if mod.Params["hash"] != "abc123" {
+		t.Errorf("expected dynamic param hash=abc123, got %q", mod.Params["hash"])
 	}
 }

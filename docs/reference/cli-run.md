@@ -13,6 +13,8 @@ loom run [path] [flags]
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Use a local directory as the target (skip git clone) |
+| `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
+| `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--dry-run` | Show what would happen without writing anything |
 | `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--local-run` | Run all operations locally but skip remote push and PR creation |

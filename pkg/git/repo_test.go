@@ -406,6 +406,178 @@ func TestPush_FullLoomFlow_FeatureBranch(t *testing.T) {
 }
 
 // ===========================================================================
+// Empty author/email: verify go-git is skipped and CLI fallback is used.
+// When author or email is empty, go-git would create a commit with an empty
+// author which remote servers (e.g. GitLab) reject. The fix ensures Commit()
+// bypasses go-git and falls through to cliCommit, which omits -c user.name/
+// user.email flags, letting git use the repo-local or global config.
+// ===========================================================================
+
+func TestCommit_EmptyAuthor_UsesGitConfig(t *testing.T) {
+	bare := initBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	repo, err := Clone(ctx, bare, cloneDir, "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set git config in the clone so CLI commit has values to use.
+	for _, args := range [][]string{
+		{"git", "-C", cloneDir, "config", "user.name", "Config User"},
+		{"git", "-C", cloneDir, "config", "user.email", "config@example.com"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit with empty author and email — should use git config fallback.
+	if err := repo.Commit("empty author commit", "", ""); err != nil {
+		t.Fatalf("Commit with empty author/email failed: %v", err)
+	}
+
+	// Verify the commit used git config values, not empty strings.
+	authorName := gitCmd(t, cloneDir, "log", "-1", "--format=%an")
+	authorEmail := gitCmd(t, cloneDir, "log", "-1", "--format=%ae")
+
+	if authorName != "Config User" {
+		t.Errorf("expected author 'Config User', got %q", authorName)
+	}
+	if authorEmail != "config@example.com" {
+		t.Errorf("expected email 'config@example.com', got %q", authorEmail)
+	}
+}
+
+func TestCommit_EmptyAuthorOnly_UsesGitConfig(t *testing.T) {
+	bare := initBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	repo, err := Clone(ctx, bare, cloneDir, "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"git", "-C", cloneDir, "config", "user.name", "Config User"},
+		{"git", "-C", cloneDir, "config", "user.email", "config@example.com"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only author is empty, email is provided — should still fall through to CLI.
+	if err := repo.Commit("partial empty commit", "", "provided@example.com"); err != nil {
+		t.Fatalf("Commit with empty author failed: %v", err)
+	}
+
+	authorName := gitCmd(t, cloneDir, "log", "-1", "--format=%an")
+	if authorName != "Config User" {
+		t.Errorf("expected author from git config 'Config User', got %q", authorName)
+	}
+}
+
+func TestCommit_EmptyEmailOnly_UsesGitConfig(t *testing.T) {
+	bare := initBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	repo, err := Clone(ctx, bare, cloneDir, "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, args := range [][]string{
+		{"git", "-C", cloneDir, "config", "user.name", "Config User"},
+		{"git", "-C", cloneDir, "config", "user.email", "config@example.com"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Only email is empty, author is provided — should still fall through to CLI.
+	if err := repo.Commit("partial empty commit", "Provided Author", ""); err != nil {
+		t.Fatalf("Commit with empty email failed: %v", err)
+	}
+
+	authorEmail := gitCmd(t, cloneDir, "log", "-1", "--format=%ae")
+	if authorEmail != "config@example.com" {
+		t.Errorf("expected email from git config 'config@example.com', got %q", authorEmail)
+	}
+}
+
+func TestCommit_WithAuthorEmail_UsesProvidedValues(t *testing.T) {
+	bare := initBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	repo, err := Clone(ctx, bare, cloneDir, "", logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set different git config to confirm it's NOT used when author/email are provided.
+	for _, args := range [][]string{
+		{"git", "-C", cloneDir, "config", "user.name", "Config User"},
+		{"git", "-C", cloneDir, "config", "user.email", "config@example.com"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(cloneDir, "file.txt"), []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := repo.Commit("explicit author commit", "Explicit User", "explicit@example.com"); err != nil {
+		t.Fatalf("Commit with explicit author/email failed: %v", err)
+	}
+
+	authorName := gitCmd(t, cloneDir, "log", "-1", "--format=%an")
+	authorEmail := gitCmd(t, cloneDir, "log", "-1", "--format=%ae")
+
+	if authorName != "Explicit User" {
+		t.Errorf("expected author 'Explicit User', got %q", authorName)
+	}
+	if authorEmail != "explicit@example.com" {
+		t.Errorf("expected email 'explicit@example.com', got %q", authorEmail)
+	}
+}
+
+// ===========================================================================
 // CLI-only tests (gg=nil): verify the pure git-CLI path works for push.
 // These cover the fallback path that real users hit when go-git can't
 // handle SSH auth, custom credential helpers, etc.

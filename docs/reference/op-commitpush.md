@@ -15,8 +15,18 @@ Stages all changes, creates a commit, and pushes to the remote.
 | Field | Description |
 |-------|-------------|
 | `message` | Commit message, templated |
-| `author` | Git author name |
-| `email` | Git author email |
+| `author` | Git author name (optional) |
+| `email` | Git author email (optional) |
+
+## Author / Email Resolution
+
+Author and email are resolved independently, each following this priority:
+
+1. `commitPush.author` / `commitPush.email` in `loom.yaml` (highest)
+2. `--author` / `--email` CLI flags
+3. System git config — `user.name` / `user.email` (lowest)
+
+This means generated modules that omit `author` and `email` will use CLI flags or your git config automatically.
 
 ## Authentication
 

@@ -529,12 +529,31 @@ If `timeout` is set and the command exceeds the duration, it is killed via conte
 | `commitPush.message` | Commit message. Templatable. |
 | `commitPush.author` | Optional. Git author name. |
 | `commitPush.email` | Optional. Git author email. |
+| `--author` | Optional. CLI flag. Default git author name when `commitPush.author` is not set. |
+| `--email` | Optional. CLI flag. Default git author email when `commitPush.email` is not set. |
 
 #### Behaviors
 
 ##### CP1: Stage and commit
 
 Stages all changes (`git add -A`) and creates a commit with the rendered message, author, and email.
+
+##### CP1a: Author/email resolution priority
+
+Author and email are resolved independently, each following this priority:
+
+1. `commitPush.author` / `commitPush.email` in `loom.yaml` (highest).
+2. `--author` / `--email` CLI flags.
+3. System git config (`user.name` / `user.email`) (lowest).
+
+```yaml
+# loom.yaml has author but no email:
+commitPush:
+  message: "update"
+  author: "yaml-bot"
+# CLI: --email bot@example.com
+# resolved: author = "yaml-bot" (from loom.yaml), email = "bot@example.com" (from CLI)
+```
 
 ##### CP2: Push to remote
 
@@ -603,6 +622,8 @@ In `--local-run` mode, the PR action is skipped entirely. Logged but no API call
 | `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
 | `--params-file` | string | `""` | YAML file with parameters |
 | `--target-path` | string | `""` | Base directory for local mode output |
+| `--author` | string | `""` | Default git author name for `commitPush` operations |
+| `--email` | string | `""` | Default git author email for `commitPush` operations |
 
 ---
 

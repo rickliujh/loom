@@ -150,6 +150,8 @@ func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.
 		LocalRun:   opts.LocalRun,
 		ShowDiff:   opts.ShowDiff,
 		DiffWriter: diffWriter,
+		GitAuthor:  opts.GitAuthor,
+		GitEmail:   opts.GitEmail,
 		Logger:     m.Logger,
 	}
 }

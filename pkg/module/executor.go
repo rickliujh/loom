@@ -22,6 +22,12 @@ type RunOptions struct {
 	// TargetPath is the base directory for --local-run mode.
 	// Each module with a target spec clones into a numbered subdirectory.
 	TargetPath string
+	// GitAuthor is the default git author name for commitPush operations
+	// when not specified in loom.yaml.
+	GitAuthor string
+	// GitEmail is the default git author email for commitPush operations
+	// when not specified in loom.yaml.
+	GitEmail string
 	// localSeq tracks the execution order for numbered subdirectories.
 	localSeq *int
 }

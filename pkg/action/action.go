@@ -28,6 +28,10 @@ type ExecutionContext struct {
 	// DiffWriter is the destination for diff output (bypasses the logger).
 	// When nil, diff output is suppressed.
 	DiffWriter io.Writer
+	// GitAuthor is the default git author name for commitPush when not set in loom.yaml.
+	GitAuthor string
+	// GitEmail is the default git author email for commitPush when not set in loom.yaml.
+	GitEmail string
 	// Logger is the structured logger.
 	Logger *slog.Logger
 }

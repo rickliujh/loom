@@ -2,6 +2,7 @@ package generate
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,11 +24,12 @@ func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 	if err != nil {
 		return nil, err
 	}
-	logger.Debug("parsed GitHub PR reference", "owner", owner, "repo", repo, "number", number)
+	repoURL := githubRepoURL(ref, owner, repo)
+	logger.Debug("parsed GitHub PR reference", "owner", owner, "repo", repo, "number", number, "repoURL", repoURL)
 
 	if token != "" {
 		logger.Debug("attempting GitHub API with token")
-		info, err := p.fetchAPI(ctx, owner, repo, number, token, logger)
+		info, err := p.fetchAPI(ctx, owner, repo, number, repoURL, token, logger)
 		if err == nil {
 			return info, nil
 		}
@@ -38,7 +40,7 @@ func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 
 	if hasBinary("gh", logger) {
 		logger.Debug("falling back to gh CLI")
-		return p.fetchCLI(ctx, owner, repo, number, logger)
+		return p.fetchCLI(ctx, owner, repo, number, repoURL, logger)
 	}
 
 	if token == "" {
@@ -47,7 +49,17 @@ func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 	return nil, fmt.Errorf("GitHub API failed and gh CLI is not available")
 }
 
-func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, number int, token string, logger *slog.Logger) (*PRInfo, error) {
+// githubRepoURL derives the repo clone URL from the original reference.
+// For full URLs, it extracts the host; for short-form, defaults to github.com.
+func githubRepoURL(ref, owner, repo string) string {
+	if pullIdx := strings.Index(ref, "/pull/"); pullIdx >= 0 {
+		return ref[:pullIdx] + ".git"
+	}
+	// Short-form fallback — github: prefix implies github.com.
+	return fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
+}
+
+func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, number int, repoURL, token string, logger *slog.Logger) (*PRInfo, error) {
 	logger.Debug("creating GitHub API client", "owner", owner, "repo", repo)
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
@@ -65,7 +77,7 @@ func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, n
 		Body:       pr.GetBody(),
 		BaseBranch: pr.GetBase().GetRef(),
 		HeadBranch: pr.GetHead().GetRef(),
-		RepoURL:    fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+		RepoURL:    repoURL,
 		Provider:   "github",
 	}
 
@@ -107,12 +119,17 @@ func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, n
 				fc.NewContent = content
 			}
 
-			// Fetch old content for modified files (needed for SMP computation).
-			if fc.Type == ChangeModified {
+			// Fetch old content for modified/renamed files (needed for SMP computation).
+			if fc.Type == ChangeModified || fc.Type == ChangeRenamed {
 				baseSHA := pr.GetBase().GetSHA()
-				oldContent, err := fetchFileAtRef(ctx, client, owner, repo, fc.Path, baseSHA)
+				// For renamed files, the old content lives at the previous path.
+				oldPath := fc.Path
+				if fc.Type == ChangeRenamed {
+					oldPath = fc.OldPath
+				}
+				oldContent, err := fetchFileAtRef(ctx, client, owner, repo, oldPath, baseSHA)
 				if err != nil {
-					logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
+					logger.Warn("failed to fetch base content", "file", oldPath, "error", err)
 				} else {
 					fc.OldContent = oldContent
 				}
@@ -168,7 +185,7 @@ func fetchFileAtRef(ctx context.Context, client *github.Client, owner, repo, pat
 	return []byte(content), nil
 }
 
-func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, number int, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, number int, repoURL string, logger *slog.Logger) (*PRInfo, error) {
 	nwo := owner + "/" + repo
 
 	// Fetch PR metadata including commit SHAs for resilience against branch deletion.
@@ -208,7 +225,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 		Body:       prMeta.Body,
 		BaseBranch: prMeta.BaseRefName,
 		HeadBranch: prMeta.HeadRefName,
-		RepoURL:    fmt.Sprintf("https://github.com/%s/%s.git", owner, repo),
+		RepoURL:    repoURL,
 		Provider:   "github",
 	}
 
@@ -276,10 +293,15 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 			fc.NewContent = content
 		}
 
-		if fc.Type == ChangeModified {
-			content, err := ghCLIFetchContent(ctx, nwo, fc.Path, baseRef)
+		if fc.Type == ChangeModified || fc.Type == ChangeRenamed {
+			// For renamed files, the old content lives at the previous path.
+			oldPath := fc.Path
+			if fc.Type == ChangeRenamed {
+				oldPath = fc.OldPath
+			}
+			content, err := ghCLIFetchContent(ctx, nwo, oldPath, baseRef)
 			if err != nil {
-				logger.Warn("failed to fetch base content", "file", fc.Path, "error", err)
+				logger.Warn("failed to fetch base content", "file", oldPath, "error", err)
 			} else {
 				fc.OldContent = content
 			}
@@ -299,47 +321,28 @@ func ghCLIFetchContent(ctx context.Context, nwo, path, ref string) ([]byte, erro
 		return nil, err
 	}
 
-	// Content is base64 encoded; decode it.
+	// The GitHub API returns file content as base64-encoded. The --jq .content
+	// flag extracts the raw base64 string; we must decode it.
 	content := strings.TrimSpace(string(out))
 	if content == "" {
 		return nil, fmt.Errorf("empty content")
 	}
 
-	import64 := strings.NewReader(content)
-	decoded, err := io.ReadAll(
-		io.NopCloser(import64),
-	)
+	decoded, err := base64.StdEncoding.DecodeString(content)
 	if err != nil {
-		return nil, err
+		// gh with newer --jq may already decode; if base64 decode fails,
+		// assume the content is already plain text.
+		return []byte(content), nil
 	}
 
-	// The API returns base64, but --jq .content already decodes in newer gh versions.
-	// Try to detect if it's still base64.
 	return decoded, nil
 }
 
 // parseGitHubPRRef extracts owner, repo, and PR number from a reference.
-// Supports:
-//   - https://github.com/owner/repo/pull/123
+// Supports any host (github.com, GitHub Enterprise, self-hosted):
+//   - https://<host>/owner/repo/pull/123
 //   - github:owner/repo#123
 func parseGitHubPRRef(ref string) (string, string, int, error) {
-	// Full URL: https://github.com/owner/repo/pull/123
-	if strings.Contains(ref, "github.com/") && strings.Contains(ref, "/pull/") {
-		parts := strings.Split(ref, "github.com/")
-		if len(parts) != 2 {
-			return "", "", 0, fmt.Errorf("cannot parse GitHub PR URL %q", ref)
-		}
-		segments := strings.Split(parts[1], "/")
-		if len(segments) < 4 || segments[2] != "pull" {
-			return "", "", 0, fmt.Errorf("cannot parse GitHub PR URL %q", ref)
-		}
-		num, err := strconv.Atoi(segments[3])
-		if err != nil {
-			return "", "", 0, fmt.Errorf("invalid PR number in %q: %w", ref, err)
-		}
-		return segments[0], segments[1], num, nil
-	}
-
 	// Short-form: github:owner/repo#123
 	if strings.HasPrefix(ref, "github:") {
 		trimmed := strings.TrimPrefix(ref, "github:")
@@ -360,5 +363,29 @@ func parseGitHubPRRef(ref string) (string, string, int, error) {
 		return parts[0], parts[1], num, nil
 	}
 
-	return "", "", 0, fmt.Errorf("cannot parse GitHub PR reference %q", ref)
+	// Full URL: https://<host>/owner/repo/pull/123
+	// Extract owner/repo as the two path segments immediately before /pull/.
+	pullIdx := strings.Index(ref, "/pull/")
+	if pullIdx < 0 {
+		return "", "", 0, fmt.Errorf("cannot parse GitHub PR reference %q", ref)
+	}
+
+	numStr := strings.TrimRight(ref[pullIdx+len("/pull/"):], "/")
+	num, err := strconv.Atoi(numStr)
+	if err != nil {
+		return "", "", 0, fmt.Errorf("invalid PR number in %q: %w", ref, err)
+	}
+
+	// Split the path before /pull/ and take the last two segments as owner/repo.
+	beforePull := ref[:pullIdx]
+	segments := strings.Split(beforePull, "/")
+	if len(segments) < 2 {
+		return "", "", 0, fmt.Errorf("cannot parse GitHub PR URL %q", ref)
+	}
+	owner := segments[len(segments)-2]
+	repo := segments[len(segments)-1]
+	if owner == "" || repo == "" {
+		return "", "", 0, fmt.Errorf("cannot parse GitHub PR URL %q", ref)
+	}
+	return owner, repo, num, nil
 }

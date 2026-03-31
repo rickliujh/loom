@@ -18,16 +18,25 @@ func (a *CommitPushAction) Execute(ctx context.Context, execCtx *ExecutionContex
 		return actionError("commitPush", err)
 	}
 
+	author := a.Config.Author
+	if author == "" {
+		author = execCtx.GitAuthor
+	}
+	email := a.Config.Email
+	if email == "" {
+		email = execCtx.GitEmail
+	}
+
 	execCtx.Logger.Info("commit and push", "message", msg)
 	if execCtx.DryRun {
-		execCtx.Logger.Info("dry-run: would commit and push", "message", msg, "author", a.Config.Author)
+		execCtx.Logger.Info("dry-run: would commit and push", "message", msg, "author", author)
 		return nil
 	}
 
 	if execCtx.LocalRun {
-		execCtx.Logger.Info("local: committing without push", "message", msg, "author", a.Config.Author)
-		return commitOnly(ctx, execCtx, msg, a.Config.Author, a.Config.Email)
+		execCtx.Logger.Info("local: committing without push", "message", msg, "author", author)
+		return commitOnly(ctx, execCtx, msg, author, email)
 	}
 
-	return commitAndPush(ctx, execCtx, msg, a.Config.Author, a.Config.Email)
+	return commitAndPush(ctx, execCtx, msg, author, email)
 }

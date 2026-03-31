@@ -18,6 +18,8 @@ var (
 	params     []string
 	paramsFile string
 	targetPath string
+	gitAuthor  string
+	gitEmail   string
 )
 
 var runCmd = &cobra.Command{
@@ -32,6 +34,8 @@ func init() {
 	runCmd.Flags().StringArrayVarP(&params, "param", "p", nil, "Parameter in key=value format (can be repeated)")
 	runCmd.Flags().StringVar(&paramsFile, "params-file", "", "YAML file with parameters")
 	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Local path to use as target directory (skips git clone)")
+	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
+	runCmd.Flags().StringVar(&gitEmail, "email", "", "Default git author email for commitPush operations")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -66,16 +70,18 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	opts := module.RunOptions{
-		DryRun:    dryRun,
-		LocalRun:  localRun,
+		DryRun:     dryRun,
+		LocalRun:   localRun,
 		ShowDiff:   showDiff,
 		TargetPath: targetPath,
+		GitAuthor:  gitAuthor,
+		GitEmail:   gitEmail,
 	}
 
 	// Resolve target directory.
 	var targetDir string
 	if mod.Config.Spec.Target != nil {
-		cloneDir, cleanup, err := cloneTarget(cmd.Context(), mod, paramMap, &opts, logger)
+		cloneDir, cleanup, err := cloneTarget(cmd.Context(), mod, mod.Params, &opts, logger)
 		if err != nil {
 			return err
 		}
@@ -103,7 +109,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 // cloneTarget clones the module's target repo. In --local-run mode, it clones into
 // a numbered subdirectory of TargetPath (no cleanup). Otherwise, it clones into
 // a temp directory and returns a cleanup function.
-func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]string, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
+func cloneTarget(ctx context.Context, mod *module.Module, params map[string]string, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
 	target := mod.Config.Spec.Target
 
 	// Determine clone destination.
@@ -123,14 +129,14 @@ func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]st
 		cleanup = func() { os.RemoveAll(tmpDir) }
 	}
 
-	targetURL, err := tmpl.RenderString(target.URL, paramMap)
+	targetURL, err := tmpl.RenderString(target.URL, params)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
 		}
 		return "", nil, fmt.Errorf("rendering target URL: %w", err)
 	}
-	targetBranch, err := tmpl.RenderString(target.Branch, paramMap)
+	targetBranch, err := tmpl.RenderString(target.Branch, params)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -147,7 +153,7 @@ func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]st
 	}
 
 	if target.FeatureBranch != "" {
-		branchName, err := tmpl.RenderString(target.FeatureBranch, paramMap)
+		branchName, err := tmpl.RenderString(target.FeatureBranch, params)
 		if err != nil {
 			if cleanup != nil {
 				cleanup()

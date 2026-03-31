@@ -64,7 +64,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,10 +120,10 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
+		Params: map[string]string{"env": "staging"},
 	}
-	params := map[string]string{"env": "staging"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,10 +150,10 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
+		Params: map[string]string{"repoPath": bare},
 	}
-	params := map[string]string{"repoPath": bare}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,10 +193,10 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
+		Params: map[string]string{"env": "prod"},
 	}
-	params := map[string]string{"env": "prod"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,10 +242,10 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
+		Params: map[string]string{"repoPath": bare, "env": "staging"},
 	}
-	params := map[string]string{"repoPath": bare, "env": "staging"}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, params, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +262,44 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 	}
 }
 
+// Target fields must be templated with the module's fully resolved params
+// (static + dynamic), not just the params passed from the parent.
+func TestResolveChildTarget_UsesModuleResolvedParams(t *testing.T) {
+	bare := initBareRepo(t)
+
+	childMod := &Module{
+		Config: &config.LoomFile{
+			Spec: config.Spec{
+				Target: &config.TargetSpec{
+					URL:           bare,
+					FeatureBranch: "feat/{{ .hash }}-{{ .env }}",
+				},
+			},
+		},
+		Logger: testLogger(),
+		// Params simulates the output of Load(): both static and dynamic resolved.
+		Params: map[string]string{
+			"env":  "staging",
+			"hash": "abc123", // would come from a dynamicParam
+		},
+	}
+
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+
+	out, err := exec.Command("git", "-C", dir, "branch", "--show-current").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git branch failed: %v\n%s", err, out)
+	}
+	branch := string(out[:len(out)-1])
+	if branch != "feat/abc123-staging" {
+		t.Errorf("expected branch feat/abc123-staging, got %q", branch)
+	}
+}
+
 func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 	bare := initBareRepo(t)
 
@@ -274,7 +312,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent", &RunOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +576,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 	}
 
 	opts := &RunOptions{LocalRun: true, TargetPath: targetPath}
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, nil, "/parent/target", opts)
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +605,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	dir2, _, err := resolveChildTarget(context.Background(), childMod2, nil, "/parent/target", opts)
+	dir2, _, err := resolveChildTarget(context.Background(), childMod2, "/parent/target", opts)
 	if err != nil {
 		t.Fatal(err)
 	}

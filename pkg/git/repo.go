@@ -136,7 +136,7 @@ func (r *Repo) AddAll() error {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) Commit(message, author, email string) error {
-	if r.gg != nil {
+	if r.gg != nil && author != "" && email != "" {
 		wt, err := r.gg.Worktree()
 		if err == nil {
 			_, cerr := wt.Commit(message, &gogit.CommitOptions{

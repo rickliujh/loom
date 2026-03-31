@@ -22,6 +22,12 @@ type RunOptions struct {
 	// TargetPath is the base directory for --local-run mode.
 	// Each module with a target spec clones into a numbered subdirectory.
 	TargetPath string
+	// GitAuthor is the default git author name for commitPush operations
+	// when not specified in loom.yaml.
+	GitAuthor string
+	// GitEmail is the default git author email for commitPush operations
+	// when not specified in loom.yaml.
+	GitEmail string
 	// localSeq tracks the execution order for numbered subdirectories.
 	localSeq *int
 }
@@ -64,7 +70,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			return fmt.Errorf("loading child module %q: %w", childRef.Name, err)
 		}
 
-		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, childParams, targetDir, &opts)
+		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, targetDir, &opts)
 		if err != nil {
 			return fmt.Errorf("resolving target for child module %q: %w", childRef.Name, err)
 		}
@@ -99,7 +105,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 // In --local-run mode, it clones into a numbered subdirectory of TargetPath.
 // Otherwise, it clones into a temp directory with a cleanup function.
 // If the child has no target spec, it falls back to the parent's targetDir.
-func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[string]string, parentTargetDir string, opts *RunOptions) (string, func(), error) {
+func resolveChildTarget(ctx context.Context, childMod *Module, parentTargetDir string, opts *RunOptions) (string, func(), error) {
 	target := childMod.Config.Spec.Target
 	if target == nil {
 		return parentTargetDir, nil, nil
@@ -123,14 +129,14 @@ func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[s
 		cleanup = func() { os.RemoveAll(tmpDir) }
 	}
 
-	targetURL, err := tmpl.RenderString(target.URL, childParams)
+	targetURL, err := tmpl.RenderString(target.URL, childMod.Params)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
 		}
 		return "", nil, fmt.Errorf("rendering target URL: %w", err)
 	}
-	targetBranch, err := tmpl.RenderString(target.Branch, childParams)
+	targetBranch, err := tmpl.RenderString(target.Branch, childMod.Params)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -147,7 +153,7 @@ func resolveChildTarget(ctx context.Context, childMod *Module, childParams map[s
 	}
 
 	if target.FeatureBranch != "" {
-		branchName, err := tmpl.RenderString(target.FeatureBranch, childParams)
+		branchName, err := tmpl.RenderString(target.FeatureBranch, childMod.Params)
 		if err != nil {
 			if cleanup != nil {
 				cleanup()

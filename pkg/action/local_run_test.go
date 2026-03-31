@@ -166,6 +166,139 @@ func TestCommitPushAction_LocalRun_TemplatesMessage(t *testing.T) {
 	}
 }
 
+// --- CommitPush author/email fallback ---
+
+func TestCommitPushAction_LocalRun_FallsBackToCLIAuthorEmail(t *testing.T) {
+	repoDir := initLocalRepo(t)
+	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
+
+	// Config has no author/email, but ExecutionContext provides CLI defaults.
+	action := &CommitPushAction{
+		Config: config.CommitPush{
+			Message: "cli fallback commit",
+		},
+	}
+
+	execCtx := localExecCtx(t, repoDir)
+	execCtx.GitAuthor = "CLI Author"
+	execCtx.GitEmail = "cli@example.com"
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	authorName := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%an")))
+	authorEmail := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%ae")))
+
+	if authorName != "CLI Author" {
+		t.Errorf("expected author 'CLI Author', got %q", authorName)
+	}
+	if authorEmail != "cli@example.com" {
+		t.Errorf("expected email 'cli@example.com', got %q", authorEmail)
+	}
+}
+
+func TestCommitPushAction_LocalRun_ConfigOverridesCLIAuthorEmail(t *testing.T) {
+	repoDir := initLocalRepo(t)
+	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
+
+	// Config specifies author/email — these should win over CLI defaults.
+	action := &CommitPushAction{
+		Config: config.CommitPush{
+			Message: "config override commit",
+			Author:  "Config Author",
+			Email:   "config@example.com",
+		},
+	}
+
+	execCtx := localExecCtx(t, repoDir)
+	execCtx.GitAuthor = "CLI Author"
+	execCtx.GitEmail = "cli@example.com"
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	authorName := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%an")))
+	authorEmail := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%ae")))
+
+	if authorName != "Config Author" {
+		t.Errorf("expected author 'Config Author', got %q", authorName)
+	}
+	if authorEmail != "config@example.com" {
+		t.Errorf("expected email 'config@example.com', got %q", authorEmail)
+	}
+}
+
+func TestCommitPushAction_LocalRun_PartialFallback(t *testing.T) {
+	repoDir := initLocalRepo(t)
+	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
+
+	// Config has author but no email — email should fall back to CLI.
+	action := &CommitPushAction{
+		Config: config.CommitPush{
+			Message: "partial fallback commit",
+			Author:  "Config Author",
+		},
+	}
+
+	execCtx := localExecCtx(t, repoDir)
+	execCtx.GitAuthor = "CLI Author"
+	execCtx.GitEmail = "cli@example.com"
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	authorName := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%an")))
+	authorEmail := strings.TrimSpace(string(mustGit(t, repoDir, "log", "-1", "--format=%ae")))
+
+	if authorName != "Config Author" {
+		t.Errorf("expected author 'Config Author' from config, got %q", authorName)
+	}
+	if authorEmail != "cli@example.com" {
+		t.Errorf("expected email 'cli@example.com' from CLI fallback, got %q", authorEmail)
+	}
+}
+
+func TestCommitPushAction_DryRun_ShowsCLIFallbackAuthor(t *testing.T) {
+	repoDir := initLocalRepo(t)
+	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
+
+	action := &CommitPushAction{
+		Config: config.CommitPush{
+			Message: "dry run msg",
+		},
+	}
+
+	var buf bytes.Buffer
+	execCtx := localExecCtx(t, repoDir)
+	execCtx.DryRun = true
+	execCtx.GitAuthor = "CLI Author"
+	execCtx.GitEmail = "cli@example.com"
+	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "CLI Author") {
+		t.Errorf("expected dry-run log to show CLI fallback author, got:\n%s", logOutput)
+	}
+}
+
+// mustGit runs a git command and returns the output, failing the test on error.
+func mustGit(t *testing.T, dir string, args ...string) []byte {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	out, err := exec.Command("git", full...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	}
+	return out
+}
+
 // --- PR ---
 
 func TestPRAction_LocalRun_SkipsPRCreation(t *testing.T) {

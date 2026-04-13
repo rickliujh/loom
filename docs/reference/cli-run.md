@@ -22,12 +22,29 @@ loom run [path] [flags]
 | `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
 | `--log-format format` | Set log format: `pretty` (default), `text`, `json` |
 
+## Source Argument
+
+`[path]` accepts:
+
+| Format | Behavior |
+|--------|----------|
+| `./relative` or `/absolute` | Local directory |
+| `https://github.com/org/repo.git` | Git URL — clones to temp dir, `loom.yaml` at repo root |
+| `https://github.com/org/repo.git//subdir` | Git URL with `//` separator — `loom.yaml` at `subdir/` within the clone |
+
 ## Examples
 
-### Full run against a remote repo
+### Full run — local module
 
 ```bash
 loom run ./onboard-service -p serviceName=payments
+```
+
+### Full run — remote module
+
+```bash
+loom run https://github.com/myorg/loom-modules.git//onboard-service \
+  -p serviceName=payments
 ```
 
 ### Dry run against a local checkout

@@ -71,7 +71,21 @@ spec:
 
 ## `spec.params`
 
-Parameters are the inputs to your module. They're injected into every template -- file contents, file paths, shell commands, commit messages, PR titles. Everything is templatable.
+Parameters are the inputs to your module. They're injected into every template — file contents, file paths, shell commands, commit messages, PR titles, and module sources.
+
+**What is templatable:** every string field in `loom.yaml` except `spec.params` definitions (names, defaults, required — these are the source of template values). Boolean fields (e.g. `shell.pure`) are not strings and are not templatable. Specifically:
+
+- `spec.excludes[]`, `spec.includes[]`
+- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
+- `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `newFiles.source`, `newFiles.dest`
+- `patch.engine`, `patch.path`, `patch.target`
+- `shell.command`, `shell.timeout`
+- `commitPush.message`, `commitPush.author`, `commitPush.email`
+- `pr.provider`, `pr.title`, `pr.body`, `pr.baseBranch`, `pr.labels[]`, `pr.tokenEnv`
+- File contents and paths processed by `newFiles`
+- Patch file contents processed by `patch`
 
 | Field | Description |
 |-------|-------------|
@@ -187,9 +201,17 @@ Child modules to execute before this module's operations. See [Module Compositio
 
 | Field | Description |
 |-------|-------------|
-| `name` | Identifier for the child module |
-| `source` | Path to the child module -- local (`./sub-module`) or a Git URL |
+| `name` | Identifier for the child module. Templatable. |
+| `source` | Path to the child module. Accepts local paths, git URLs, or git URLs with `//subdir` separator. Templatable — rendered before source resolution. |
 | `params` | Parameters to pass down, rendered through the parent's context |
+
+Source formats:
+
+| Format | Behavior |
+|--------|----------|
+| `./relative` or `/absolute` | Local path, resolved relative to parent module directory |
+| `https://github.com/org/repo.git` | Git URL — `loom.yaml` expected at repo root |
+| `https://github.com/org/repo.git//path` | Git URL — `loom.yaml` expected at `path/` within the clone |
 
 ## `spec.operations`
 

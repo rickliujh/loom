@@ -1,4 +1,16 @@
 import { defineConfig } from 'vitepress'
+import { readdirSync } from 'fs'
+import { join, basename } from 'path'
+
+const specsDir = join(__dirname, '../../specs')
+const specNavItems = readdirSync(specsDir)
+  .filter(f => f.endsWith('.md'))
+  .sort()
+  .map(f => {
+    const name = basename(f, '.md')
+    const text = name.charAt(0).toUpperCase() + name.slice(1).replace(/-/g, ' ') + ' Spec'
+    return { text, link: `https://github.com/rickliujh/loom/blob/main/specs/${f}` }
+  })
 
 export default defineConfig({
   title: 'Loom',
@@ -12,6 +24,7 @@ export default defineConfig({
     nav: [
       { text: 'Guide', link: '/guide/what-is-loom' },
       { text: 'Reference', link: '/reference/loom-yaml' },
+      { text: 'Specs', items: specNavItems },
       {
         text: 'Links',
         items: [

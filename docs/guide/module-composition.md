@@ -44,8 +44,45 @@ spec:
 
 Sources can be:
 
-- **Local paths** (`./relative/path` or `/absolute/path`) -- resolved relative to the parent module
-- **Git URLs** -- cloned to a temporary directory automatically
+- **Local paths** (`./relative/path` or `/absolute/path`) — resolved relative to the parent module
+- **Git URLs** — cloned to a temporary directory automatically
+- **Git URLs with `//` separator** — `repo.git//subdir` clones the repo and uses `subdir/` as the module root
+
+The `//` convention (borrowed from Terraform) lets a single Git repository host multiple modules in different directories:
+
+```yaml
+modules:
+  - name: networking
+    source: https://github.com/myorg/loom-modules.git//networking
+  - name: monitoring
+    source: https://github.com/myorg/loom-modules.git//monitoring
+```
+
+The `source` field is templatable, so the subdirectory can be dynamic:
+
+```yaml
+modules:
+  - name: env-module
+    source: "https://github.com/myorg/loom-modules.git//{{ .environment }}"
+    params:
+      env: "{{ .environment }}"
+```
+
+### Sibling modules within the same repo
+
+When a git URL contains `//`, the **entire repository** is cloned (not a sparse checkout). Modules within the same repo can reference each other using relative local paths:
+
+```yaml
+# repo layout:
+#   loom-modules/
+#     networking/loom.yaml
+#     monitoring/loom.yaml
+#
+# inside networking/loom.yaml:
+modules:
+  - name: monitoring
+    source: ../monitoring    # resolves to <cloneDir>/monitoring
+```
 
 This means you can publish reusable modules as Git repositories. A platform team maintains the standard modules; product teams compose them.
 

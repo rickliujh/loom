@@ -330,6 +330,47 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 	}
 }
 
+// --- ResolveSource tests ---
+
+func TestResolveSource_LocalPath_NilCleanup(t *testing.T) {
+	dir := t.TempDir()
+
+	resolved, cleanup, err := ResolveSource(".", dir, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Error("expected nil cleanup for local path")
+	}
+	if resolved != dir {
+		t.Errorf("expected %q, got %q", dir, resolved)
+	}
+}
+
+func TestResolveSource_GitURL_ReturnsCleanup(t *testing.T) {
+	bare := initBareRepo(t)
+
+	dir, cleanup, err := ResolveSource("file://"+bare, "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup for git source")
+	}
+
+	// Dir exists before cleanup.
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("cloned dir should exist: %v", err)
+	}
+
+	cleanup()
+
+	// Dir gone after cleanup.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("expected dir removed after cleanup, got: %v", err)
+	}
+}
+
 // --- Execute tests ---
 
 func TestExecute_SimpleShellOperation(t *testing.T) {
@@ -407,6 +448,52 @@ spec:
 	// The child's shell command runs in the targetDir context.
 	// Shell commands use the current process dir, so marker.txt lands in cwd.
 	// The key assertion is that Execute completed without error.
+}
+
+func TestExecute_ChildModuleTemplatedSource(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "myChild")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  params:
+    - name: childDir
+      default: myChild
+  modules:
+    - name: child
+      source: ./{{ .childDir }}
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestExecute_ChildModuleResolvesOwnTarget(t *testing.T) {
@@ -669,6 +756,98 @@ spec:
 	}
 	if _, err := os.Stat(filepath.Join(childCloneDir, "marker.txt")); err != nil {
 		t.Errorf("expected marker.txt from shell command: %v", err)
+	}
+}
+
+// Sibling module relative reference: networking/loom.yaml references ../monitoring
+// when the repo is cloned via //networking subdir separator.
+func TestExecute_SiblingModuleRelativeRef(t *testing.T) {
+	// Build a working repo with two sibling modules.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create monitoring module (the sibling that will be referenced).
+	monDir := filepath.Join(work, "monitoring")
+	os.MkdirAll(monDir, 0o755)
+	writeLoomYAML(t, monDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: monitoring-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch monitoring-executed.txt
+        pure: true
+`)
+
+	// Create networking module that references ../monitoring as child.
+	netDir := filepath.Join(work, "networking")
+	os.MkdirAll(netDir, 0o755)
+	writeLoomYAML(t, netDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: networking-mod
+spec:
+  modules:
+    - name: monitoring
+      source: ../monitoring
+  operations:
+    - name: create-marker
+      shell:
+        command: touch networking-executed.txt
+        pure: true
+`)
+
+	// Commit and create bare repo for cloning.
+	for _, args := range [][]string{
+		{"git", "-C", work, "add", "."},
+		{"git", "-C", work, "commit", "-m", "init with two modules"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone: %v\n%s", err, out)
+	}
+
+	// Resolve source with //networking subdir.
+	moduleDir, cleanup, err := ResolveSource("file://"+bare+"//networking", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// Verify full repo was cloned (monitoring dir exists as sibling).
+	siblingDir := filepath.Join(moduleDir, "..", "monitoring")
+	if _, err := os.Stat(siblingDir); err != nil {
+		t.Fatalf("full repo not cloned — sibling dir missing: %v", err)
+	}
+
+	// Load and execute the networking module.
+	mod, err := Load(moduleDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatalf("Execute with sibling module ref failed: %v", err)
 	}
 }
 

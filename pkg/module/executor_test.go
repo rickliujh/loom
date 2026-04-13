@@ -409,6 +409,52 @@ spec:
 	// The key assertion is that Execute completed without error.
 }
 
+func TestExecute_ChildModuleTemplatedSource(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "myChild")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  params:
+    - name: childDir
+      default: myChild
+  modules:
+    - name: child
+      source: ./{{ .childDir }}
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExecute_ChildModuleResolvesOwnTarget(t *testing.T) {
 	// This is the bug scenario: a child module has its own target spec.
 	// Before the fix, the parent's targetDir was passed through, causing

@@ -41,7 +41,7 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, fmt.Errorf("resolving params for %s: %w", cfg.Metadata.Name, err)
 	}
 
-	if err := resolveDynamicParams(cfg.Spec.DynamicParams, params, providedParams, logger); err != nil {
+	if err := resolveDynamicParams(cfg.Spec.DynamicParams, params, providedParams, dir, logger); err != nil {
 		return nil, fmt.Errorf("resolving dynamic params for %s: %w", cfg.Metadata.Name, err)
 	}
 
@@ -90,7 +90,7 @@ func resolveParams(declared []config.ParamDef, dynamicDeclared []config.DynamicP
 // resolveDynamicParams evaluates dynamic parameters after all regular params
 // are resolved. The command string is templated with the resolved params before
 // execution. Provided params override dynamic evaluation.
-func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string]string, provided map[string]string, logger *slog.Logger) error {
+func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string]string, provided map[string]string, moduleDir string, logger *slog.Logger) error {
 	for _, dp := range declared {
 		// P6: Provided params always take priority; log warning.
 		if val, ok := provided[dp.Name]; ok {
@@ -105,7 +105,7 @@ func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string
 			return fmt.Errorf("templating command for dynamic param %q: %w", dp.Name, err)
 		}
 
-		val, err := evalParamCommand(dp.Name, renderedCmd, logger)
+		val, err := evalParamCommand(dp.Name, renderedCmd, moduleDir, logger)
 		if err != nil {
 			if dp.Default != "" {
 				logger.Warn("dynamic param command failed, using default", "param", dp.Name, "error", err)
@@ -120,9 +120,10 @@ func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string
 }
 
 // evalParamCommand runs a shell command and returns its trimmed stdout as the param value.
-func evalParamCommand(name, command string, logger *slog.Logger) (string, error) {
+func evalParamCommand(name, command, moduleDir string, logger *slog.Logger) (string, error) {
 	logger.Info("evaluating dynamic parameter", "param", name, "command", command)
 	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = moduleDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

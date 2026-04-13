@@ -167,13 +167,19 @@ app/__serviceName__/deploy.yaml
 
 #### T4: What is templatable
 
-Everything in `loom.yaml` **except** `spec.params` definitions:
+Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required — these are the source of template values and cannot reference themselves). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
+
+Exhaustive list of templatable fields:
 
 - `spec.excludes[]`, `spec.includes[]`
+- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.dynamicParams[].command`
-- `spec.modules[].params` values
-- All operation fields: `newFiles.source`, `newFiles.dest`, `patch.path`, `patch.target`, `shell.command`, `shell.timeout`, `commitPush.message`, `pr.title`, `pr.body`, etc.
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `newFiles.source`, `newFiles.dest`
+- `patch.engine`, `patch.path`, `patch.target`
+- `shell.command`, `shell.timeout`
+- `commitPush.message`, `commitPush.author`, `commitPush.email`
+- `pr.provider`, `pr.title`, `pr.body`, `pr.baseBranch`, `pr.labels[]`, `pr.tokenEnv`
 - File contents processed by `newFiles`
 - Patch file contents processed by `patch`
 
@@ -280,14 +286,41 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 |---|---|
 | Starts with `.` | Relative to parent module directory |
 | Starts with `/` | Absolute path |
-| Anything else | Treated as git URL, cloned to temp directory |
+| Git URL without `//` | Cloned to temp directory, `loom.yaml` expected at repo root |
+| Git URL with `//path` | Cloned to temp directory, `loom.yaml` expected at `path` within the clone |
+
+The `source` field is templatable (see T4). Templates are rendered **before** source resolution, so `//` parsing operates on the rendered string.
+
+The `//` separator (Terraform convention) splits a git URL into the repository URL and a subdirectory path within the cloned repo. This allows a single git repository to host multiple loom modules in different directories.
 
 ```yaml
 modules:
   - name: local-child
     source: ./infra               # resolved: <parentDir>/infra
   - name: remote-child
-    source: https://github.com/org/module.git  # cloned to temp dir
+    source: https://github.com/org/module.git  # cloned to temp dir, loom.yaml at root
+  - name: remote-subdir
+    source: https://github.com/org/modules.git//networking  # cloned to temp dir, loom.yaml at networking/
+  - name: templated-source
+    source: "https://github.com/{{ .org }}/modules.git//{{ .modulePath }}"  # templated, then // parsed
+    params:
+      env: "{{ .environment }}"
+```
+
+##### M1a: Subdirectory modules share clone context
+
+When a git URL contains `//`, the entire repository is cloned (not sparse checkout). This means modules within the same repo can reference sibling modules using relative local paths (e.g., `source: "../other-module"`), and those paths resolve correctly because the full repo is on disk.
+
+```yaml
+# repo layout:
+#   modules-repo/
+#     networking/loom.yaml    ← source: https://github.com/org/modules-repo.git//networking
+#     monitoring/loom.yaml
+#
+# inside networking/loom.yaml:
+modules:
+  - name: monitoring
+    source: ../monitoring       # resolves to <cloneDir>/monitoring — works because full repo cloned
 ```
 
 #### M2: Execution order — declaration order, children before parent operations
@@ -736,10 +769,11 @@ The following constraints are enforced when loading a module:
 ## Execution Flow
 
 ```
-loom run <moduleDir> [flags]
+loom run <moduleSource> [flags]
 
  1. Parse CLI flags and parameters.
- 2. Load loom.yaml from moduleDir.
+ 1a. If moduleSource contains "//", split into git URL and subdirectory.
+ 2. Load loom.yaml from moduleDir (or cloneDir/subdir if git source with //).
  3. Validate config structure.
  4. Resolve static params (CLI > params-file > default > required error).
  5. Resolve dynamic params in declaration order
@@ -750,7 +784,7 @@ loom run <moduleDir> [flags]
     c. No target spec, --target-path given  → use target-path directly.
     d. No target spec, no --target-path     → use moduleDir.
  7. For each child module (in declaration order):
-    a. Resolve child source (local path or git clone).
+    a. Resolve child source (local path, git clone, or git clone with // subdir).
     b. Render child params through parent template context.
     c. Load child module (validate, resolve params).
     d. Resolve child target (same logic as step 6).

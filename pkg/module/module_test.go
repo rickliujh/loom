@@ -104,7 +104,7 @@ func TestResolveDynamicParams_CommandEvaluated(t *testing.T) {
 	}
 	resolved := make(map[string]string)
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestResolveDynamicParams_CommandTrimsTrailingNewlines(t *testing.T) {
 	}
 	resolved := make(map[string]string)
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestResolveDynamicParams_CLIOverrideSkipsCommandWithWarning(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	err := resolveDynamicParams(declared, resolved, provided, logger)
+	err := resolveDynamicParams(declared, resolved, provided, ".", logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestResolveDynamicParams_CommandFailsNoDefault(t *testing.T) {
 	}
 	resolved := make(map[string]string)
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err == nil {
 		t.Fatal("expected error for failed command")
 	}
@@ -174,7 +174,7 @@ func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	}
 	resolved := make(map[string]string)
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	}
 	resolved := map[string]string{"name": "world"}
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestResolveDynamicParams_EvaluatedAfterStaticParams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = resolveDynamicParams(dynamicParams, resolved, nil, testLogger())
+	err = resolveDynamicParams(dynamicParams, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
 	}
 	resolved := make(map[string]string)
 
-	err := resolveDynamicParams(declared, resolved, nil, testLogger())
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +241,23 @@ func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
 	}
 	if resolved["second"] != "alpha-beta" {
 		t.Errorf("expected alpha-beta, got %q", resolved["second"])
+	}
+}
+
+// Dynamic param command runs in module directory, not process cwd.
+func TestResolveDynamicParams_CommandRunsInModuleDir(t *testing.T) {
+	dir := t.TempDir()
+	declared := []config.DynamicParamDef{
+		{Name: "cwd", Command: "pwd"},
+	}
+	resolved := make(map[string]string)
+
+	err := resolveDynamicParams(declared, resolved, nil, dir, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved["cwd"] != dir {
+		t.Errorf("expected command to run in %q, got %q", dir, resolved["cwd"])
 	}
 }
 

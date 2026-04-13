@@ -220,5 +220,6 @@ The ordered list of steps. Each operation has a `name` and exactly one action ty
 - [`newFiles`](/reference/op-newfiles) -- render and write templates
 - [`patch`](/reference/op-patch) -- patch existing YAML files
 - [`shell`](/reference/op-shell) -- run a command
+- [`llm`](/reference/op-llm) -- generate or modify a file using LLM inference
 - [`commitPush`](/reference/op-commitpush) -- commit and push
 - [`pr`](/reference/op-pr) -- open a pull request

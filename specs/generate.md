@@ -2,11 +2,11 @@
 
 This document describes the expected behavior of the **`generate`** command, which reverse-engineers a loom module from an existing Pull Request (GitHub) or Merge Request (GitLab). The generated module, when executed with loom, reproduces the changes from the original PR/MR in a parameterized, repeatable form.
 
-The generated module conforms to the module specification defined in [`pkg/module/SPEC_MODULE.yaml`](../module/SPEC_MODULE.yaml).
+The generated module conforms to the module specification defined in [`specs/module.yaml`](module.yaml).
 
 ## Overview
 
-Generate takes a PR/MR reference, fetches the diff and file contents from the provider, classifies each changed file, applies user-supplied parameterization, and emits a complete loom module directory. The module contains a `loom.yaml`, template files for new content, and SMP patch files for modified YAML files.
+Generate takes a PR/MR reference, fetches the diff and file contents from the provider, classifies each changed file, applies user-supplied parameterization, and emits a complete loom module directory. The module contains a `loom.yaml`, template files for new content, and SMP patch files for modified or renamed YAML files with content changes.
 
 ## Inputs
 
@@ -273,7 +273,7 @@ Parameters with empty string values are ignored during replacement.
 
 Parameterization is applied to:
 - Template file content (added files).
-- SMP patch content (modified YAML files).
+- SMP patch content (modified and renamed YAML files with content changes).
 - File paths (template files and patch targets).
 - PR/MR metadata used in gitops operations: feature branch name, commit message, PR title, and PR body.
 
@@ -303,25 +303,25 @@ spec:
 `ComputeSMP` takes old and new YAML content and produces the minimal YAML document that, when applied through the `expandScalarLists` + `merge2` pipeline in `pkg/action/patch.go`, reproduces the new content from the old content.
 
 - **Maps**: recursively compared. Only keys with changed values or new keys are included in the patch.
-- **Scalar lists**: only added items are included. On apply, `expandScalarLists` prepends old values back, so the patch only needs the additions.
+- **Scalar lists**: only added items are included. On apply, `expandScalarLists` prepends old values back, so the patch only needs the additions. Removed scalar list items cannot be represented in SMP — `expandScalarLists` always preserves all existing target items. When removals are detected, `ComputeSMP` reports them as warnings so the caller can inform the user (manual patch needed). If a list has both additions and removals, the additions are still included but the removals are dropped with a warning.
 - **Map-lists** (lists of maps with a common key like `name`): items are matched by an inferred merge key. Only changed or newly added items are included. Unchanged items are omitted. On apply, `merge2` matches by key and deep-merges, preserving unmatched old items.
 - **Other lists/scalars**: if they differ, the entire new value is included.
 - **Deleted keys**: not represented in the SMP output (SMP does not support key deletion; this would require `$patch: delete` directives).
 
-#### SMP2: Nil return on no changes
+#### SMP2: Nil patch on no changes
 
-If old and new content are identical, `ComputeSMP` returns `nil`. The file is not included in the generated module.
+If old and new content are identical, `ComputeSMP` returns a nil `Patch`. The file is not included in the generated module.
 
-#### SMP3: Nil return on parse failure
+#### SMP3: Nil patch on parse failure
 
-If either document cannot be parsed as YAML, `ComputeSMP` returns `nil`. The caller logs a warning and skips the file (manual review needed).
+If either document cannot be parsed as YAML, `ComputeSMP` returns a nil `Patch`. The caller logs a warning and skips the file (manual review needed).
 
 #### SMP4: Patch file naming
 
-The patch file name is derived from the original file path by replacing `/` with `--` and appending `.patch.yaml`:
+The patch file name is derived from the patch target path by replacing `/` with `--` and appending `.patch.yaml`. For modified files this is the file's current path; for renamed files this is the **old path** (since the patch is applied before the `mv`).
 
 ```
-cluster/apps/deployment.yaml → cluster--apps--deployment.yaml.patch.yaml
+cluster/apps/deployment.yaml -> cluster--apps--deployment.yaml.patch.yaml
 ```
 
 #### SMP5: Patch file location

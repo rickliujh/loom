@@ -442,9 +442,9 @@ Patch file contents are templated with params before application.
 
 #### Strategic Merge Patch (`smp`, default)
 
-Deep-merges a partial YAML document into the target using kustomize's `merge2` library. For full behavioral specification including merge semantics, scalar list handling, and end-to-end examples, see [`pkg/action/SPEC_SMP.md`](../pkg/action/SPEC_SMP.md).
+Deep-merges a partial YAML document into the target using kustomize's `merge2` library. For full behavioral specification including merge semantics, scalar list handling, and end-to-end examples, see [`specs/smp.md`](smp.md).
 
-Summary of merge behaviors (B1–B8 in SPEC_SMP.md):
+Summary of merge behaviors (B1–B8 in smp.md):
 - **B1**: Scalar fields set/overwritten.
 - **B2**: Absent fields preserved.
 - **B3**: Nested maps deep-merged recursively.

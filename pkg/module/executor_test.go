@@ -759,6 +759,98 @@ spec:
 	}
 }
 
+// Sibling module relative reference: networking/loom.yaml references ../monitoring
+// when the repo is cloned via //networking subdir separator.
+func TestExecute_SiblingModuleRelativeRef(t *testing.T) {
+	// Build a working repo with two sibling modules.
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	// Create monitoring module (the sibling that will be referenced).
+	monDir := filepath.Join(work, "monitoring")
+	os.MkdirAll(monDir, 0o755)
+	writeLoomYAML(t, monDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: monitoring-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch monitoring-executed.txt
+        pure: true
+`)
+
+	// Create networking module that references ../monitoring as child.
+	netDir := filepath.Join(work, "networking")
+	os.MkdirAll(netDir, 0o755)
+	writeLoomYAML(t, netDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: networking-mod
+spec:
+  modules:
+    - name: monitoring
+      source: ../monitoring
+  operations:
+    - name: create-marker
+      shell:
+        command: touch networking-executed.txt
+        pure: true
+`)
+
+	// Commit and create bare repo for cloning.
+	for _, args := range [][]string{
+		{"git", "-C", work, "add", "."},
+		{"git", "-C", work, "commit", "-m", "init with two modules"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v\n%s", args, err, out)
+		}
+	}
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone: %v\n%s", err, out)
+	}
+
+	// Resolve source with //networking subdir.
+	moduleDir, cleanup, err := ResolveSource("file://"+bare+"//networking", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+
+	// Verify full repo was cloned (monitoring dir exists as sibling).
+	siblingDir := filepath.Join(moduleDir, "..", "monitoring")
+	if _, err := os.Stat(siblingDir); err != nil {
+		t.Fatalf("full repo not cloned — sibling dir missing: %v", err)
+	}
+
+	// Load and execute the networking module.
+	mod, err := Load(moduleDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	targetDir := t.TempDir()
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatalf("Execute with sibling module ref failed: %v", err)
+	}
+}
+
 func TestNewExecutionContext_SetsLocalRun(t *testing.T) {
 	mod := &Module{
 		Config: &config.LoomFile{Spec: config.Spec{}},

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 
-	"github.com/rickliujh/loom/pkg/config"
 	"github.com/rickliujh/loom/pkg/git"
 )
 
@@ -50,8 +49,8 @@ func commitAndPush(ctx context.Context, execCtx *ExecutionContext, message, auth
 }
 
 // openPR opens a pull request using the configured provider.
-func openPR(ctx context.Context, execCtx *ExecutionContext, cfg config.PR, title, body string) error {
-	provider, err := git.NewProvider(cfg.Provider, cfg.TokenEnv, execCtx.Logger)
+func openPR(ctx context.Context, execCtx *ExecutionContext, providerName, tokenEnv, baseBranch string, labels []string, title, body string) error {
+	provider, err := git.NewProvider(providerName, tokenEnv, execCtx.Logger)
 	if err != nil {
 		return actionError("pr", err)
 	}
@@ -71,7 +70,6 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, cfg config.PR, title
 		return actionError("pr", err)
 	}
 
-	baseBranch := cfg.BaseBranch
 	if baseBranch == "" {
 		baseBranch = "main"
 	}
@@ -82,7 +80,7 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, cfg config.PR, title
 		Body:       body,
 		HeadBranch: headBranch,
 		BaseBranch: baseBranch,
-		Labels:     cfg.Labels,
+		Labels:     labels,
 		WorkDir:    execCtx.TargetDir,
 	})
 	if err != nil {

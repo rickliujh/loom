@@ -97,6 +97,29 @@ func TestShellAction_Timeout(t *testing.T) {
 	}
 }
 
+// Shell timeout is templated before parsing.
+func TestShellAction_TemplatedTimeout(t *testing.T) {
+	targetDir := t.TempDir()
+
+	action := &ShellAction{
+		Config: config.Shell{
+			Command: "echo ok",
+			Timeout: "{{ .dur }}",
+		},
+	}
+
+	execCtx := testExecCtx(t, t.TempDir(), targetDir)
+	execCtx.Params = map[string]string{"dur": "not-a-duration"}
+
+	err := action.Execute(context.Background(), execCtx)
+	if err == nil {
+		t.Fatal("expected invalid timeout error")
+	}
+	if !strings.Contains(err.Error(), `invalid timeout "not-a-duration"`) {
+		t.Errorf("expected rendered timeout in error, got: %v", err)
+	}
+}
+
 // S5: Invalid timeout format errors.
 func TestShellAction_InvalidTimeout(t *testing.T) {
 	targetDir := t.TempDir()

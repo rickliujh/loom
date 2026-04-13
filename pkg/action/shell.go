@@ -21,6 +21,11 @@ func (a *ShellAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		return actionError("shell", err)
 	}
 
+	timeout, err := tmpl.RenderString(a.Config.Timeout, execCtx.Params)
+	if err != nil {
+		return actionError("shell", err)
+	}
+
 	execCtx.Logger.Info("running shell command", "command", cmdStr)
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would execute", "command", cmdStr)
@@ -32,10 +37,10 @@ func (a *ShellAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		return nil
 	}
 
-	if a.Config.Timeout != "" {
-		dur, err := time.ParseDuration(a.Config.Timeout)
+	if timeout != "" {
+		dur, err := time.ParseDuration(timeout)
 		if err != nil {
-			return actionError("shell", fmt.Errorf("invalid timeout %q: %w", a.Config.Timeout, err))
+			return actionError("shell", fmt.Errorf("invalid timeout %q: %w", timeout, err))
 		}
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, dur)

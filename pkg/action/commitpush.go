@@ -18,11 +18,17 @@ func (a *CommitPushAction) Execute(ctx context.Context, execCtx *ExecutionContex
 		return actionError("commitPush", err)
 	}
 
-	author := a.Config.Author
+	author, err := tmpl.RenderString(a.Config.Author, execCtx.Params)
+	if err != nil {
+		return actionError("commitPush", err)
+	}
 	if author == "" {
 		author = execCtx.GitAuthor
 	}
-	email := a.Config.Email
+	email, err := tmpl.RenderString(a.Config.Email, execCtx.Params)
+	if err != nil {
+		return actionError("commitPush", err)
+	}
 	if email == "" {
 		email = execCtx.GitEmail
 	}

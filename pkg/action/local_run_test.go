@@ -261,6 +261,31 @@ func TestCommitPushAction_LocalRun_PartialFallback(t *testing.T) {
 	}
 }
 
+func TestCommitPushAction_TemplatesAuthorEmail(t *testing.T) {
+	action := &CommitPushAction{
+		Config: config.CommitPush{
+			Message: "msg",
+			Author:  "{{ .team }} Bot",
+			Email:   "{{ .team }}@example.com",
+		},
+	}
+
+	var buf bytes.Buffer
+	execCtx := localExecCtx(t, t.TempDir())
+	execCtx.DryRun = true
+	execCtx.Params = map[string]string{"team": "infra"}
+	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "infra Bot") {
+		t.Errorf("expected rendered author 'infra Bot' in log, got:\n%s", logOutput)
+	}
+}
+
 func TestCommitPushAction_DryRun_ShowsCLIFallbackAuthor(t *testing.T) {
 	repoDir := initLocalRepo(t)
 	os.WriteFile(filepath.Join(repoDir, "file.txt"), []byte("data"), 0o644)
@@ -487,6 +512,54 @@ func TestCommitPushAction_DryRunTakesPrecedenceOverLocal(t *testing.T) {
 	log := gitLog(t, repoDir)
 	if strings.Contains(log, "should not commit") {
 		t.Error("dry-run should prevent commit even when local is set")
+	}
+}
+
+func TestPRAction_TemplatesProviderAndBaseBranch(t *testing.T) {
+	action := &PRAction{
+		Config: config.PR{
+			Provider:   "{{ .provider }}",
+			Title:      "deploy {{ .env }}",
+			BaseBranch: "release-{{ .version }}",
+			Labels:     []string{"env:{{ .env }}", "team:{{ .team }}"},
+		},
+	}
+
+	var buf bytes.Buffer
+	execCtx := localExecCtx(t, t.TempDir())
+	execCtx.DryRun = true
+	execCtx.Params = map[string]string{"env": "prod", "version": "2.0", "team": "platform", "provider": "github"}
+	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	logOutput := buf.String()
+	if !strings.Contains(logOutput, "deploy prod") {
+		t.Errorf("expected rendered title 'deploy prod' in log, got:\n%s", logOutput)
+	}
+	if !strings.Contains(logOutput, "github") {
+		t.Errorf("expected rendered provider 'github' in log, got:\n%s", logOutput)
+	}
+}
+
+func TestPRAction_TemplatesLabels_ErrorOnBadTemplate(t *testing.T) {
+	action := &PRAction{
+		Config: config.PR{
+			Provider: "github",
+			Title:    "test",
+			Labels:   []string{"ok-label", "{{ .bad }"},
+		},
+	}
+
+	execCtx := localExecCtx(t, t.TempDir())
+	execCtx.DryRun = true
+	execCtx.Params = map[string]string{}
+
+	err := action.Execute(context.Background(), execCtx)
+	if err == nil {
+		t.Fatal("expected template error from malformed label")
 	}
 }
 

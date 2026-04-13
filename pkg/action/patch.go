@@ -26,7 +26,10 @@ type PatchAction struct {
 }
 
 func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) error {
-	engine := a.Config.Engine
+	engine, err := tmpl.RenderString(a.Config.Engine, execCtx.Params)
+	if err != nil {
+		return actionError("patch", err)
+	}
 	if engine == "" {
 		engine = "smp"
 	}

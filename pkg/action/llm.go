@@ -13,9 +13,14 @@ import (
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
+// InferFunc is the signature for LLM inference. Defaults to llm.Infer.
+type InferFunc func(ctx context.Context, opts llm.InferenceOptions) (string, error)
+
 // LLMAction uses LLM inference to generate or modify a file.
 type LLMAction struct {
 	Config config.LLM
+	// Infer overrides the inference function (for testing). Nil uses llm.Infer.
+	Infer InferFunc
 }
 
 func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) error {
@@ -50,7 +55,10 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 
 	var tokenEnv, project, location string
 	if pc := a.Config.ProviderConfig; pc != nil {
-		tokenEnv = pc.TokenEnv
+		tokenEnv, err = render("providerConfig.tokenEnv", pc.TokenEnv)
+		if err != nil {
+			return err
+		}
 		project, err = render("providerConfig.project", pc.Project)
 		if err != nil {
 			return err
@@ -63,7 +71,11 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 
 	targetPath := filepath.Join(execCtx.TargetDir, targetRel)
 
-	mode := a.Config.Mode
+	modeStr, err := render("mode", a.Config.Mode)
+	if err != nil {
+		return err
+	}
+	mode := modeStr
 	if mode == "" {
 		mode = "generate"
 	}
@@ -110,6 +122,13 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		return nil
 	}
 
+	// In generate mode, fail if the target already exists.
+	if mode == "generate" {
+		if _, err := os.Stat(targetPath); err == nil {
+			return actionError("llm", fmt.Errorf("target already exists: %s", targetPath))
+		}
+	}
+
 	// In modify mode, read the existing file and prepend its content to the prompt.
 	if mode == "modify" {
 		existing, err := os.ReadFile(targetPath)
@@ -126,11 +145,15 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		)
 	}
 
+	retryDelayStr, err := render("retryDelay", a.Config.RetryDelay)
+	if err != nil {
+		return err
+	}
 	var retryDelay time.Duration
-	if a.Config.RetryDelay != "" {
-		retryDelay, err = time.ParseDuration(a.Config.RetryDelay)
+	if retryDelayStr != "" {
+		retryDelay, err = time.ParseDuration(retryDelayStr)
 		if err != nil {
-			return actionError("llm", fmt.Errorf("parsing retryDelay %q: %w", a.Config.RetryDelay, err))
+			return actionError("llm", fmt.Errorf("parsing retryDelay %q: %w", retryDelayStr, err))
 		}
 	}
 
@@ -156,7 +179,12 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		Location:     location,
 	}
 
-	result, err := llm.Infer(ctx, opts)
+	inferFn := a.Infer
+	if inferFn == nil {
+		inferFn = llm.Infer
+	}
+
+	result, err := inferFn(ctx, opts)
 	if err != nil {
 		return actionError("llm", err)
 	}

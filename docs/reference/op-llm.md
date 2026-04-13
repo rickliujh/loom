@@ -64,7 +64,7 @@ Reads the existing file at `target`, prepends it to the prompt, then calls the m
 
 The prompt sent to the model is composed as:
 
-```
+````text
 Here is the existing file content:
 
 ```
@@ -72,7 +72,7 @@ Here is the existing file content:
 ```
 
 <your prompt>
-```
+````
 
 ## Retry
 

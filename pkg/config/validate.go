@@ -1,6 +1,10 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 const (
 	ExpectedAPIVersion = "loom.rickliujh.github.io/v1beta1"
@@ -69,6 +73,9 @@ func Validate(lf *LoomFile) error {
 		if op.PR != nil {
 			count++
 		}
+		if op.LLM != nil {
+			count++
+		}
 		if count != 1 {
 			return fmt.Errorf("operation %q must have exactly one action type, got %d", op.Name, count)
 		}
@@ -81,7 +88,49 @@ func Validate(lf *LoomFile) error {
 				return fmt.Errorf("operation %q: unknown patch engine %q (supported: smp, json6902)", op.Name, op.Patch.Engine)
 			}
 		}
+
+		if op.LLM != nil {
+			// Skip enum validation for templated values (contain "{{").
+			if !isTemplated(op.LLM.Provider) {
+				switch op.LLM.Provider {
+				case "openai", "anthropic", "vertex", "gemini", "openrouter", "bedrock":
+					// valid
+				default:
+					return fmt.Errorf("operation %q: unknown llm provider %q (supported: openai, anthropic, vertex, gemini, openrouter, bedrock)", op.Name, op.LLM.Provider)
+				}
+			}
+			if op.LLM.Model == "" {
+				return fmt.Errorf("operation %q: llm model is required", op.Name)
+			}
+			if op.LLM.Prompt == "" {
+				return fmt.Errorf("operation %q: llm prompt is required", op.Name)
+			}
+			if op.LLM.Target == "" {
+				return fmt.Errorf("operation %q: llm target is required", op.Name)
+			}
+			if op.LLM.Mode != "" && op.LLM.Mode != "generate" && op.LLM.Mode != "modify" {
+				return fmt.Errorf("operation %q: unknown llm mode %q (supported: generate, modify)", op.Name, op.LLM.Mode)
+			}
+			if op.LLM.Retries < 0 {
+				return fmt.Errorf("operation %q: llm retries must be >= 0", op.Name)
+			}
+			if op.LLM.RetryDelay != "" {
+				if _, err := time.ParseDuration(op.LLM.RetryDelay); err != nil {
+					return fmt.Errorf("operation %q: invalid llm retryDelay %q: %w", op.Name, op.LLM.RetryDelay, err)
+				}
+			}
+			if !isTemplated(op.LLM.Provider) && op.LLM.Provider == "vertex" {
+				if op.LLM.ProviderConfig == nil || op.LLM.ProviderConfig.Project == "" {
+					return fmt.Errorf("operation %q: llm providerConfig.project is required for vertex provider", op.Name)
+				}
+			}
+		}
 	}
 
 	return nil
+}
+
+// isTemplated returns true if the string contains Go template expressions.
+func isTemplated(s string) bool {
+	return strings.Contains(s, "{{")
 }

@@ -260,3 +260,240 @@ func TestValidate_PatchEngineJSON6902(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestValidate_LLMOperationValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "openai",
+					Model:    "gpt-4o",
+					Prompt:   "Generate a config file",
+					Target:   "output.yaml",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMInvalidProvider(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "cohere",
+					Model:    "model",
+					Prompt:   "prompt",
+					Target:   "out.yaml",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for unsupported provider")
+	}
+	if !strings.Contains(err.Error(), "unknown llm provider") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMMissingModel(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "openai",
+					Prompt:   "prompt",
+					Target:   "out.yaml",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing model")
+	}
+	if !strings.Contains(err.Error(), "llm model is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMInvalidMode(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "anthropic",
+					Model:    "claude-sonnet-4-20250514",
+					Prompt:   "prompt", Target: "out.yaml",
+					Mode: "summarize",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), "unknown llm mode") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMOpenRouterValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "openrouter",
+					Model:    "anthropic/claude-sonnet-4-20250514",
+					Prompt:   "Generate a config file",
+					Target:   "output.yaml",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMBedrockValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "bedrock",
+					Model:    "anthropic.claude-sonnet-4-20250514-v1:0",
+					Prompt:   "Generate a config file",
+					Target:   "output.yaml",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMVertexRequiresProject(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "vertex",
+					Model:    "gemini-2.5-flash",
+					Prompt:   "prompt",
+					Target:   "out.yaml",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing project")
+	}
+	if !strings.Contains(err.Error(), "providerConfig.project is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMRetryValid(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider:   "openai",
+					Model:      "gpt-4o",
+					Prompt:     "prompt",
+					Target:     "out.yaml",
+					Retries:    3,
+					RetryDelay: "5s",
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMRetryInvalidDelay(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider:   "openai",
+					Model:      "gpt-4o",
+					Prompt:     "prompt",
+					Target:     "out.yaml",
+					Retries:    3,
+					RetryDelay: "notaduration",
+				}},
+			},
+		},
+	}
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for invalid retryDelay")
+	}
+	if !strings.Contains(err.Error(), "invalid llm retryDelay") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMVertexWithProviderConfig(t *testing.T) {
+	lf := &LoomFile{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Metadata:   Metadata{Name: "test"},
+		Spec: Spec{
+			Operations: []Operation{
+				{Name: "gen", LLM: &LLM{
+					Provider: "vertex",
+					Model:    "gemini-2.5-flash",
+					Prompt:   "prompt",
+					Target:   "out.yaml",
+					ProviderConfig: &LLMProviderConfig{
+						Project:  "my-project",
+						Location: "us-central1",
+					},
+				}},
+			},
+		},
+	}
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

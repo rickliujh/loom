@@ -330,6 +330,47 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 	}
 }
 
+// --- ResolveSource tests ---
+
+func TestResolveSource_LocalPath_NilCleanup(t *testing.T) {
+	dir := t.TempDir()
+
+	resolved, cleanup, err := ResolveSource(".", dir, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		t.Error("expected nil cleanup for local path")
+	}
+	if resolved != dir {
+		t.Errorf("expected %q, got %q", dir, resolved)
+	}
+}
+
+func TestResolveSource_GitURL_ReturnsCleanup(t *testing.T) {
+	bare := initBareRepo(t)
+
+	dir, cleanup, err := ResolveSource("file://"+bare, "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup == nil {
+		t.Fatal("expected non-nil cleanup for git source")
+	}
+
+	// Dir exists before cleanup.
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("cloned dir should exist: %v", err)
+	}
+
+	cleanup()
+
+	// Dir gone after cleanup.
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("expected dir removed after cleanup, got: %v", err)
+	}
+}
+
 // --- Execute tests ---
 
 func TestExecute_SimpleShellOperation(t *testing.T) {

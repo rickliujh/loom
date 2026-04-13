@@ -12,9 +12,10 @@ import (
 )
 
 // ResolveSource resolves a module source to a local directory.
-// Sources starting with "." or "/" are treated as local paths.
+// Sources starting with "." or "/" are treated as local paths (cleanup is nil).
 // Other sources are treated as git URLs and cloned to a temp directory.
-func ResolveSource(source, parentDir string, logger *slog.Logger) (string, error) {
+// Callers must call cleanup (if non-nil) when the directory is no longer needed.
+func ResolveSource(source, parentDir string, logger *slog.Logger) (dir string, cleanup func(), err error) {
 	if strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") {
 		path := source
 		if strings.HasPrefix(source, ".") {
@@ -22,16 +23,20 @@ func ResolveSource(source, parentDir string, logger *slog.Logger) (string, error
 		}
 		info, err := os.Stat(path)
 		if err != nil {
-			return "", fmt.Errorf("module source %q: %w", source, err)
+			return "", nil, fmt.Errorf("module source %q: %w", source, err)
 		}
 		if !info.IsDir() {
-			return "", fmt.Errorf("module source %q is not a directory", source)
+			return "", nil, fmt.Errorf("module source %q is not a directory", source)
 		}
-		return path, nil
+		return path, nil, nil
 	}
 
 	// Git URL — clone to temp directory.
-	return cloneToTemp(source, logger)
+	cloneDir, err := cloneToTemp(source, logger)
+	if err != nil {
+		return "", nil, err
+	}
+	return cloneDir, func() { os.RemoveAll(cloneDir) }, nil
 }
 
 // cloneToTemp clones a git URL to a temporary directory.

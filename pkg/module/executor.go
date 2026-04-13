@@ -55,9 +55,12 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			return fmt.Errorf("rendering source for child %q: %w", childRef.Name, err)
 		}
 
-		childDir, err := ResolveSource(renderedSource, mod.Dir, mod.Logger)
+		childDir, sourceCleanup, err := ResolveSource(renderedSource, mod.Dir, mod.Logger)
 		if err != nil {
 			return fmt.Errorf("resolving child module %q: %w", childRef.Name, err)
+		}
+		if sourceCleanup != nil {
+			defer sourceCleanup()
 		}
 
 		// Render child params through parent's template context.

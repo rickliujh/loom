@@ -101,33 +101,6 @@ modules:
 
 Each child module resolves its own `spec.params` independently -- only the values passed in `params` are available. There is no implicit inheritance of parent parameters.
 
-## Bulk Runs with Jsonnet
+## Bulk Runs
 
-Repeating the same child module with different params is how you run one module in bulk — but writing N nearly-identical YAML entries by hand gets old. Write the wrapper as [`loom.jsonnet`](/reference/loom-yaml#loom-jsonnet) instead and generate the entries:
-
-```jsonnet
-// bulk-onboard/loom.jsonnet
-local services = [
-  { name: 'payments', namespace: 'fintech' },
-  { name: 'billing', namespace: 'fintech' },
-  { name: 'auth', namespace: 'platform' },
-];
-
-{
-  apiVersion: 'loom.rickliujh.github.io/v1beta1',
-  kind: 'Loom',
-  metadata: { name: 'bulk-onboard' },
-  spec: {
-    modules: [
-      {
-        name: 'onboard-' + svc.name,
-        source: '../onboard-service',
-        params: { serviceName: svc.name, namespace: svc.namespace },
-      }
-      for svc in services
-    ],
-  },
-}
-```
-
-One `loom run ./bulk-onboard` executes every entry in order. If the child module carries its own `spec.target`, each entry produces its own branch and pull request. To ship the whole batch as a **single** PR, put `target`, `commitPush`, and `pr` on the wrapper and leave the child target-less — target-less children write into the parent's target directory.
+Repeating the same child module with different params is how you run one module in bulk — and with [`loom.jsonnet`](/reference/loom-yaml#loom-jsonnet) the entries can be generated from a list instead of written by hand. See [Bulk Runs](/guide/bulk-runs) for the full patterns, including how to ship a batch as one PR or one PR per item.

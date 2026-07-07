@@ -49,6 +49,7 @@ export default defineConfig({
             { text: 'How It Works', link: '/guide/how-it-works' },
             { text: 'Templates', link: '/guide/templates' },
             { text: 'Module Composition', link: '/guide/module-composition' },
+            { text: 'Bulk Runs', link: '/guide/bulk-runs' },
             { text: 'LLM-Powered Operations', link: '/guide/llm' },
             { text: 'Generate', link: '/guide/generate' },
           ],

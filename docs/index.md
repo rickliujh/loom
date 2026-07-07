@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Declarative Workflows
-    details: Describe what should happen in a loom.yaml. Loom handles cloning, rendering, committing, pushing, and opening PRs.
+    details: Describe what should happen in a loom.yaml — or generate it programmatically with loom.jsonnet. Loom handles cloning, rendering, committing, pushing, and opening PRs.
   - title: Template Everything
     details: File contents, file paths, shell commands, commit messages, PR titles — every string is a Go template.
   - title: Composable Modules

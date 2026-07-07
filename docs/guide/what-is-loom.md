@@ -4,7 +4,7 @@ Loom automates the last mile of your GitOps.
 
 You've adopted GitOps. Your applications deploy through Git. But every time you onboard a new service, add a new environment, or wire up a new team, you find yourself doing the same thing: copying YAML files, editing five fields, opening a PR, and moving on. It's not hard work. It's just tedious, error-prone, and never worth building a whole internal tool for.
 
-Loom sits in that gap. You describe the repetitive part once as a **module** — a folder of templates and a `loom.yaml` file that declares what to do with them — and then you run it whenever you need it. Loom renders your templates, writes them into a target Git repository, commits, pushes, and opens a pull request. One command, done.
+Loom sits in that gap. You describe the repetitive part once as a **module** — a folder of templates and a `loom.yaml` file (or a programmatic [`loom.jsonnet`](/reference/loom-yaml#loom-jsonnet)) that declares what to do with them — and then you run it whenever you need it. Loom renders your templates, writes them into a target Git repository, commits, pushes, and opens a pull request. One command, done.
 
 ```bash
 loom run ./onboard-service -p serviceName=payments -p namespace=fintech

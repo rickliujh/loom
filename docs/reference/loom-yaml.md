@@ -253,7 +253,7 @@ local services = ['payments', 'billing', 'auth'];
 
 A few rules:
 
-- **Evaluation happens before parameter resolution.** Jsonnet produces the config; params are resolved from it afterward. Jsonnet cannot see CLI params — runtime values still flow through Go templating (`{{ .param }}`) in the evaluated strings.
+- **Evaluation happens before parameter resolution.** Jsonnet produces the config; params are resolved from it afterward. Jsonnet cannot see CLI params — runtime values still flow through Go template placeholders in the evaluated strings.
 - **Imports work.** `import` and `importstr` resolve relative to the module directory, so shared logic can live in `.libsonnet` files next to `loom.jsonnet`. Remember to add them to `spec.excludes` if the module also uses `newFiles`.
 - **Same validation.** The evaluated object passes through the same validation as a `loom.yaml`.
 - `loom.jsonnet` is always excluded from template walking, same as `loom.yaml`.

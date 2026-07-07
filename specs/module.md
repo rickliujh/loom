@@ -556,7 +556,7 @@ Same as B7 — patch content is templated before being applied.
 |-------|-------------|
 | `shell.command` | Shell command string. Templatable. Executed via `sh -c`. |
 | `shell.timeout` | Optional. Go duration format (e.g. `"30s"`, `"5m"`). Creates a context deadline. |
-| `shell.local` | Optional. Default `false`. When `true`, this command runs even in `--local-run` mode. |
+| `shell.pure` | Optional. Default `false`. When `true`, this command runs even in `--local-run` mode. |
 
 #### Behaviors
 

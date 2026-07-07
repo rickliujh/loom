@@ -76,6 +76,12 @@ loom run ./bulk-onboard
 
 **Best for**: batches with more than a handful of items, or where the list changes regularly. Adding an item is a one-line diff. Shared logic can live in `.libsonnet` files next to the config.
 
+You don't have to write the wrapper by hand — [`loom bulk`](/reference/cli-bulk) scaffolds it from the module's declared parameters:
+
+```bash
+loom bulk ../onboard-service -o ./bulk-onboard --items items.yaml --name-param serviceName
+```
+
 **Trade-off**: the config is evaluated before parameter resolution, so Jsonnet cannot see CLI params — the item list lives in the file (or an imported one), not on the command line.
 
 ## 3. Shell Loop

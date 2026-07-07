@@ -50,6 +50,7 @@ export default defineConfig({
             { text: 'Templates', link: '/guide/templates' },
             { text: 'Module Composition', link: '/guide/module-composition' },
             { text: 'Bulk Runs', link: '/guide/bulk-runs' },
+            { text: 'Using Loom with AI Agents', link: '/guide/ai-agents' },
             { text: 'LLM-Powered Operations', link: '/guide/llm' },
             { text: 'Generate', link: '/guide/generate' },
           ],

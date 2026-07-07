@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/go-git/go-git/v5 v5.17.0
 	github.com/google/go-github/v60 v60.0.0
+	github.com/google/go-jsonnet v0.22.0
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/spf13/cobra v1.10.2
 	github.com/tmc/langchaingo v0.1.14

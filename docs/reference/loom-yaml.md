@@ -1,6 +1,6 @@
 # loom.yaml
 
-Every module starts with a `loom.yaml`. It follows a Kubernetes-style schema.
+Every module starts with a `loom.yaml`. It follows a Kubernetes-style schema. Modules that need programmatic config can use [`loom.jsonnet`](#loom-jsonnet) instead.
 
 ## Full Example
 
@@ -223,3 +223,37 @@ The ordered list of steps. Each operation has a `name` and exactly one action ty
 - [`llm`](/reference/op-llm) -- generate or modify a file using LLM inference
 - [`commitPush`](/reference/op-commitpush) -- commit and push
 - [`pr`](/reference/op-pr) -- open a pull request
+
+## `loom.jsonnet`
+
+A module may define its config as [Jsonnet](https://jsonnet.org/) instead of YAML. Loom evaluates `loom.jsonnet` and expects the result to be a single object with the exact same schema as `loom.yaml`. A module must have exactly one config file — if both `loom.yaml` and `loom.jsonnet` are present, loading fails.
+
+Jsonnet is useful when the config itself needs logic — the most common case is generating `spec.modules` entries from a list to run the same module in bulk:
+
+```jsonnet
+// loom.jsonnet
+local services = ['payments', 'billing', 'auth'];
+
+{
+  apiVersion: 'loom.rickliujh.github.io/v1beta1',
+  kind: 'Loom',
+  metadata: { name: 'bulk-onboard' },
+  spec: {
+    modules: [
+      {
+        name: 'onboard-' + svc,
+        source: '../onboard-service',
+        params: { serviceName: svc },
+      }
+      for svc in services
+    ],
+  },
+}
+```
+
+A few rules:
+
+- **Evaluation happens before parameter resolution.** Jsonnet produces the config; params are resolved from it afterward. Jsonnet cannot see CLI params — runtime values still flow through Go templating (`{{ .param }}`) in the evaluated strings.
+- **Imports work.** `import` and `importstr` resolve relative to the module directory, so shared logic can live in `.libsonnet` files next to `loom.jsonnet`. Remember to add them to `spec.excludes` if the module also uses `newFiles`.
+- **Same validation.** The evaluated object passes through the same validation as a `loom.yaml`.
+- `loom.jsonnet` is always excluded from template walking, same as `loom.yaml`.

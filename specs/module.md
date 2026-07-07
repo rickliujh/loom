@@ -23,6 +23,59 @@ spec:
 
 ---
 
+## Config File Resolution (`loom.yaml` / `loom.jsonnet`)
+
+A module's config may be written as plain YAML (`loom.yaml`) or as Jsonnet (`loom.jsonnet`). Jsonnet enables programmatic config — most notably generating `spec.modules[]` entries from a list for bulk runs.
+
+### Behaviors
+
+#### C1: Exactly one config file per module
+
+| Files present | Result |
+|---|---|
+| `loom.yaml` only | Parsed as YAML |
+| `loom.jsonnet` only | Evaluated as Jsonnet |
+| Both | Error: `both loom.yaml and loom.jsonnet found in <dir>: a module must have exactly one config file` |
+| Neither | Error: `reading loom.yaml: ...` |
+
+#### C2: Jsonnet evaluates to the loom.yaml schema
+
+The Jsonnet program must evaluate to a single object with the same structure as `loom.yaml` (`apiVersion`, `kind`, `metadata`, `spec`). The evaluated JSON is validated by the same rules as YAML configs.
+
+#### C3: Imports resolve relative to the module directory
+
+`import` / `importstr` paths resolve relative to the importing file, with the module directory as an additional search path. Supporting `.libsonnet` files live alongside `loom.jsonnet` (they are not rendered as templates: non-config files are still subject to excludes/includes, so list them in `spec.excludes` if they would otherwise be walked by `newFiles`).
+
+#### C4: Evaluation happens before param resolution
+
+Jsonnet runs first and produces the config; params are resolved afterward from the evaluated config. Jsonnet has no access to CLI params or resolved params — dynamic values remain the job of Go templating (`{{ .param }}`) inside the evaluated strings.
+
+```jsonnet
+// loom.jsonnet — bulk: one child entry per service
+local services = ['payments', 'billing', 'auth'];
+{
+  apiVersion: 'loom.rickliujh.github.io/v1beta1',
+  kind: 'Loom',
+  metadata: { name: 'bulk-onboard' },
+  spec: {
+    modules: [
+      { name: 'onboard-' + svc, source: '../onboard-service', params: { serviceName: svc } }
+      for svc in services
+    ],
+  },
+}
+```
+
+### Error Conditions
+
+| Condition | Error |
+|-----------|-------|
+| Both config files present | `both loom.yaml and loom.jsonnet found in <dir>: ...` |
+| Jsonnet evaluation fails (syntax, missing import, runtime) | `evaluating loom.jsonnet: ...` |
+| Evaluated output does not match schema | `parsing loom.jsonnet output: ...` |
+
+---
+
 ## Parameters
 
 ### Inputs

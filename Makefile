@@ -1,6 +1,7 @@
 VERSION		?= dev
 PROJ_BIN_PATH	:= ./bin/
 BINARY_NAME	:= loom
+SEMVER_REGEX	:= ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(\+([0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*))?$$
 
 all: help
 
@@ -39,7 +40,8 @@ run: ## Run loom without compiling (use ARGS, e.g. make run ARGS="run ./example 
 	go run main.go $(ARGS)
 
 .PHONY: tag
-tag: ## Create release tag
+tag: ## Create release tag (VERSION must be semver, e.g. VERSION=v1.2.3)
+	@echo '$(VERSION)' | grep -Eq '$(SEMVER_REGEX)' || { echo "VERSION '$(VERSION)' is not semver (vMAJOR.MINOR.PATCH[-prerelease][+build])"; exit 1; }
 	git tag -s -m "version bump to $(VERSION)" $(VERSION)
 	git push origin $(VERSION)
 

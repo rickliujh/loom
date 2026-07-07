@@ -224,6 +224,14 @@ func TestEmitModule(t *testing.T) {
 		t.Errorf("expected name 'test', got %q", lf.Metadata.Name)
 	}
 
+	// Verify 2-space indent (yaml.Marshal would emit 4).
+	if !strings.Contains(string(loomData), "\n  name: test") {
+		t.Errorf("expected 2-space indent in loom.yaml, got:\n%s", string(loomData))
+	}
+	if strings.Contains(string(loomData), "\n    name: test") {
+		t.Errorf("loom.yaml uses 4-space indent:\n%s", string(loomData))
+	}
+
 	// Verify template file.
 	tmplData, err := os.ReadFile(filepath.Join(outputDir, "app", "{{ .svc }}.yaml"))
 	if err != nil {

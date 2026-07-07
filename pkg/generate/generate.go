@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -264,11 +265,18 @@ func buildParamDefs(params map[string]string) []config.ParamDef {
 
 // emitModule writes the generated module to disk.
 func emitModule(outputDir string, mod *generatedModule, logger *slog.Logger) error {
-	// Write loom.yaml.
-	loomYAML, err := yaml.Marshal(mod.loomFile)
-	if err != nil {
+	// Write loom.yaml with 2-space indent, matching the patch files emitted
+	// by ComputeSMP (yaml.Marshal defaults to 4).
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(mod.loomFile); err != nil {
 		return fmt.Errorf("marshaling loom.yaml: %w", err)
 	}
+	if err := enc.Close(); err != nil {
+		return fmt.Errorf("marshaling loom.yaml: %w", err)
+	}
+	loomYAML := buf.Bytes()
 
 	loomPath := filepath.Join(outputDir, "loom.yaml")
 	logger.Info("writing", "path", loomPath)

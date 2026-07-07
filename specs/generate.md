@@ -392,7 +392,7 @@ The generated module is written to `outputDir` with the following layout:
 
 #### E2: loom.yaml structure
 
-The emitted `loom.yaml` conforms to the module spec:
+The emitted `loom.yaml` conforms to the module spec and uses 2-space indentation, consistent with the emitted patch files:
 
 ```yaml
 apiVersion: loom.rickliujh.github.io/v1beta1

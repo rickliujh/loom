@@ -85,7 +85,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 		Body:       mr.Description,
 		BaseBranch: mr.TargetBranch,
 		HeadBranch: mr.SourceBranch,
-		RepoURL:    fmt.Sprintf("%s/%s.git", baseURL, projectPath),
+		RepoURL:    gitlabRepoURL(baseURL, projectPath),
 		Provider:   "gitlab",
 	}
 
@@ -218,6 +218,7 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath 
 		Body:       mrMeta.Description,
 		BaseBranch: mrMeta.TargetBranch,
 		HeadBranch: mrMeta.SourceBranch,
+		RepoURL:    gitlabRepoURL(baseURL, projectPath),
 		Provider:   "gitlab",
 	}
 
@@ -296,6 +297,12 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath 
 	}
 
 	return info, nil
+}
+
+// gitlabRepoURL derives the repo clone URL from the base URL and project path,
+// preserving the host for self-hosted instances.
+func gitlabRepoURL(baseURL, projectPath string) string {
+	return fmt.Sprintf("%s/%s.git", baseURL, projectPath)
 }
 
 // glabAPI runs `glab api <path>` and returns stdout, including stderr in errors.

@@ -28,6 +28,9 @@ type RunOptions struct {
 	// GitEmail is the default git author email for commitPush operations
 	// when not specified in loom.yaml.
 	GitEmail string
+	// Summary collects created PRs/MRs across the run, shared by parent
+	// and child executions. May be nil.
+	Summary *action.RunSummary
 	// localSeq tracks the execution order for numbered subdirectories.
 	localSeq *int
 }

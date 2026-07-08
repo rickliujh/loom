@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
 	"github.com/rickliujh/loom/pkg/module"
 	tmpl "github.com/rickliujh/loom/pkg/template"
@@ -15,11 +16,12 @@ import (
 )
 
 var (
-	params     []string
-	paramsFile string
-	targetPath string
-	gitAuthor  string
-	gitEmail   string
+	params      []string
+	paramsFile  string
+	targetPath  string
+	gitAuthor   string
+	gitEmail    string
+	showSummary bool
 )
 
 var runCmd = &cobra.Command{
@@ -36,6 +38,7 @@ func init() {
 	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Local path to use as target directory (skips git clone)")
 	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
 	runCmd.Flags().StringVar(&gitEmail, "email", "", "Default git author email for commitPush operations")
+	runCmd.Flags().BoolVar(&showSummary, "summary", false, "Print a list of PRs/MRs created during the run at the end")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -78,6 +81,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
 	}
 
+	summary := &action.RunSummary{}
 	opts := module.RunOptions{
 		DryRun:     dryRun,
 		LocalRun:   localRun,
@@ -85,6 +89,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 		TargetPath: targetPath,
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,
+		Summary:    summary,
 	}
 
 	// Resolve target directory.
@@ -112,7 +117,14 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	ctx := context.Background()
-	return module.Execute(ctx, mod, targetDir, opts)
+	execErr := module.Execute(ctx, mod, targetDir, opts)
+
+	// Print even when the run failed partway — PRs opened before the
+	// failure are exactly what the user needs to track down.
+	if showSummary {
+		summary.Print(os.Stdout)
+	}
+	return execErr
 }
 
 // cloneTarget clones the module's target repo. In --local-run mode, it clones into

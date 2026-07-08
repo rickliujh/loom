@@ -117,7 +117,7 @@ printf '%s\n' payments billing auth |
 
 With the wrapper approaches (1 and 2), the child module's `spec.target` decides how the batch ships:
 
-- **Child has its own `spec.target`** → every entry clones, branches, and opens a pull request independently. Ten items, ten PRs.
+- **Child has its own `spec.target`** → every entry clones, branches, and opens a pull request independently. Ten items, ten PRs. Pass `--summary` to `loom run` to get all their URLs as a list at the end of the run.
 - **Child has no `spec.target`** → children fall back to the parent's target directory. Put `target`, `commitPush`, and `pr` on the *wrapper*, and the whole batch lands in one clone and ships as a **single commit and PR**:
 
 ```yaml

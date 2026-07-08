@@ -142,6 +142,7 @@ func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.
 		diffWriter = os.Stdout
 	}
 	return &action.ExecutionContext{
+		ModuleName: m.Config.Metadata.Name,
 		ModuleDir:  m.Dir,
 		TargetDir:  targetDir,
 		Params:     m.Params,
@@ -153,6 +154,7 @@ func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.
 		DiffWriter: diffWriter,
 		GitAuthor:  opts.GitAuthor,
 		GitEmail:   opts.GitEmail,
+		Summary:    opts.Summary,
 		Logger:     m.Logger,
 	}
 }

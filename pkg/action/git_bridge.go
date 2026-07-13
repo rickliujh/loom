@@ -88,5 +88,6 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, providerName, tokenE
 	}
 
 	execCtx.Logger.Info("PR created", "url", prURL)
+	execCtx.Summary.AddPR(execCtx.ModuleName, title, prURL)
 	return nil
 }

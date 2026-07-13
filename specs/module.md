@@ -686,6 +686,18 @@ In `--local-run` mode, the PR action is skipped entirely. Logged but no API call
 
 ##### PR3: Dry-run — logged, not executed
 
+##### PR4: Created PRs collected for the run summary
+
+Every successfully created PR/MR is recorded (module name, rendered title, web URL) in a run-wide summary shared across parent and child modules. With the `--summary` flag, `loom run` prints the list at the end of the run:
+
+```
+Pull/merge requests created (2):
+  - Onboard payments (onboard-service): https://github.com/org/repo/pull/12
+  - Onboard auth (onboard-service): https://github.com/org/repo/pull/13
+```
+
+The summary is printed even when a later operation fails — PRs opened before the failure are part of the run's outcome. Runs in dry-run or local mode create no PRs and therefore print nothing.
+
 ---
 
 ## CLI Flags
@@ -710,6 +722,7 @@ In `--local-run` mode, the PR action is skipped entirely. Logged but no API call
 | `--target-path` | string | `""` | Base directory for local mode output |
 | `--author` | string | `""` | Default git author name for `commitPush` operations |
 | `--email` | string | `""` | Default git author email for `commitPush` operations |
+| `--summary` | bool | `false` | Print a list of PRs/MRs created during the run at the end (see PR4) |
 
 ---
 

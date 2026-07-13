@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
 )
 
@@ -880,5 +881,25 @@ func TestNewExecutionContext_SetsLocalRun(t *testing.T) {
 	}
 	if !ctx3.DryRun {
 		t.Error("expected DryRun to be true")
+	}
+}
+
+func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
+	mod := &Module{
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "my-module"},
+			Spec:     config.Spec{},
+		},
+		Params: map[string]string{},
+		Logger: testLogger(),
+	}
+
+	summary := &action.RunSummary{}
+	ctx := mod.NewExecutionContext("/target", RunOptions{Summary: summary})
+	if ctx.Summary != summary {
+		t.Error("expected Summary pointer to be propagated")
+	}
+	if ctx.ModuleName != "my-module" {
+		t.Errorf("expected ModuleName my-module, got %q", ctx.ModuleName)
 	}
 }

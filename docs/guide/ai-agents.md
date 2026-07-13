@@ -126,7 +126,8 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 ## Other Commands
 
 - `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--exclude-git-ops`.
-- Global flags on all commands: `--dry-run`, `--diff`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`.
+- `loom bulk <module> [-o dir] [--items file.yaml] [--name-param param]` — scaffold a jsonnet bulk wrapper from a module's declared params; prefer this over hand-writing wrappers. It refuses to overwrite existing configs and self-verifies the output.
+- Global flags on all commands: `--dry-run`, `--diff`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
 
 ## Debugging Quick Map
 

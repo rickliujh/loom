@@ -31,3 +31,33 @@ jobs:
         with:
           name: coverage
           path: cover.out
+
+  # Machine-checks the formal model of specs/smp.md. Only runs when the
+  # spec model or the spec itself changes.
+  lean-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect spec changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if git diff --name-only "$BASE" HEAD | grep -qE '^specs/'; then
+            echo "specs=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install elan
+        if: steps.changes.outputs.specs == 'true'
+        run: |
+          curl -sSfL https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+
+      - name: Check proofs
+        if: steps.changes.outputs.specs == 'true'
+        working-directory: specs/lean
+        run: lake build

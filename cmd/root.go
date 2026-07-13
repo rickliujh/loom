@@ -18,9 +18,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "loom",
-	Short: "Loom automates the last mile of your GitOps",
-	Long:  "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
+	Use:          "loom",
+	Short:        "Loom automates the last mile of your GitOps",
+	Long:         "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
+	SilenceUsage: true,
 }
 
 // Execute runs the root command.
@@ -31,6 +32,11 @@ func Execute() {
 }
 
 func init() {
+	// SilenceUsage suppresses help text on runtime errors; still show it for flag misuse.
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		cmd.PrintErrln(cmd.UsageString())
+		return err
+	})
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Simulate operations without making changes")
 	rootCmd.PersistentFlags().BoolVar(&localRun, "local-run", false, "Run all operations locally but skip remote push and PR creation")

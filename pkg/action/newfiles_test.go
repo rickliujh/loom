@@ -161,6 +161,60 @@ func TestNewFilesAction_WithDest(t *testing.T) {
 	}
 }
 
+func TestNewFilesAction_TemplatedDest(t *testing.T) {
+	moduleDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "src")
+	os.MkdirAll(srcDir, 0o755)
+	os.WriteFile(filepath.Join(srcDir, "app.conf"), []byte("conf"), 0o644)
+
+	action := &NewFilesAction{
+		Config: configNewFiles("src", `{{ if eq .anthos "true" }}ACM{{ else }}.{{ end }}`),
+	}
+
+	tests := []struct {
+		anthos  string
+		wantRel string
+	}{
+		{"true", filepath.Join("ACM", "app.conf")},
+		{"false", "app.conf"},
+	}
+	for _, tc := range tests {
+		targetDir := t.TempDir()
+		execCtx := testExecCtx(t, moduleDir, targetDir)
+		execCtx.Params = map[string]string{"anthos": tc.anthos}
+
+		if err := action.Execute(context.Background(), execCtx); err != nil {
+			t.Fatalf("anthos=%s: unexpected error: %v", tc.anthos, err)
+		}
+		if _, err := os.Stat(filepath.Join(targetDir, tc.wantRel)); err != nil {
+			t.Errorf("anthos=%s: expected file at %s: %v", tc.anthos, tc.wantRel, err)
+		}
+	}
+}
+
+func TestNewFilesAction_TemplatedSource(t *testing.T) {
+	moduleDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "variants", "prod")
+	os.MkdirAll(srcDir, 0o755)
+	os.WriteFile(filepath.Join(srcDir, "app.conf"), []byte("conf"), 0o644)
+
+	targetDir := t.TempDir()
+
+	action := &NewFilesAction{
+		Config: configNewFiles("variants/{{ .env }}", ""),
+	}
+
+	execCtx := testExecCtx(t, moduleDir, targetDir)
+	execCtx.Params = map[string]string{"env": "prod"}
+
+	if err := action.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "app.conf")); err != nil {
+		t.Errorf("expected file at app.conf: %v", err)
+	}
+}
+
 func TestNewFilesAction_WithTemplating(t *testing.T) {
 	moduleDir := t.TempDir()
 	srcDir := filepath.Join(moduleDir, "tpl")

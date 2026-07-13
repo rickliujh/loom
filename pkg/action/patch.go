@@ -34,14 +34,23 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		engine = "smp"
 	}
 
-	patchPath := util.ExpandPath(execCtx.ModuleDir, a.Config.Path)
-	targetPath := filepath.Join(execCtx.TargetDir, a.Config.Target)
+	path, err := tmpl.RenderString(a.Config.Path, execCtx.Params)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("rendering path: %w", err))
+	}
+	target, err := tmpl.RenderString(a.Config.Target, execCtx.Params)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("rendering target: %w", err))
+	}
+
+	patchPath := util.ExpandPath(execCtx.ModuleDir, path)
+	targetPath := filepath.Join(execCtx.TargetDir, target)
 
 	execCtx.Logger.Info("applying patch", "engine", engine, "patch", patchPath, "target", targetPath)
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would apply patch", "engine", engine, "patch", patchPath, "target", targetPath)
 		if execCtx.ShowDiff {
-			return a.showPatchDiff(execCtx, engine, patchPath, targetPath)
+			return a.showPatchDiff(execCtx, engine, patchPath, targetPath, target)
 		}
 		return nil
 	}
@@ -260,7 +269,7 @@ func (a *PatchAction) applyJSON6902(patchContent, targetPath string) error {
 }
 
 // showPatchDiff renders the patch and displays a diff without writing.
-func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath, targetPath string) error {
+func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath, targetPath, target string) error {
 	patchRaw, err := os.ReadFile(patchPath)
 	if err != nil {
 		return actionError("patch", fmt.Errorf("reading patch file %q: %w", patchPath, err))
@@ -310,6 +319,6 @@ func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath
 		return actionError("patch", fmt.Errorf("unknown patch engine %q", engine))
 	}
 
-	printDiff(execCtx, a.Config.Target, string(targetRaw), result)
+	printDiff(execCtx, target, string(targetRaw), result)
 	return nil
 }

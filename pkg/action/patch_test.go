@@ -74,6 +74,28 @@ func runPatchErr(t *testing.T, engine string, params map[string]string, patchCon
 	return a.Execute(context.Background(), execCtx)
 }
 
+func TestPatch_TemplatedPathAndTarget(t *testing.T) {
+	moduleDir, targetDir, targetFile := setupPatch(t, "metadata:\n  name: patched\n", "metadata:\n  name: original\n")
+
+	a := &PatchAction{Config: config.Patch{
+		Path:   "__functions/patches/{{ .patchName }}.yaml",
+		Target: "{{ .targetName }}.yaml",
+	}}
+
+	execCtx := testExecCtx(t, moduleDir, targetDir)
+	execCtx.Params = map[string]string{
+		"patchName":  "patch",
+		"targetName": strings.TrimSuffix(targetFile, ".yaml"),
+	}
+
+	if err := a.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result := readTarget(t, targetDir, targetFile); !strings.Contains(result, "name: patched") {
+		t.Errorf("expected patched target, got:\n%s", result)
+	}
+}
+
 // -------------------------------------------------------------------
 // B1: Scalar field set/overwrite
 // -------------------------------------------------------------------

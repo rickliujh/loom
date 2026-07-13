@@ -16,6 +16,8 @@ Copies template files from the module directory into the target repository, rend
 | `source` | Source directory relative to the module directory |
 | `dest` | Destination directory relative to the target repository root. Empty string means root. |
 
+Both fields are rendered as Go templates over the resolved params before use.
+
 ## Behavior
 
 Every file in the source directory is treated as a Go template, subject to the [exclude/include rules](/reference/loom-yaml#spec-excludes-and-spec-includes). The directory structure is preserved. File and folder names can also contain Go template expressions (see [Path Templating](/guide/templates#path-templating)).
@@ -50,4 +52,13 @@ With a destination subdirectory:
   newFiles:
     source: "configs"
     dest: "environments/prod"
+```
+
+With a destination chosen by a param (`.` means the target root):
+
+```yaml
+- name: create-configs
+  newFiles:
+    source: "configs"
+    dest: '{{ if eq .anthos "true" }}ACM{{ else }}.{{ end }}'
 ```

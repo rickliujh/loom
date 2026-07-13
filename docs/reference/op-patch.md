@@ -18,6 +18,8 @@ Modifies YAML files already in the target repository. Loom supports two patch en
 | `path` | Path to the patch file, relative to module directory |
 | `target` | Path to the target file, relative to target repository root |
 
+All fields are rendered as Go templates over the resolved params before use.
+
 Both engines are powered by the [kustomize](https://github.com/kubernetes-sigs/kustomize) library and built into Loom -- no external tools required. Patch files are rendered as Go templates before being applied.
 
 ## Strategic Merge Patch (SMP) {#smp}

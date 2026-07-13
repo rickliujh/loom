@@ -18,7 +18,16 @@ type NewFilesAction struct {
 }
 
 func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext) error {
-	sourceDir := util.ExpandPath(execCtx.ModuleDir, a.Config.Source)
+	source, err := tmpl.RenderString(a.Config.Source, execCtx.Params)
+	if err != nil {
+		return actionError("newFiles", fmt.Errorf("rendering source: %w", err))
+	}
+	dest, err := tmpl.RenderString(a.Config.Dest, execCtx.Params)
+	if err != nil {
+		return actionError("newFiles", fmt.Errorf("rendering dest: %w", err))
+	}
+
+	sourceDir := util.ExpandPath(execCtx.ModuleDir, source)
 
 	opts := &util.FilterOptions{
 		Excludes: execCtx.Excludes,
@@ -47,7 +56,7 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 			return actionError("newFiles", err)
 		}
 
-		destPath := filepath.Join(execCtx.TargetDir, a.Config.Dest, destRel)
+		destPath := filepath.Join(execCtx.TargetDir, dest, destRel)
 
 		execCtx.Logger.Info("writing file", "path", destPath)
 		if execCtx.DryRun {

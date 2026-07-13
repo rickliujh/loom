@@ -12,7 +12,7 @@ loom run [path] [flags]
 |------|-------------|
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
-| `--target-path /path` | Use a local directory as the target (skip git clone) |
+| `--target-path /path` | Directory for target files. With `--local-run`, each target repo is cloned into a numbered subdirectory (`00-<name>/`, `01-<name>/`, …). Modules without a `target` spec use it directly as the target directory. Ignored otherwise. |
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--dry-run` | Show what would happen without writing anything |
@@ -47,12 +47,14 @@ loom run https://github.com/myorg/loom-modules.git//onboard-service \
   -p serviceName=payments
 ```
 
-### Dry run against a local checkout
+### Dry run
+
+Modules with a `target` spec clone the target repo into a temporary
+directory and preview against that fresh clone:
 
 ```bash
 loom run ./onboard-service \
   -p serviceName=payments \
-  --target-path ~/repos/gitops \
   --dry-run
 ```
 
@@ -63,7 +65,6 @@ See exactly what files would be created and changed:
 ```bash
 loom run ./onboard-service \
   -p serviceName=payments \
-  --target-path ~/repos/gitops \
   --diff
 ```
 

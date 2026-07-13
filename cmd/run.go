@@ -33,7 +33,7 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().StringArrayVarP(&params, "param", "p", nil, "Parameter in key=value format (can be repeated)")
 	runCmd.Flags().StringVar(&paramsFile, "params-file", "", "YAML file with parameters")
-	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Local path to use as target directory (skips git clone)")
+	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Directory for target files: with --local-run, target repos are cloned into numbered subdirectories here; modules without a target spec use it directly")
 	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
 	runCmd.Flags().StringVar(&gitEmail, "email", "", "Default git author email for commitPush operations")
 	rootCmd.AddCommand(runCmd)

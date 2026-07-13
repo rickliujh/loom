@@ -291,6 +291,87 @@ func TestSMP_B4_ScalarListOrderTargetFirst(t *testing.T) {
 	}
 }
 
+func TestSMP_B4_ScalarListAppendToEmptyFlowList(t *testing.T) {
+	// Reproduces: patching a kustomization whose resources list is the
+	// empty flow-style sequence `[]` fails with
+	// "strategic merge patch failed: no merge key found for field resources".
+	target := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: []
+`
+	patch := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - myapp
+`
+	result := runPatch(t, "smp", nil, patch, target)
+
+	if !strings.Contains(result, "- myapp") {
+		t.Errorf("expected 'myapp' appended to empty resources list, got:\n%s", result)
+	}
+}
+
+func TestSMP_B4_ScalarListAppendToNestedEmptyList(t *testing.T) {
+	// Same empty-list failure one level down: the empty list lives inside
+	// a map-list item matched by name.
+	target := `stores:
+  - name: store-1
+    namespaces: []
+  - name: store-2
+    namespaces:
+      - ns-b
+`
+	patch := `stores:
+  - name: store-1
+    namespaces:
+      - ns-a
+`
+	result := runPatch(t, "smp", nil, patch, target)
+
+	if !strings.Contains(result, "ns-a") {
+		t.Errorf("expected 'ns-a' appended to store-1's empty list, got:\n%s", result)
+	}
+	if !strings.Contains(result, "ns-b") {
+		t.Errorf("expected store-2 preserved, got:\n%s", result)
+	}
+}
+
+func TestSMP_B4_UntouchedEmptyListPreserved(t *testing.T) {
+	// merge2 fails on any empty list in the target — even one the patch
+	// never mentions — and normalization must not rewrite it in the output.
+	target := `resources: []
+metadata:
+  name: original
+`
+	patch := `metadata:
+  name: patched
+`
+	result := runPatch(t, "smp", nil, patch, target)
+
+	if !strings.Contains(result, "resources: []") {
+		t.Errorf("expected untouched 'resources: []' preserved verbatim, got:\n%s", result)
+	}
+	if !strings.Contains(result, "name: patched") {
+		t.Errorf("expected patch applied, got:\n%s", result)
+	}
+}
+
+func TestSMP_B4_EmptyPatchListOnEmptyTargetList(t *testing.T) {
+	target := `resources: []
+kept: value
+`
+	patch := `resources: []
+`
+	result := runPatch(t, "smp", nil, patch, target)
+
+	if !strings.Contains(result, "resources: []") {
+		t.Errorf("expected resources to stay an empty list, got:\n%s", result)
+	}
+	if !strings.Contains(result, "kept: value") {
+		t.Errorf("expected sibling field preserved, got:\n%s", result)
+	}
+}
+
 // -------------------------------------------------------------------
 // B5: Map-list merge by inferred key
 // -------------------------------------------------------------------

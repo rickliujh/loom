@@ -91,17 +91,177 @@ func (a *PatchAction) applySMP(patchContent, targetPath string) error {
 		return actionError("patch", fmt.Errorf("expanding scalar lists: %w", err))
 	}
 
-	result, err := merge2.MergeStrings(expanded, string(targetRaw), true, kyaml.MergeOptions{
+	normalized, err := normalizeEmptyTargetLists(string(targetRaw))
+	if err != nil {
+		return actionError("patch", fmt.Errorf("normalizing empty lists: %w", err))
+	}
+
+	merged, err := merge2.MergeStrings(expanded, normalized, true, kyaml.MergeOptions{
 		ListIncreaseDirection: kyaml.MergeOptionsListAppend,
 	})
 	if err != nil {
 		return actionError("patch", fmt.Errorf("strategic merge patch failed: %w", err))
 	}
 
+	result, err := restoreEmptyLists(merged, string(targetRaw))
+	if err != nil {
+		return actionError("patch", fmt.Errorf("restoring empty lists: %w", err))
+	}
+
 	if err := os.WriteFile(targetPath, []byte(result), 0o644); err != nil {
 		return actionError("patch", fmt.Errorf("writing patched file %q: %w", targetPath, err))
 	}
 	return nil
+}
+
+// normalizeEmptyTargetLists rewrites every empty sequence in the target to
+// null before merging. kyaml infers an empty sequence as an associative
+// list (its merge-key check is vacuously true over zero elements), which
+// sends merge2 down the merge-by-key path and fails with "no merge key
+// found" — even for fields the patch never touches. Null values merge
+// cleanly and keep each field's position; restoreEmptyLists turns unfilled
+// nulls back into empty sequences afterwards.
+func normalizeEmptyTargetLists(targetStr string) (string, error) {
+	target, err := kyaml.Parse(targetStr)
+	if err != nil {
+		return "", err
+	}
+	normalizeEmptyWalk(target.YNode())
+	return target.String()
+}
+
+func normalizeEmptyWalk(n *kyaml.Node) {
+	switch n.Kind {
+	case kyaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			v := n.Content[i+1]
+			if v.Kind == kyaml.SequenceNode && len(v.Content) == 0 {
+				// Value must be non-empty ("null"), or merge2 drops the
+				// field instead of preserving the explicit null.
+				*v = kyaml.Node{Kind: kyaml.ScalarNode, Tag: kyaml.NodeTagNull, Value: "null"}
+				continue
+			}
+			normalizeEmptyWalk(v)
+		}
+	case kyaml.SequenceNode, kyaml.DocumentNode:
+		for _, c := range n.Content {
+			normalizeEmptyWalk(c)
+		}
+	}
+}
+
+// restoreEmptyLists walks the merge result alongside the original target
+// and turns null values back into the original empty sequences wherever
+// the patch left them unfilled.
+func restoreEmptyLists(resultStr, targetStr string) (string, error) {
+	result, err := kyaml.Parse(resultStr)
+	if err != nil {
+		return "", err
+	}
+	target, err := kyaml.Parse(targetStr)
+	if err != nil {
+		return "", err
+	}
+	restoreWalk(result.YNode(), target.YNode())
+	return result.String()
+}
+
+func restoreWalk(res, orig *kyaml.Node) {
+	if res == nil || orig == nil {
+		return
+	}
+	switch {
+	case res.Kind == kyaml.DocumentNode && orig.Kind == kyaml.DocumentNode:
+		if len(res.Content) > 0 && len(orig.Content) > 0 {
+			restoreWalk(res.Content[0], orig.Content[0])
+		}
+	case res.Kind == kyaml.MappingNode && orig.Kind == kyaml.MappingNode:
+		for i := 0; i+1 < len(orig.Content); i += 2 {
+			ov := orig.Content[i+1]
+			rf := kyaml.NewRNode(res).Field(orig.Content[i].Value)
+			if rf == nil {
+				continue
+			}
+			rv := rf.Value.YNode()
+			if ov.Kind == kyaml.SequenceNode && len(ov.Content) == 0 && rv.Tag == kyaml.NodeTagNull {
+				*rv = *ov
+				continue
+			}
+			restoreWalk(rv, ov)
+		}
+	case res.Kind == kyaml.SequenceNode && orig.Kind == kyaml.SequenceNode:
+		restoreWalkSeq(res, orig)
+	}
+}
+
+// restoreWalkSeq matches map items in the result and original sequences by
+// a common scalar key (e.g. "name") and recurses into matched pairs, so
+// empty lists nested inside list items are restored too.
+func restoreWalkSeq(res, orig *kyaml.Node) {
+	rElems := wrapRNodes(res.Content)
+	oElems := wrapRNodes(orig.Content)
+	key := inferRNodeSliceKey(rElems, oElems)
+	if key == "" {
+		return
+	}
+	for _, oe := range oElems {
+		ov := fieldScalarValue(oe, key)
+		if ov == "" {
+			continue
+		}
+		for _, re := range rElems {
+			if fieldScalarValue(re, key) == ov {
+				restoreWalk(re.YNode(), oe.YNode())
+				break
+			}
+		}
+	}
+}
+
+func wrapRNodes(nodes []*kyaml.Node) []*kyaml.RNode {
+	out := make([]*kyaml.RNode, len(nodes))
+	for i, n := range nodes {
+		out[i] = kyaml.NewRNode(n)
+	}
+	return out
+}
+
+// inferRNodeSliceKey finds a common scalar-valued key across the first
+// map elements of both sequences, mirroring inferMapSliceKey.
+func inferRNodeSliceKey(target, patch []*kyaml.RNode) string {
+	if len(target) == 0 || len(patch) == 0 {
+		return ""
+	}
+	pe, te := patch[0], target[0]
+	if pe.YNode().Kind != kyaml.MappingNode || te.YNode().Kind != kyaml.MappingNode {
+		return ""
+	}
+	fields, err := pe.Fields()
+	if err != nil {
+		return ""
+	}
+	for _, name := range fields {
+		if fieldScalarValue(pe, name) == "" {
+			continue
+		}
+		if te.Field(name) != nil {
+			return name
+		}
+	}
+	return ""
+}
+
+// fieldScalarValue returns the scalar value of a mapping field, or "" if
+// the node is not a mapping, the field is absent, or its value is not scalar.
+func fieldScalarValue(n *kyaml.RNode, field string) string {
+	if n.YNode().Kind != kyaml.MappingNode {
+		return ""
+	}
+	f := n.Field(field)
+	if f == nil || f.Value.YNode().Kind != kyaml.ScalarNode {
+		return ""
+	}
+	return f.Value.YNode().Value
 }
 
 // expandScalarLists walks the patch and target as untyped Go values.
@@ -144,6 +304,14 @@ func expandWalk(target, patch any) {
 
 		pSlice, pIsList := pv.([]any)
 		tSlice, tIsList := tv.([]any)
+
+		if pIsList && tIsList && len(pSlice) == 0 {
+			// Append-nothing is a no-op; drop the field so merge2 never
+			// sees an empty patch list (kyaml misinfers it as associative
+			// and fails with "no merge key found").
+			delete(pm, k)
+			continue
+		}
 
 		if pIsList && tIsList && len(pSlice) > 0 {
 			if isScalarSlice(pSlice) && isScalarSlice(tSlice) {
@@ -292,11 +460,19 @@ func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath
 		if err != nil {
 			return actionError("patch", fmt.Errorf("expanding scalar lists: %w", err))
 		}
-		result, err = merge2.MergeStrings(expanded, string(targetRaw), true, kyaml.MergeOptions{
+		normalized, err := normalizeEmptyTargetLists(string(targetRaw))
+		if err != nil {
+			return actionError("patch", fmt.Errorf("normalizing empty lists: %w", err))
+		}
+		merged, err := merge2.MergeStrings(expanded, normalized, true, kyaml.MergeOptions{
 			ListIncreaseDirection: kyaml.MergeOptionsListAppend,
 		})
 		if err != nil {
 			return actionError("patch", fmt.Errorf("strategic merge patch failed: %w", err))
+		}
+		result, err = restoreEmptyLists(merged, string(targetRaw))
+		if err != nil {
+			return actionError("patch", fmt.Errorf("restoring empty lists: %w", err))
 		}
 	case "json6902":
 		node, err := kyaml.Parse(string(targetRaw))

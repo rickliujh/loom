@@ -65,14 +65,16 @@ The diff output is colored in terminals: green for additions, red for removals, 
 
 ## Combining with Local Run
 
-Both `--dry-run` and `--diff` can be combined with `--target-path` to preview against a local checkout:
+Modules with a `target` spec always clone the target repo before previewing — into a temporary directory by default. Add `--local-run --target-path` to keep the clones in numbered subdirectories you can inspect afterwards:
 
 ```bash
 loom run ./onboard-service \
   -p serviceName=payments \
-  --target-path ~/repos/gitops \
+  --local-run --target-path ./preview \
   --diff
 ```
+
+For modules without a `target` spec, `--target-path` is used directly as the target directory.
 
 ::: tip
 `--dry-run` takes precedence over `--local-run`. If both are set, dry-run wins and nothing is written.

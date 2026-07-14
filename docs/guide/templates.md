@@ -15,6 +15,7 @@ Loom uses Go's [`text/template`](https://pkg.go.dev/text/template) syntax. Insid
 | Quote | <code v-pre>{{ quote .value }}</code> | `"payments"` (escaped double-quoted string) |
 | To YAML | <code v-pre>{{ toYaml .value }}</code> | Value marshaled as 2-space-indented YAML |
 | From YAML | <code v-pre>{{ fromYaml .items }}</code> | String parsed into a value (list, map, or scalar) |
+| Split | <code v-pre>{{ .regions | split "," }}</code> | String divided around a separator, empty elements dropped |
 
 ## Multi-line Values
 
@@ -59,6 +60,17 @@ env:
 ```
 
 Malformed YAML in the parameter fails at render time instead of producing a broken file.
+
+For simple comma-separated values, `split` avoids YAML syntax in the parameter entirely (with `regions: "us-east-1,eu-west-1"`):
+
+```yaml
+regions:
+{{- range .regions | split "," }}
+  - {{ . }}
+{{- end }}
+```
+
+`split` drops empty elements, so an empty parameter or a trailing separator yields no blank list items.
 
 ## Where Templates Work
 

@@ -24,7 +24,22 @@ func FuncMap() template.FuncMap {
 		"quote":    strconv.Quote,
 		"toYaml":   toYaml,
 		"fromYaml": fromYaml,
+		"split":    split,
 	}
+}
+
+// split divides s around sep, dropping empty elements so both "" and
+// trailing separators don't produce blank items. The separator comes
+// first to keep the function pipe-friendly: {{ .regions | split "," }}.
+func split(sep, s string) []string {
+	parts := strings.Split(s, sep)
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // indent prefixes every line of s with n spaces.

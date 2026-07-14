@@ -17,12 +17,13 @@ func FuncMap() template.FuncMap {
 			}
 			return val
 		},
-		"upper":   strings.ToUpper,
-		"lower":   strings.ToLower,
-		"indent":  indent,
-		"nindent": nindent,
-		"quote":   strconv.Quote,
-		"toYaml":  toYaml,
+		"upper":    strings.ToUpper,
+		"lower":    strings.ToLower,
+		"indent":   indent,
+		"nindent":  nindent,
+		"quote":    strconv.Quote,
+		"toYaml":   toYaml,
+		"fromYaml": fromYaml,
 	}
 }
 
@@ -36,6 +37,16 @@ func indent(n int, s string) string {
 // after a key on the same line: "config: {{ .param | nindent 4 }}".
 func nindent(n int, s string) string {
 	return "\n" + indent(n, s)
+}
+
+// fromYaml parses a YAML string into a value (list, map, or scalar), so
+// string params can be ranged over or re-serialized with toYaml.
+func fromYaml(s string) (any, error) {
+	var v any
+	if err := yaml.Unmarshal([]byte(s), &v); err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // toYaml marshals a value to 2-space-indented YAML, without a trailing newline.

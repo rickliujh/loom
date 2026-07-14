@@ -261,6 +261,243 @@ func TestValidate_PatchEngineJSON6902(t *testing.T) {
 	}
 }
 
+// --- error collection ---
+
+func TestValidate_CollectsAllErrors(t *testing.T) {
+	lf := validLoomFile()
+	lf.Metadata.Name = ""
+	lf.Spec.Params = []ParamDef{{Name: "dup"}, {Name: "dup"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	for _, want := range []string{
+		"metadata.name is required",
+		`duplicate param name "dup"`,
+		"shell command is required",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected error to contain %q, got: %v", want, err)
+		}
+	}
+}
+
+// --- target ---
+
+func TestValidate_TargetURLRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Target = &TargetSpec{Branch: "main"}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing target url")
+	}
+	if !strings.Contains(err.Error(), "spec.target.url is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TargetValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Target = &TargetSpec{URL: "https://github.com/org/repo.git", FeatureBranch: "loom/{{ .svc }}"}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- child module refs ---
+
+func TestValidate_ModuleNameEmpty(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Modules = []ModuleRef{{Name: "", Source: "../child"}}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for empty module name")
+	}
+	if !strings.Contains(err.Error(), "module name cannot be empty") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ModuleNameDuplicate(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "child", Source: "../a"},
+		{Name: "child", Source: "../b"},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for duplicate module name")
+	}
+	if !strings.Contains(err.Error(), `duplicate module name "child"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ModuleSourceRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Modules = []ModuleRef{{Name: "child"}}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing module source")
+	}
+	if !strings.Contains(err.Error(), `module "child": source is required`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ModuleValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "onboard-{{ .svc }}", Source: "../child", Params: map[string]string{"svc": "{{ .svc }}"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- template syntax ---
+
+func TestValidate_TemplateSyntaxErrorInShellCommand(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ .svc"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for unclosed template action")
+	}
+	if !strings.Contains(err.Error(), `operation "sh" shell.command: invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TemplateSyntaxErrorInExcludes(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Excludes = []string{"{{ .dir }/**"}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for malformed template")
+	}
+	if !strings.Contains(err.Error(), "spec.excludes[0]: invalid template") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TemplateSyntaxErrorInDynamicParamCommand(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.DynamicParams = []DynamicParamDef{
+		{Name: "sha", Command: "git rev-parse {{ .branch"},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for unclosed template action")
+	}
+	if !strings.Contains(err.Error(), `dynamicParam "sha" command: invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TemplateSyntaxErrorInModuleSource(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "child", Source: "{{ if .x }../a"},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for malformed template")
+	}
+	if !strings.Contains(err.Error(), `module "child" source: invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TemplateWithFuncsValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: `echo {{ default "dev" .env | upper }}`}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TemplateUnknownFuncRejected(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ nosuchfunc .env }}"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for unknown template function")
+	}
+	if !strings.Contains(err.Error(), `operation "sh" shell.command: invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- templated enum values skipped ---
+
+func TestValidate_PatchEngineTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "patch-op", Patch: &Patch{Path: "p.yaml", Target: "t.yaml", Engine: "{{ .engine }}"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMRetryDelayTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "gen", LLM: &LLM{
+			Provider:   "openai",
+			Model:      "gpt-4o",
+			Prompt:     "prompt",
+			Target:     "out.yaml",
+			RetryDelay: "{{ .delay }}",
+		}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMModeTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "gen", LLM: &LLM{
+			Provider: "openai",
+			Model:    "gpt-4o",
+			Prompt:   "prompt",
+			Target:   "out.yaml",
+			Mode:     "{{ .mode }}",
+		}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- per-action required fields ---
 
 func TestValidate_NewFilesSourceRequired(t *testing.T) {

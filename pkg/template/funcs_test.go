@@ -1,6 +1,9 @@
 package template
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestFuncMap_Default(t *testing.T) {
 	tests := []struct {
@@ -179,6 +182,104 @@ func TestFuncMap_ToYaml(t *testing.T) {
 	}
 }
 
+func TestFuncMap_FromYaml(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want any
+	}{
+		{name: "scalar", in: "hello", want: "hello"},
+		{name: "block list", in: "- a\n- b", want: []any{"a", "b"}},
+		{name: "flow list", in: "[a, b]", want: []any{"a", "b"}},
+		{name: "map", in: "key: val", want: map[string]any{"key": "val"}},
+		{
+			name: "list of maps",
+			in:   "- name: DB_HOST\n  value: pg.internal",
+			want: []any{map[string]any{"name": "DB_HOST", "value": "pg.internal"}},
+		},
+		{name: "empty string", in: "", want: nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := fromYaml(tt.in)
+			if err != nil {
+				t.Fatalf("fromYaml(%q) returned error: %v", tt.in, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("fromYaml(%q) = %#v, want %#v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFuncMap_FromYaml_Invalid(t *testing.T) {
+	if _, err := fromYaml("key: [unclosed"); err == nil {
+		t.Error("fromYaml with invalid YAML should return an error")
+	}
+}
+
+func TestFuncMap_Split(t *testing.T) {
+	tests := []struct {
+		name string
+		sep  string
+		in   string
+		want []string
+	}{
+		{name: "comma separated", sep: ",", in: "a,b,c", want: []string{"a", "b", "c"}},
+		{name: "single element", sep: ",", in: "a", want: []string{"a"}},
+		{name: "empty string yields no elements", sep: ",", in: "", want: []string{}},
+		{name: "trailing separator dropped", sep: ",", in: "a,b,", want: []string{"a", "b"}},
+		{name: "consecutive separators dropped", sep: ",", in: "a,,b", want: []string{"a", "b"}},
+		{name: "multi-char separator", sep: ", ", in: "a, b, c", want: []string{"a", "b", "c"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := split(tt.sep, tt.in)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("split(%q, %q) = %#v, want %#v", tt.sep, tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderString_SplitRange(t *testing.T) {
+	params := map[string]string{"regions": "us-east-1,eu-west-1"}
+	got, err := RenderString(`regions:{{ range .regions | split "," }}{{ printf "\n  - %s" . }}{{ end }}`, params)
+	if err != nil {
+		t.Fatalf("RenderString returned error: %v", err)
+	}
+	want := "regions:\n  - us-east-1\n  - eu-west-1"
+	if got != want {
+		t.Errorf("RenderString = %q, want %q", got, want)
+	}
+}
+
+func TestRenderString_FromYamlRange(t *testing.T) {
+	params := map[string]string{"regions": "[us-east-1, eu-west-1]"}
+	got, err := RenderString("regions:{{ range .regions | fromYaml }}\n  - {{ . }}{{ end }}", params)
+	if err != nil {
+		t.Fatalf("RenderString returned error: %v", err)
+	}
+	want := "regions:\n  - us-east-1\n  - eu-west-1"
+	if got != want {
+		t.Errorf("RenderString = %q, want %q", got, want)
+	}
+}
+
+func TestRenderString_FromYamlToYamlRoundTrip(t *testing.T) {
+	params := map[string]string{"extraEnv": "- name: DB_HOST\n  value: pg.internal"}
+	got, err := RenderString("env:{{ .extraEnv | fromYaml | toYaml | nindent 2 }}", params)
+	if err != nil {
+		t.Fatalf("RenderString returned error: %v", err)
+	}
+	want := "env:\n  - name: DB_HOST\n    value: pg.internal"
+	if got != want {
+		t.Errorf("RenderString = %q, want %q", got, want)
+	}
+}
+
 func TestRenderString_MultilineIndent(t *testing.T) {
 	params := map[string]string{"config": "key1: val1\nkey2: val2"}
 	got, err := RenderString("data:{{ .config | nindent 2 }}", params)
@@ -193,7 +294,7 @@ func TestRenderString_MultilineIndent(t *testing.T) {
 
 func TestFuncMap_ContainsExpectedFunctions(t *testing.T) {
 	fm := FuncMap()
-	expected := []string{"default", "upper", "lower", "indent", "nindent", "quote", "toYaml"}
+	expected := []string{"default", "upper", "lower", "indent", "nindent", "quote", "toYaml", "fromYaml", "split"}
 	for _, name := range expected {
 		if _, ok := fm[name]; !ok {
 			t.Errorf("FuncMap() missing expected function %q", name)

@@ -110,7 +110,9 @@ func TestSpecRulesHaveTests(t *testing.T) {
 
 	var missing, staleAllowlist []string
 	for id := range ids {
-		re := regexp.MustCompile(`\b` + id + `\b`)
+		// Underscores count as delimiters so IDs embedded in test names
+		// (TestFoo_PR4_Bar) are found; \b alone treats _ as a word char.
+		re := regexp.MustCompile(`(?:\b|_)` + id + `(?:\b|_)`)
 		covered := false
 		for _, content := range files {
 			if re.MatchString(content) {

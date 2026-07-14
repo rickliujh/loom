@@ -5,7 +5,9 @@ import (
 	"testing"
 )
 
-func TestRunSummary_AddAndPrint(t *testing.T) {
+// TestRunSummary_PR4_AddAndPrint verifies spec rule PR4: created PRs/MRs are
+// collected in the run summary and printed as "- <title> (<module>): <url>".
+func TestRunSummary_PR4_AddAndPrint(t *testing.T) {
 	s := &RunSummary{}
 	s.AddPR("onboard-payments", "Onboard payments", "https://github.com/org/repo/pull/12")
 	s.AddPR("onboard-auth", "Onboard auth", "https://gitlab.com/org/repo/-/merge_requests/3")
@@ -25,7 +27,8 @@ func TestRunSummary_AddAndPrint(t *testing.T) {
 	}
 }
 
-func TestRunSummary_EmptyPrintsNothing(t *testing.T) {
+// PR4: runs that create no PRs (dry-run/local mode) print nothing.
+func TestRunSummary_PR4_EmptyPrintsNothing(t *testing.T) {
 	var b strings.Builder
 	(&RunSummary{}).Print(&b)
 	if b.Len() != 0 {
@@ -33,7 +36,7 @@ func TestRunSummary_EmptyPrintsNothing(t *testing.T) {
 	}
 }
 
-func TestRunSummary_NilSafe(t *testing.T) {
+func TestRunSummary_PR4_NilSafe(t *testing.T) {
 	var s *RunSummary
 	s.AddPR("m", "t", "u") // must not panic
 	var b strings.Builder

@@ -817,20 +817,40 @@ In addition to dry-run logging:
 
 ## Validation Rules
 
-The following constraints are enforced when loading a module:
+The following constraints are enforced when loading a module. All violations
+are collected and reported together as one joined error (one violation per
+line), not just the first, so a config can be fixed in a single pass.
+
+Every templatable string field (see T4) must also parse as a valid Go
+template with the loom function map; syntax errors are reported as
+`<field>: invalid template: <parse error>`. Fields without `{{` always pass.
 
 | Rule | Error |
 |------|-------|
+| Config contains only known fields (strict decoding; applies to `loom.yaml` and evaluated `loom.jsonnet` output) | `parsing loom.yaml: ... field <name> not found in type ...` |
 | `apiVersion` must be `loom.rickliujh.github.io/v1beta1` | `unsupported apiVersion "<value>"` |
 | `kind` must be `Loom` | `unsupported kind "<value>"` |
 | `metadata.name` required | `metadata.name is required` |
 | Param names non-empty | `param name cannot be empty` |
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
+| `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
+| Module names non-empty | `module name cannot be empty` |
+| Module names unique | `duplicate module name "<name>"` |
+| Module `source` required | `module "<name>": source is required` |
 | Operation names non-empty | `operation name cannot be empty` |
 | Operation names unique | `duplicate operation name "<name>"` |
 | Each operation has exactly one action type | `operation "<name>" must have exactly one action type, got <N>` |
-| Patch engine is `smp` or `json6902` | `unknown patch engine "<engine>"` |
+| `newFiles.source` required | `operation "<name>": newFiles source is required` |
+| `patch.path` required | `operation "<name>": patch path is required` |
+| `patch.target` required | `operation "<name>": patch target is required` |
+| Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
+| `shell.command` required | `operation "<name>": shell command is required` |
+| `shell.timeout` is a valid duration (skipped when templated) | `operation "<name>": invalid shell timeout "<value>"` |
+| `commitPush.message` required | `operation "<name>": commitPush message is required` |
+| `pr.provider` required | `operation "<name>": pr provider is required` |
+| PR provider is `github` or `gitlab` (skipped when templated) | `unknown pr provider "<provider>"` |
+| `pr.title` required | `operation "<name>": pr title is required` |
 | Undeclared CLI param not in `params` or `dynamicParams` | `undeclared parameter "<name>"` |
 
 ---

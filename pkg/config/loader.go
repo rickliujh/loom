@@ -1,7 +1,10 @@
 package config
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -37,7 +40,7 @@ func loadYAML(path string) (*LoomFile, error) {
 	}
 
 	var lf LoomFile
-	if err := yaml.Unmarshal(data, &lf); err != nil {
+	if err := strictUnmarshal(data, &lf); err != nil {
 		return nil, fmt.Errorf("parsing loom.yaml: %w", err)
 	}
 
@@ -56,11 +59,22 @@ func loadJsonnet(path string) (*LoomFile, error) {
 	// JSON is a subset of YAML, so the evaluated output unmarshals through
 	// the same yaml tags as loom.yaml.
 	var lf LoomFile
-	if err := yaml.Unmarshal([]byte(jsonStr), &lf); err != nil {
+	if err := strictUnmarshal([]byte(jsonStr), &lf); err != nil {
 		return nil, fmt.Errorf("parsing loom.jsonnet output: %w", err)
 	}
 
 	return &lf, nil
+}
+
+// strictUnmarshal decodes YAML into lf, rejecting fields that don't exist in
+// the schema so typos surface as parse errors instead of being silently dropped.
+func strictUnmarshal(data []byte, lf *LoomFile) error {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(lf); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func fileExists(path string) bool {

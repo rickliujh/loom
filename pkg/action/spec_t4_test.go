@@ -2,13 +2,12 @@ package action
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 
+	"github.com/rickliujh/loom/internal/spectest"
 	"github.com/rickliujh/loom/pkg/config"
 	"github.com/rickliujh/loom/pkg/llm"
 )
@@ -22,69 +21,15 @@ import (
 // action config but never passed through tmpl.RenderString fails this test
 // automatically — no subtest needs to be written.
 //
+// Module-level loom.yaml fields (params, dynamicParams, excludes, includes,
+// target, modules) are covered by the companion TestSpecT4 in pkg/module.
+//
 // Fields that are intentionally NOT templated must be listed in t4Exempt with
 // a reason.
-
-const badTmpl = "{{ .unterminated"
 
 // t4Exempt maps "<case>/<field path>" to the reason the field is allowed to
 // bypass template rendering. Keep this empty unless the spec says otherwise.
 var t4Exempt = map[string]string{}
-
-type t4Step struct {
-	field bool // true: struct field index; false: slice index
-	index int
-	name  string
-}
-
-// collectStringPaths records the path of every settable string reachable from v.
-func collectStringPaths(v reflect.Value, prefix []t4Step, out *[][]t4Step) {
-	switch v.Kind() {
-	case reflect.String:
-		cp := make([]t4Step, len(prefix))
-		copy(cp, prefix)
-		*out = append(*out, cp)
-	case reflect.Pointer:
-		if !v.IsNil() {
-			collectStringPaths(v.Elem(), prefix, out)
-		}
-	case reflect.Struct:
-		for i := 0; i < v.NumField(); i++ {
-			f := v.Type().Field(i)
-			if !f.IsExported() {
-				continue
-			}
-			collectStringPaths(v.Field(i), append(prefix, t4Step{true, i, f.Name}), out)
-		}
-	case reflect.Slice:
-		for i := 0; i < v.Len(); i++ {
-			collectStringPaths(v.Index(i), append(prefix, t4Step{false, i, fmt.Sprintf("[%d]", i)}), out)
-		}
-	}
-}
-
-func setByPath(root reflect.Value, path []t4Step, val string) {
-	v := root
-	for _, s := range path {
-		for v.Kind() == reflect.Pointer {
-			v = v.Elem()
-		}
-		if s.field {
-			v = v.Field(s.index)
-		} else {
-			v = v.Index(s.index)
-		}
-	}
-	v.SetString(val)
-}
-
-func pathName(path []t4Step) string {
-	parts := make([]string, 0, len(path))
-	for _, s := range path {
-		parts = append(parts, s.name)
-	}
-	return strings.Join(parts, ".")
-}
 
 func dryRunCtx(t *testing.T) *ExecutionContext {
 	t.Helper()
@@ -94,17 +39,6 @@ func dryRunCtx(t *testing.T) *ExecutionContext {
 		Params:    map[string]string{},
 		DryRun:    true,
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
-	}
-}
-
-func assertTemplateError(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected template parse error, got nil — field is not templated (spec T4 violation)")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "template") && !strings.Contains(msg, "unclosed action") {
-		t.Fatalf("expected template parse error, got: %v", err)
 	}
 }
 
@@ -208,20 +142,20 @@ func TestSpecT4(t *testing.T) {
 				t.Fatalf("baseline config failed to execute: %v", err)
 			}
 
-			var paths [][]t4Step
-			collectStringPaths(reflect.ValueOf(tc.cfg()), nil, &paths)
+			var paths [][]spectest.Step
+			spectest.CollectStringPaths(reflect.ValueOf(tc.cfg()), nil, &paths)
 			if len(paths) == 0 {
 				t.Fatal("no string fields found — reflection walk is broken")
 			}
 
 			for _, path := range paths {
-				t.Run(pathName(path), func(t *testing.T) {
-					if reason, ok := t4Exempt[tc.name+"/"+pathName(path)]; ok {
+				t.Run(spectest.PathName(path), func(t *testing.T) {
+					if reason, ok := t4Exempt[tc.name+"/"+spectest.PathName(path)]; ok {
 						t.Skipf("exempt from T4: %s", reason)
 					}
 					cfg := tc.cfg()
-					setByPath(reflect.ValueOf(cfg), path, badTmpl)
-					assertTemplateError(t, tc.run(t, cfg))
+					spectest.SetByPath(reflect.ValueOf(cfg), path, spectest.BadTmpl)
+					spectest.AssertTemplateError(t, tc.run(t, cfg))
 				})
 			}
 		})

@@ -183,6 +183,38 @@ func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	}
 }
 
+// T4: Dynamic param default is templated with already-resolved params.
+func TestResolveDynamicParams_DefaultTemplatedWithParams(t *testing.T) {
+	declared := []config.DynamicParamDef{
+		{Name: "foo", Command: "exit 1", Default: "{{ .env }}-unknown"},
+	}
+	resolved := map[string]string{"env": "prod"}
+
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved["foo"] != "prod-unknown" {
+		t.Errorf("expected prod-unknown, got %q", resolved["foo"])
+	}
+}
+
+// T4: Dynamic param default that fails to render returns an error.
+func TestResolveDynamicParams_DefaultTemplateError(t *testing.T) {
+	declared := []config.DynamicParamDef{
+		{Name: "foo", Command: "exit 1", Default: "{{ .env"},
+	}
+	resolved := make(map[string]string)
+
+	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	if err == nil {
+		t.Fatal("expected error for unrenderable default")
+	}
+	if !strings.Contains(err.Error(), "templating default for dynamic param") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // P4: Dynamic param command is templated with already-resolved params.
 func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	declared := []config.DynamicParamDef{

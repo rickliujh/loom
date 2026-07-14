@@ -53,14 +53,19 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 
 	// Execute child modules first.
 	for _, childRef := range mod.Config.Spec.Modules {
+		childName, err := tmpl.RenderString(childRef.Name, mod.Params)
+		if err != nil {
+			return fmt.Errorf("rendering name for child module %q: %w", childRef.Name, err)
+		}
+
 		renderedSource, err := tmpl.RenderString(childRef.Source, mod.Params)
 		if err != nil {
-			return fmt.Errorf("rendering source for child %q: %w", childRef.Name, err)
+			return fmt.Errorf("rendering source for child %q: %w", childName, err)
 		}
 
 		childDir, sourceCleanup, err := ResolveSource(renderedSource, mod.Dir, mod.Logger)
 		if err != nil {
-			return fmt.Errorf("resolving child module %q: %w", childRef.Name, err)
+			return fmt.Errorf("resolving child module %q: %w", childName, err)
 		}
 		if sourceCleanup != nil {
 			defer sourceCleanup()
@@ -71,26 +76,26 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		for k, v := range childRef.Params {
 			rendered, err := tmpl.RenderString(v, mod.Params)
 			if err != nil {
-				return fmt.Errorf("rendering param %q for child %q: %w", k, childRef.Name, err)
+				return fmt.Errorf("rendering param %q for child %q: %w", k, childName, err)
 			}
 			childParams[k] = rendered
 		}
 
 		childMod, err := Load(childDir, childParams, mod.Logger)
 		if err != nil {
-			return fmt.Errorf("loading child module %q: %w", childRef.Name, err)
+			return fmt.Errorf("loading child module %q: %w", childName, err)
 		}
 
 		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, targetDir, &opts)
 		if err != nil {
-			return fmt.Errorf("resolving target for child module %q: %w", childRef.Name, err)
+			return fmt.Errorf("resolving target for child module %q: %w", childName, err)
 		}
 		if cleanup != nil {
 			defer cleanup()
 		}
 
 		if err := Execute(ctx, childMod, childTargetDir, opts); err != nil {
-			return fmt.Errorf("executing child module %q: %w", childRef.Name, err)
+			return fmt.Errorf("executing child module %q: %w", childName, err)
 		}
 	}
 

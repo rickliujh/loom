@@ -105,7 +105,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 |-------|-------------|
 | `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
-| `default` | Fallback value if the command fails |
+| `default` | Fallback value used only if the command exits non-zero. Supports Go template syntax (rendered with already-resolved params). A successful command with empty output yields an empty value, not the default. |
 
 ```yaml
 dynamicParams:

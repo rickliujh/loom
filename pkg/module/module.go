@@ -45,12 +45,32 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, fmt.Errorf("resolving dynamic params for %s: %w", cfg.Metadata.Name, err)
 	}
 
+	// T4: exclude/include patterns are templatable with resolved params.
+	if err := renderPatterns("excludes", cfg.Spec.Excludes, params); err != nil {
+		return nil, fmt.Errorf("module %s: %w", cfg.Metadata.Name, err)
+	}
+	if err := renderPatterns("includes", cfg.Spec.Includes, params); err != nil {
+		return nil, fmt.Errorf("module %s: %w", cfg.Metadata.Name, err)
+	}
+
 	return &Module{
 		Dir:    dir,
 		Config: cfg,
 		Params: params,
 		Logger: logger.With("module", cfg.Metadata.Name),
 	}, nil
+}
+
+// renderPatterns templates each glob pattern in place with the resolved params.
+func renderPatterns(field string, patterns []string, params map[string]string) error {
+	for i, p := range patterns {
+		rendered, err := tmpl.RenderString(p, params)
+		if err != nil {
+			return fmt.Errorf("rendering %s[%d]: %w", field, i, err)
+		}
+		patterns[i] = rendered
+	}
+	return nil
 }
 
 // resolveParams merges provided params with declared defaults, checking required params.
@@ -108,8 +128,12 @@ func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string
 		val, err := evalParamCommand(dp.Name, renderedCmd, moduleDir, logger)
 		if err != nil {
 			if dp.Default != "" {
+				renderedDefault, tmplErr := tmpl.RenderString(dp.Default, resolved)
+				if tmplErr != nil {
+					return fmt.Errorf("templating default for dynamic param %q: %w", dp.Name, tmplErr)
+				}
 				logger.Warn("dynamic param command failed, using default", "param", dp.Name, "error", err)
-				resolved[dp.Name] = dp.Default
+				resolved[dp.Name] = renderedDefault
 				continue
 			}
 			return err

@@ -120,6 +120,8 @@ Extra parameters provided via CLI that are not declared in `spec.params` or `spe
 
 Dynamic params run after all static params are resolved. The `command` string is itself templatable with already-resolved params.
 
+Unlike a static param's `default` (used when no value is provided), a dynamic param's `default` is a fallback used only when the command exits non-zero. It is also templatable with already-resolved params, and is rendered only if the command fails. A successful command with empty output yields an empty value — the default does not apply.
+
 ```yaml
 params:
   - name: env
@@ -127,7 +129,7 @@ params:
 dynamicParams:
   - name: commitHash
     command: "git rev-parse --short HEAD"   # executed via sh -c
-    default: "unknown"                       # fallback if command fails
+    default: "{{ .env }}-unknown"            # fallback if command fails; templated
 ```
 
 #### P5: Dynamic params can chain
@@ -155,6 +157,7 @@ If a dynamic param's name is provided via CLI, the command is never executed. A 
 | Duplicate name across `params` and `dynamicParams` | `duplicate param name "<name>"` |
 | Dynamic param missing `command` | `dynamicParam "<name>": command is required` |
 | Dynamic param command fails and no default | `dynamic parameter "<name>" command failed: ...` |
+| Dynamic param default fails to render | `templating default for dynamic param "<name>": ...` |
 | Undeclared param provided via CLI | `undeclared parameter "<name>"` |
 
 ---

@@ -80,12 +80,57 @@ func Validate(lf *LoomFile) error {
 			return fmt.Errorf("operation %q must have exactly one action type, got %d", op.Name, count)
 		}
 
-		if op.Patch != nil && op.Patch.Engine != "" {
-			switch op.Patch.Engine {
-			case "smp", "json6902":
-				// valid
-			default:
-				return fmt.Errorf("operation %q: unknown patch engine %q (supported: smp, json6902)", op.Name, op.Patch.Engine)
+		if op.NewFiles != nil && op.NewFiles.Source == "" {
+			return fmt.Errorf("operation %q: newFiles source is required", op.Name)
+		}
+
+		if op.Patch != nil {
+			if op.Patch.Path == "" {
+				return fmt.Errorf("operation %q: patch path is required", op.Name)
+			}
+			if op.Patch.Target == "" {
+				return fmt.Errorf("operation %q: patch target is required", op.Name)
+			}
+			if op.Patch.Engine != "" {
+				switch op.Patch.Engine {
+				case "smp", "json6902":
+					// valid
+				default:
+					return fmt.Errorf("operation %q: unknown patch engine %q (supported: smp, json6902)", op.Name, op.Patch.Engine)
+				}
+			}
+		}
+
+		if op.Shell != nil {
+			if op.Shell.Command == "" {
+				return fmt.Errorf("operation %q: shell command is required", op.Name)
+			}
+			// Skip duration validation for templated values (resolved at run time).
+			if op.Shell.Timeout != "" && !isTemplated(op.Shell.Timeout) {
+				if _, err := time.ParseDuration(op.Shell.Timeout); err != nil {
+					return fmt.Errorf("operation %q: invalid shell timeout %q: %w", op.Name, op.Shell.Timeout, err)
+				}
+			}
+		}
+
+		if op.CommitPush != nil && op.CommitPush.Message == "" {
+			return fmt.Errorf("operation %q: commitPush message is required", op.Name)
+		}
+
+		if op.PR != nil {
+			if op.PR.Provider == "" {
+				return fmt.Errorf("operation %q: pr provider is required", op.Name)
+			}
+			if !isTemplated(op.PR.Provider) {
+				switch op.PR.Provider {
+				case "github", "gitlab":
+					// valid
+				default:
+					return fmt.Errorf("operation %q: unknown pr provider %q (supported: github, gitlab)", op.Name, op.PR.Provider)
+				}
+			}
+			if op.PR.Title == "" {
+				return fmt.Errorf("operation %q: pr title is required", op.Name)
 			}
 		}
 

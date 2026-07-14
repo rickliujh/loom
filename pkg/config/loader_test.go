@@ -134,6 +134,83 @@ func TestLoad_MissingConfig(t *testing.T) {
 	}
 }
 
+func TestLoad_YAMLUnknownFieldRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "loom.yaml", `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: typo-module
+spec:
+  operatoins:
+    - name: op1
+`)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for unknown field")
+	}
+	if !strings.Contains(err.Error(), "operatoins") {
+		t.Errorf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestLoad_YAMLUnknownNestedFieldRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "loom.yaml", `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: typo-module
+spec:
+  operations:
+    - name: op1
+      shell:
+        comand: echo hi
+`)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for unknown nested field")
+	}
+	if !strings.Contains(err.Error(), "comand") {
+		t.Errorf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestLoad_JsonnetUnknownFieldRejected(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "loom.jsonnet", `
+{
+  apiVersion: 'loom.rickliujh.github.io/v1beta1',
+  kind: 'Loom',
+  metadata: { name: 'typo-module' },
+  spec: { operatoins: [] },
+}
+`)
+
+	_, err := Load(dir)
+	if err == nil {
+		t.Fatal("expected error for unknown field in jsonnet output")
+	}
+	if !strings.Contains(err.Error(), "operatoins") {
+		t.Errorf("error should name the unknown field: %v", err)
+	}
+}
+
+func TestLoad_EmptyYAML(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "loom.yaml", "")
+
+	lf, err := Load(dir)
+	if err != nil {
+		t.Fatalf("unexpected error for empty file: %v", err)
+	}
+	if lf.APIVersion != "" {
+		t.Errorf("expected zero-value LoomFile, got %+v", lf)
+	}
+}
+
 func TestLoad_JsonnetEvalError(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "loom.jsonnet", `{ broken: undefined_var }`)

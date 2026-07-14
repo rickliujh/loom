@@ -261,6 +261,187 @@ func TestValidate_PatchEngineJSON6902(t *testing.T) {
 	}
 }
 
+// --- per-action required fields ---
+
+func TestValidate_NewFilesSourceRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "nf", NewFiles: &NewFiles{Dest: "out/"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing newFiles source")
+	}
+	if !strings.Contains(err.Error(), "newFiles source is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PatchPathRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "patch-op", Patch: &Patch{Target: "t.yaml"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing patch path")
+	}
+	if !strings.Contains(err.Error(), "patch path is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PatchTargetRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "patch-op", Patch: &Patch{Path: "p.yaml"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing patch target")
+	}
+	if !strings.Contains(err.Error(), "patch target is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ShellCommandRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing shell command")
+	}
+	if !strings.Contains(err.Error(), "shell command is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ShellTimeoutInvalid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo hi", Timeout: "not-a-duration"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for invalid shell timeout")
+	}
+	if !strings.Contains(err.Error(), "invalid shell timeout") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ShellTimeoutTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo hi", Timeout: "{{ .dur }}"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ShellTimeoutValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo hi", Timeout: "30s"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_CommitPushMessageRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "cp", CommitPush: &CommitPush{Author: "loom"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing commitPush message")
+	}
+	if !strings.Contains(err.Error(), "commitPush message is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PRProviderRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "pr", PR: &PR{Title: "title"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing pr provider")
+	}
+	if !strings.Contains(err.Error(), "pr provider is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PRProviderUnknown(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "pr", PR: &PR{Provider: "bitbucket", Title: "title"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for unknown pr provider")
+	}
+	if !strings.Contains(err.Error(), `unknown pr provider "bitbucket"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PRProviderTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "pr", PR: &PR{Provider: "{{ .provider }}", Title: "title"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PRTitleRequired(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "pr", PR: &PR{Provider: "github"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for missing pr title")
+	}
+	if !strings.Contains(err.Error(), "pr title is required") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PRValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "pr", PR: &PR{Provider: "gitlab", Title: "Add config"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidate_LLMOperationValid(t *testing.T) {
 	lf := &LoomFile{
 		APIVersion: ExpectedAPIVersion,

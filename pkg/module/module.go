@@ -32,7 +32,7 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		return nil, err
 	}
 
-	if err := config.Validate(cfg); err != nil {
+	if err := config.ValidateInDir(cfg, dir); err != nil {
 		return nil, fmt.Errorf("validating %s: %w", dir, err)
 	}
 

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -303,6 +305,7 @@ func TestValidate_TargetURLRequired(t *testing.T) {
 
 func TestValidate_TargetValid(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
 	lf.Spec.Target = &TargetSpec{URL: "https://github.com/org/repo.git", FeatureBranch: "loom/{{ .svc }}"}
 
 	if err := Validate(lf); err != nil {
@@ -356,6 +359,7 @@ func TestValidate_ModuleSourceRequired(t *testing.T) {
 
 func TestValidate_ModuleValid(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
 	lf.Spec.Modules = []ModuleRef{
 		{Name: "onboard-{{ .svc }}", Source: "../child", Params: map[string]string{"svc": "{{ .svc }}"}},
 	}
@@ -427,6 +431,7 @@ func TestValidate_TemplateSyntaxErrorInModuleSource(t *testing.T) {
 
 func TestValidate_TemplateWithFuncsValid(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "env"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "sh", Shell: &Shell{Command: `echo {{ default "dev" .env | upper }}`}},
 	}
@@ -451,10 +456,210 @@ func TestValidate_TemplateUnknownFuncRejected(t *testing.T) {
 	}
 }
 
+// --- undeclared param references ---
+
+func TestValidate_UndeclaredParamRef(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ .svc }} {{ .env }}"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for undeclared param reference")
+	}
+	if !strings.Contains(err.Error(), `operation "sh" shell.command: references undeclared param "env"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if strings.Contains(err.Error(), `"svc"`) {
+		t.Errorf("declared param should not be flagged: %v", err)
+	}
+}
+
+func TestValidate_UndeclaredParamRefNestedField(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ .cfg.key }}"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for undeclared param reference")
+	}
+	if !strings.Contains(err.Error(), `references undeclared param "cfg"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_UndeclaredParamRefReportedOnce(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ .env }} {{ .env }}"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for undeclared param reference")
+	}
+	if strings.Count(err.Error(), `undeclared param "env"`) != 1 {
+		t.Errorf("expected exactly one report per field, got: %v", err)
+	}
+}
+
+func TestValidate_DynamicParamCanReferenceEarlierParams(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "branch"}}
+	lf.Spec.DynamicParams = []DynamicParamDef{
+		{Name: "sha", Command: "git rev-parse {{ .branch }}"},
+		{Name: "short", Command: "echo {{ .sha }} | cut -c1-7"},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_DynamicParamCannotReferenceLaterParam(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.DynamicParams = []DynamicParamDef{
+		{Name: "short", Command: "echo {{ .sha }} | cut -c1-7"},
+		{Name: "sha", Command: "git rev-parse HEAD"},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for forward reference")
+	}
+	if !strings.Contains(err.Error(), `dynamicParam "short" command: references undeclared param "sha"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ParamRefCheckSkippedForRange(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", Shell: &Shell{Command: "echo {{ range . }}{{ .x }}{{ end }}"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("expected dot-rebinding template to be skipped: %v", err)
+	}
+}
+
+// --- filesystem checks (ValidateInDir) ---
+
+func fsLoomFile(op Operation) *LoomFile {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Operations = []Operation{op}
+	return lf
+}
+
+func TestValidateInDir_NewFilesSourceMissing(t *testing.T) {
+	dir := t.TempDir()
+	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates"}})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for missing newFiles source directory")
+	}
+	if !strings.Contains(err.Error(), `newFiles source "templates" not found`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_NewFilesSourceNotADir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "templates"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates"}})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for file newFiles source")
+	}
+	if !strings.Contains(err.Error(), `newFiles source "templates" is not a directory`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_NewFilesSourceExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates"}})
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_NewFilesSourceTemplatedSkipped(t *testing.T) {
+	dir := t.TempDir()
+	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates-{{ .svc }}"}})
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchFileMissing(t *testing.T) {
+	dir := t.TempDir()
+	lf := fsLoomFile(Operation{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "t.yaml"}})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for missing patch file")
+	}
+	if !strings.Contains(err.Error(), `patch file "patch.yaml" not found`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchPathIsDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "patch.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lf := fsLoomFile(Operation{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "t.yaml"}})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for directory patch path")
+	}
+	if !strings.Contains(err.Error(), `patch path "patch.yaml" is a directory`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchFileExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "patch.yaml"), []byte("a: b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := fsLoomFile(Operation{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "t.yaml"}})
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_SkipsFilesystemChecks(t *testing.T) {
+	lf := fsLoomFile(Operation{Name: "p", Patch: &Patch{Path: "nonexistent.yaml", Target: "t.yaml"}})
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("Validate without a dir must not stat paths: %v", err)
+	}
+}
+
 // --- templated enum values skipped ---
 
 func TestValidate_PatchEngineTemplatedSkipped(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "engine"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "patch-op", Patch: &Patch{Path: "p.yaml", Target: "t.yaml", Engine: "{{ .engine }}"}},
 	}
@@ -466,6 +671,7 @@ func TestValidate_PatchEngineTemplatedSkipped(t *testing.T) {
 
 func TestValidate_LLMRetryDelayTemplatedSkipped(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "delay"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "gen", LLM: &LLM{
 			Provider:   "openai",
@@ -483,6 +689,7 @@ func TestValidate_LLMRetryDelayTemplatedSkipped(t *testing.T) {
 
 func TestValidate_LLMModeTemplatedSkipped(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "mode"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "gen", LLM: &LLM{
 			Provider: "openai",
@@ -577,6 +784,7 @@ func TestValidate_ShellTimeoutInvalid(t *testing.T) {
 
 func TestValidate_ShellTimeoutTemplatedSkipped(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "dur"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "sh", Shell: &Shell{Command: "echo hi", Timeout: "{{ .dur }}"}},
 	}
@@ -644,6 +852,7 @@ func TestValidate_PRProviderUnknown(t *testing.T) {
 
 func TestValidate_PRProviderTemplatedSkipped(t *testing.T) {
 	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "provider"}}
 	lf.Spec.Operations = []Operation{
 		{Name: "pr", PR: &PR{Provider: "{{ .provider }}", Title: "title"}},
 	}

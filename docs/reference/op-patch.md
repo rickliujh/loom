@@ -17,6 +17,7 @@ Modifies YAML files already in the target repository. Loom supports two patch en
 | `engine` | Patch engine: `smp` (default) or `json6902` |
 | `path` | Path to the patch file, relative to module directory |
 | `target` | Path to the target file, relative to target repository root |
+| `preserveComments` | `"true"` (default) or `"false"`. Keep target comments through an `smp` merge. |
 
 All fields are rendered as Go templates over the resolved params before use.
 
@@ -41,6 +42,18 @@ The default engine. The patch file is a partial YAML document that is deep-merge
 - **Scalars** are replaced by the patch value.
 
 Original file formatting (indentation, key order, flow style) is preserved.
+
+### Comments
+
+By default, comments in the target file survive the merge — including comments on values the patch changes and on scalar list items. Set `preserveComments: "false"` to skip the restoration pass and keep only the comments the merge engine retains on its own (untouched fields). The field is templatable and must render to `true` or `false`. It only affects the `smp` engine; `json6902` preserves comments natively.
+
+```yaml
+- name: overlay-app
+  patch:
+    path: "__functions/patches/smp-overlay.yaml"
+    target: "argocd/application.yaml"
+    preserveComments: "false"
+```
 
 ### Example: Adding Labels
 

@@ -42,6 +42,19 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	if err != nil {
 		return actionError("patch", fmt.Errorf("rendering target: %w", err))
 	}
+	preserveStr, err := tmpl.RenderString(a.Config.PreserveComments, execCtx.Params)
+	if err != nil {
+		return actionError("patch", fmt.Errorf("rendering preserveComments: %w", err))
+	}
+	var preserveComments bool
+	switch preserveStr {
+	case "", "true":
+		preserveComments = true
+	case "false":
+		preserveComments = false
+	default:
+		return actionError("patch", fmt.Errorf("invalid patch preserveComments %q (supported: true, false)", preserveStr))
+	}
 
 	patchPath := util.ExpandPath(execCtx.ModuleDir, path)
 	targetPath := filepath.Join(execCtx.TargetDir, target)
@@ -50,7 +63,7 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would apply patch", "engine", engine, "patch", patchPath, "target", targetPath)
 		if execCtx.ShowDiff {
-			return a.showPatchDiff(execCtx, engine, patchPath, targetPath, target)
+			return a.showPatchDiff(execCtx, engine, patchPath, targetPath, target, preserveComments)
 		}
 		return nil
 	}
@@ -68,7 +81,7 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 
 	switch engine {
 	case "smp":
-		return a.applySMP(string(rendered), targetPath)
+		return a.applySMP(string(rendered), targetPath, preserveComments)
 	case "json6902":
 		return a.applyJSON6902(string(rendered), targetPath)
 	default:
@@ -80,7 +93,7 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 // format preservation. Scalar lists in the patch are pre-expanded with
 // the target's existing values so that merge2's list replacement produces
 // the correct append-unique result.
-func (a *PatchAction) applySMP(patchContent, targetPath string) error {
+func (a *PatchAction) applySMP(patchContent, targetPath string, preserveComments bool) error {
 	targetRaw, err := os.ReadFile(targetPath)
 	if err != nil {
 		return actionError("patch", fmt.Errorf("reading target file %q: %w", targetPath, err))
@@ -106,6 +119,13 @@ func (a *PatchAction) applySMP(patchContent, targetPath string) error {
 	result, err := restoreEmptyLists(merged, string(targetRaw))
 	if err != nil {
 		return actionError("patch", fmt.Errorf("restoring empty lists: %w", err))
+	}
+
+	if preserveComments {
+		result, err = restoreComments(result, string(targetRaw))
+		if err != nil {
+			return actionError("patch", fmt.Errorf("restoring comments: %w", err))
+		}
 	}
 
 	if err := os.WriteFile(targetPath, []byte(result), 0o644); err != nil {
@@ -214,6 +234,106 @@ func restoreWalkSeq(res, orig *kyaml.Node) {
 				restoreWalk(re.YNode(), oe.YNode())
 				break
 			}
+		}
+	}
+}
+
+// restoreComments walks the merge result alongside the original target and
+// copies head/line/foot comments back onto nodes that lost them during the
+// merge. merge2 drops target comments wherever the patch wins a node (changed
+// scalars, matched map-list items) and expandScalarLists rebuilds scalar
+// lists from plain values, losing per-item comments. Comments already present
+// on the result are never overwritten.
+func restoreComments(resultStr, targetStr string) (string, error) {
+	result, err := kyaml.Parse(resultStr)
+	if err != nil {
+		return "", err
+	}
+	target, err := kyaml.Parse(targetStr)
+	if err != nil {
+		return "", err
+	}
+	commentWalk(result.YNode(), target.YNode())
+	return result.String()
+}
+
+func copyComments(res, orig *kyaml.Node) {
+	if res.HeadComment == "" {
+		res.HeadComment = orig.HeadComment
+	}
+	if res.LineComment == "" {
+		res.LineComment = orig.LineComment
+	}
+	if res.FootComment == "" {
+		res.FootComment = orig.FootComment
+	}
+}
+
+func commentWalk(res, orig *kyaml.Node) {
+	if res == nil || orig == nil {
+		return
+	}
+	switch {
+	case res.Kind == kyaml.DocumentNode && orig.Kind == kyaml.DocumentNode:
+		copyComments(res, orig)
+		if len(res.Content) > 0 && len(orig.Content) > 0 {
+			commentWalk(res.Content[0], orig.Content[0])
+		}
+	case res.Kind == kyaml.MappingNode && orig.Kind == kyaml.MappingNode:
+		copyComments(res, orig)
+		for i := 0; i+1 < len(orig.Content); i += 2 {
+			rf := kyaml.NewRNode(res).Field(orig.Content[i].Value)
+			if rf == nil {
+				continue
+			}
+			// Head/foot comments attach to the key node, line comments to
+			// the key (block values) or the value (scalar values).
+			copyComments(rf.Key.YNode(), orig.Content[i])
+			commentWalk(rf.Value.YNode(), orig.Content[i+1])
+		}
+	case res.Kind == kyaml.SequenceNode && orig.Kind == kyaml.SequenceNode:
+		copyComments(res, orig)
+		commentWalkSeq(res, orig)
+	case res.Kind == kyaml.ScalarNode && orig.Kind == kyaml.ScalarNode:
+		copyComments(res, orig)
+	}
+}
+
+// commentWalkSeq matches sequence items between result and original —
+// map items by inferred merge key, scalar items by value — and restores
+// comments on each matched pair.
+func commentWalkSeq(res, orig *kyaml.Node) {
+	rElems := wrapRNodes(res.Content)
+	oElems := wrapRNodes(orig.Content)
+	if key := inferRNodeSliceKey(rElems, oElems); key != "" {
+		for _, oe := range oElems {
+			ov := fieldScalarValue(oe, key)
+			if ov == "" {
+				continue
+			}
+			for _, re := range rElems {
+				if fieldScalarValue(re, key) == ov {
+					commentWalk(re.YNode(), oe.YNode())
+					break
+				}
+			}
+		}
+		return
+	}
+	// Scalar items: each original item claims the first unclaimed result
+	// item with the same value.
+	claimed := make([]bool, len(res.Content))
+	for _, oc := range orig.Content {
+		if oc.Kind != kyaml.ScalarNode {
+			continue
+		}
+		for i, rc := range res.Content {
+			if claimed[i] || rc.Kind != kyaml.ScalarNode || rc.Value != oc.Value || rc.Tag != oc.Tag {
+				continue
+			}
+			claimed[i] = true
+			copyComments(rc, oc)
+			break
 		}
 	}
 }
@@ -437,7 +557,7 @@ func (a *PatchAction) applyJSON6902(patchContent, targetPath string) error {
 }
 
 // showPatchDiff renders the patch and displays a diff without writing.
-func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath, targetPath, target string) error {
+func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath, targetPath, target string, preserveComments bool) error {
 	patchRaw, err := os.ReadFile(patchPath)
 	if err != nil {
 		return actionError("patch", fmt.Errorf("reading patch file %q: %w", patchPath, err))
@@ -473,6 +593,12 @@ func (a *PatchAction) showPatchDiff(execCtx *ExecutionContext, engine, patchPath
 		result, err = restoreEmptyLists(merged, string(targetRaw))
 		if err != nil {
 			return actionError("patch", fmt.Errorf("restoring empty lists: %w", err))
+		}
+		if preserveComments {
+			result, err = restoreComments(result, string(targetRaw))
+			if err != nil {
+				return actionError("patch", fmt.Errorf("restoring comments: %w", err))
+			}
 		}
 	case "json6902":
 		node, err := kyaml.Parse(string(targetRaw))

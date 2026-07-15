@@ -613,6 +613,134 @@ func TestSMP_B8_ExpandFailureReturnsError(t *testing.T) {
 }
 
 // -------------------------------------------------------------------
+// B9: Comment preservation
+// -------------------------------------------------------------------
+
+// runPatchPreserve runs an smp patch with an explicit preserveComments value.
+func runPatchPreserve(t *testing.T, preserve, patchContent, targetContent string) string {
+	t.Helper()
+	moduleDir, targetDir, targetFile := setupPatch(t, patchContent, targetContent)
+
+	a := &PatchAction{Config: config.Patch{
+		Path:             "__functions/patches/patch.yaml",
+		Target:           targetFile,
+		PreserveComments: preserve,
+	}}
+
+	if err := a.Execute(context.Background(), testExecCtx(t, moduleDir, targetDir)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return readTarget(t, targetDir, targetFile)
+}
+
+const b9Target = `# top comment
+name: demo # inline name comment
+replicas: 1 # scale with care
+list: # list line comment
+  - a # item a comment
+  - b
+containers:
+  # head comment for web
+  - name: web # inline web
+    image: nginx:1 # image comment
+untouched:
+  # nested head
+  key: val # nested inline
+`
+
+const b9Patch = `replicas: 2
+list:
+  - c
+containers:
+  - name: web
+    image: nginx:2
+`
+
+func TestSMP_B9_CommentsPreservedByDefault(t *testing.T) {
+	result := runPatch(t, "smp", nil, b9Patch, b9Target)
+
+	for _, comment := range []string{
+		"# top comment",
+		"# inline name comment",
+		"# scale with care", // on a value the patch changed
+		"# list line comment",
+		"# item a comment", // scalar list item
+		"# head comment for web",
+		"# inline web",    // merge-key field of a matched map-list item
+		"# image comment", // changed field inside a matched map-list item
+		"# nested head",
+		"# nested inline",
+	} {
+		if !strings.Contains(result, comment) {
+			t.Errorf("expected %q preserved, got:\n%s", comment, result)
+		}
+	}
+	if !strings.Contains(result, "replicas: 2") || !strings.Contains(result, "image: nginx:2") {
+		t.Errorf("expected patch applied, got:\n%s", result)
+	}
+}
+
+func TestSMP_B9_ExplicitTruePreserves(t *testing.T) {
+	result := runPatchPreserve(t, "true", b9Patch, b9Target)
+	if !strings.Contains(result, "# item a comment") {
+		t.Errorf("expected scalar list item comment preserved, got:\n%s", result)
+	}
+}
+
+func TestSMP_B9_FalseDisablesRestoration(t *testing.T) {
+	result := runPatchPreserve(t, "false", b9Patch, b9Target)
+
+	// Comments dropped by the merge stay dropped.
+	for _, comment := range []string{"# item a comment", "# inline web", "# image comment"} {
+		if strings.Contains(result, comment) {
+			t.Errorf("expected %q dropped with preserveComments=false, got:\n%s", comment, result)
+		}
+	}
+	// Comments merge2 keeps on its own remain.
+	if !strings.Contains(result, "# nested inline") {
+		t.Errorf("expected untouched field comment kept, got:\n%s", result)
+	}
+}
+
+func TestSMP_B9_TemplatedPreserveComments(t *testing.T) {
+	moduleDir, targetDir, targetFile := setupPatch(t, b9Patch, b9Target)
+
+	a := &PatchAction{Config: config.Patch{
+		Path:             "__functions/patches/patch.yaml",
+		Target:           targetFile,
+		PreserveComments: "{{ .keepComments }}",
+	}}
+
+	execCtx := testExecCtx(t, moduleDir, targetDir)
+	execCtx.Params = map[string]string{"keepComments": "false"}
+
+	if err := a.Execute(context.Background(), execCtx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result := readTarget(t, targetDir, targetFile); strings.Contains(result, "# item a comment") {
+		t.Errorf("expected comment dropped via templated false, got:\n%s", result)
+	}
+}
+
+func TestSMP_B9_Error_InvalidPreserveComments(t *testing.T) {
+	moduleDir, targetDir, targetFile := setupPatch(t, b9Patch, b9Target)
+
+	a := &PatchAction{Config: config.Patch{
+		Path:             "__functions/patches/patch.yaml",
+		Target:           targetFile,
+		PreserveComments: "yes",
+	}}
+
+	err := a.Execute(context.Background(), testExecCtx(t, moduleDir, targetDir))
+	if err == nil {
+		t.Fatal("expected error for invalid preserveComments")
+	}
+	if !strings.Contains(err.Error(), "invalid patch preserveComments") {
+		t.Errorf("expected 'invalid patch preserveComments' error, got: %v", err)
+	}
+}
+
+// -------------------------------------------------------------------
 // Dry-run mode
 // -------------------------------------------------------------------
 

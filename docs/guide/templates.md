@@ -15,7 +15,7 @@ Loom uses Go's [`text/template`](https://pkg.go.dev/text/template) syntax. Insid
 | Quote | <code v-pre>{{ quote .value }}</code> | `"payments"` (escaped double-quoted string) |
 | To YAML | <code v-pre>{{ toYaml .value }}</code> | Value marshaled as 2-space-indented YAML |
 | From YAML | <code v-pre>{{ fromYaml .items }}</code> | String parsed into a value (list, map, or scalar) |
-| Split | <code v-pre>{{ .regions | split "," }}</code> | String divided around a separator, empty elements dropped |
+| Split | <code v-pre>{{ .regions \| split "," }}</code> | String divided around a separator, empty elements dropped |
 
 ## Multi-line Values
 

@@ -58,7 +58,7 @@ func Run(opts Options, logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	if err := config.Validate(cfg); err != nil {
+	if err := config.ValidateInDir(cfg, moduleDir); err != nil {
 		return fmt.Errorf("validating %s: %w", opts.ModuleRef, err)
 	}
 

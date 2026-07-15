@@ -825,6 +825,18 @@ Every templatable string field (see T4) must also parse as a valid Go
 template with the loom function map; syntax errors are reported as
 `<field>: invalid template: <parse error>`. Fields without `{{` always pass.
 
+Template param references (`{{ .name }}`) must resolve to declared params:
+`<field>: references undeclared param "<name>"`. Dynamic param templates may
+only reference static params and dynamic params declared before them (P4/P5
+evaluation order). Templates that rebind dot (`range`/`with`) are exempt from
+reference checking, since their fields cannot be resolved statically.
+
+When the module directory is known (`loom validate`, `loom run`, `loom bulk`
+— i.e. everywhere except in-memory configs), filesystem checks also apply:
+`newFiles.source` must be an existing directory and `patch.path` an existing
+file, resolved against the module directory exactly as at run time. Templated
+paths are skipped.
+
 | Rule | Error |
 |------|-------|
 | Config contains only known fields (strict decoding; applies to `loom.yaml` and evaluated `loom.jsonnet` output) | `parsing loom.yaml: ... field <name> not found in type ...` |
@@ -842,7 +854,9 @@ template with the loom function map; syntax errors are reported as
 | Operation names unique | `duplicate operation name "<name>"` |
 | Each operation has exactly one action type | `operation "<name>" must have exactly one action type, got <N>` |
 | `newFiles.source` required | `operation "<name>": newFiles source is required` |
+| `newFiles.source` exists and is a directory (module dir known, non-templated) | `operation "<name>": newFiles source "<path>" not found in module directory` |
 | `patch.path` required | `operation "<name>": patch path is required` |
+| `patch.path` exists and is a file (module dir known, non-templated) | `operation "<name>": patch file "<path>" not found in module directory` |
 | `patch.target` required | `operation "<name>": patch target is required` |
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
 | `shell.command` required | `operation "<name>": shell command is required` |

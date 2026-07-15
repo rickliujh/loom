@@ -3,11 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"text/template"
+	ttparse "text/template/parse"
 	"time"
 
+	"github.com/rickliujh/loom/internal/util"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
@@ -20,19 +23,49 @@ const (
 // All violations are collected and returned as a single joined error so a
 // config can be fixed in one pass.
 func Validate(lf *LoomFile) error {
+	return validate(lf, "")
+}
+
+// ValidateInDir runs all Validate checks plus filesystem checks that need
+// the module directory: newFiles.source must be an existing directory and
+// patch.path an existing file (both resolved like at run time, skipped when
+// templated).
+func ValidateInDir(lf *LoomFile, moduleDir string) error {
+	return validate(lf, moduleDir)
+}
+
+func validate(lf *LoomFile, moduleDir string) error {
 	var errs []error
 	fail := func(format string, args ...any) {
 		errs = append(errs, fmt.Errorf(format, args...))
 	}
+	// paramNames is consulted by checkTmpl while still being built: dynamic
+	// param templates may only reference params declared before them, while
+	// everything after the param loops sees the complete set.
+	paramNames := make(map[string]bool)
 	// checkTmpl parses value as a Go template with the loom function map and
-	// records a violation on syntax errors. Values without template
-	// expressions always parse, so they are skipped.
+	// records a violation on syntax errors or references to undeclared
+	// params. Values without template expressions always pass, so they are
+	// skipped.
 	checkTmpl := func(field, value string) {
 		if !isTemplated(value) {
 			return
 		}
-		if _, err := template.New("").Funcs(tmpl.FuncMap()).Parse(value); err != nil {
+		t, err := template.New("").Funcs(tmpl.FuncMap()).Parse(value)
+		if err != nil {
 			fail("%s: invalid template: %v", field, err)
+			return
+		}
+		refs, ok := templateParamRefs(t.Tree.Root)
+		if !ok {
+			return
+		}
+		seen := make(map[string]bool)
+		for _, r := range refs {
+			if !paramNames[r] && !seen[r] {
+				seen[r] = true
+				fail("%s: references undeclared param %q", field, r)
+			}
 		}
 	}
 
@@ -46,7 +79,6 @@ func Validate(lf *LoomFile) error {
 		fail("metadata.name is required")
 	}
 
-	paramNames := make(map[string]bool)
 	for _, p := range lf.Spec.Params {
 		if p.Name == "" {
 			fail("param name cannot be empty")
@@ -69,9 +101,12 @@ func Validate(lf *LoomFile) error {
 		if dp.Command == "" {
 			fail("dynamicParam %q: command is required", dp.Name)
 		}
-		paramNames[dp.Name] = true
+		// Checked before the name is registered: dynamic params are evaluated
+		// in declaration order, so a command may only reference static params
+		// and earlier dynamic params, never itself or later ones.
 		checkTmpl(fmt.Sprintf("dynamicParam %q command", dp.Name), dp.Command)
 		checkTmpl(fmt.Sprintf("dynamicParam %q default", dp.Name), dp.Default)
+		paramNames[dp.Name] = true
 	}
 
 	for i, e := range lf.Spec.Excludes {
@@ -152,6 +187,13 @@ func Validate(lf *LoomFile) error {
 		if op.NewFiles != nil {
 			if op.NewFiles.Source == "" {
 				fail("operation %q: newFiles source is required", op.Name)
+			} else if moduleDir != "" && !isTemplated(op.NewFiles.Source) {
+				src := util.ExpandPath(moduleDir, op.NewFiles.Source)
+				if info, err := os.Stat(src); err != nil {
+					fail("operation %q: newFiles source %q not found in module directory", op.Name, op.NewFiles.Source)
+				} else if !info.IsDir() {
+					fail("operation %q: newFiles source %q is not a directory", op.Name, op.NewFiles.Source)
+				}
 			}
 			checkTmpl(fmt.Sprintf("operation %q newFiles.source", op.Name), op.NewFiles.Source)
 			checkTmpl(fmt.Sprintf("operation %q newFiles.dest", op.Name), op.NewFiles.Dest)
@@ -160,6 +202,13 @@ func Validate(lf *LoomFile) error {
 		if op.Patch != nil {
 			if op.Patch.Path == "" {
 				fail("operation %q: patch path is required", op.Name)
+			} else if moduleDir != "" && !isTemplated(op.Patch.Path) {
+				p := util.ExpandPath(moduleDir, op.Patch.Path)
+				if info, err := os.Stat(p); err != nil {
+					fail("operation %q: patch file %q not found in module directory", op.Name, op.Patch.Path)
+				} else if info.IsDir() {
+					fail("operation %q: patch path %q is a directory, expected a file", op.Name, op.Patch.Path)
+				}
 			}
 			if op.Patch.Target == "" {
 				fail("operation %q: patch target is required", op.Name)
@@ -281,4 +330,56 @@ func Validate(lf *LoomFile) error {
 // isTemplated returns true if the string contains Go template expressions.
 func isTemplated(s string) bool {
 	return strings.Contains(s, "{{")
+}
+
+// templateParamRefs collects the names referenced as top-level fields
+// ({{ .name }}, {{ .name.sub }} → "name") in a parsed template. ok is false
+// when the template rebinds dot (range/with) — field references inside such
+// templates cannot be resolved statically, so reference checking is skipped.
+func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
+	ok = true
+	var walkNode func(n ttparse.Node)
+	walkPipe := func(p *ttparse.PipeNode) {
+		if p == nil {
+			return
+		}
+		for _, c := range p.Cmds {
+			for _, arg := range c.Args {
+				walkNode(arg)
+			}
+		}
+	}
+	walkNode = func(n ttparse.Node) {
+		if n == nil || !ok {
+			return
+		}
+		switch n := n.(type) {
+		case *ttparse.ListNode:
+			for _, item := range n.Nodes {
+				walkNode(item)
+			}
+		case *ttparse.ActionNode:
+			walkPipe(n.Pipe)
+		case *ttparse.IfNode:
+			walkPipe(n.Pipe)
+			if n.List != nil {
+				walkNode(n.List)
+			}
+			if n.ElseList != nil {
+				walkNode(n.ElseList)
+			}
+		case *ttparse.RangeNode, *ttparse.WithNode:
+			ok = false
+		case *ttparse.TemplateNode:
+			walkPipe(n.Pipe)
+		case *ttparse.PipeNode:
+			walkPipe(n)
+		case *ttparse.FieldNode:
+			refs = append(refs, n.Ident[0])
+		case *ttparse.ChainNode:
+			walkNode(n.Node)
+		}
+	}
+	walkNode(root)
+	return refs, ok
 }

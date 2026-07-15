@@ -30,7 +30,7 @@ func validateModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if err := config.Validate(lf); err != nil {
+	if err := config.ValidateInDir(lf, moduleDir); err != nil {
 		return err
 	}
 

@@ -263,6 +263,46 @@ func TestValidate_PatchEngineJSON6902(t *testing.T) {
 	}
 }
 
+func TestValidate_PatchPreserveCommentsInvalid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "patch-op", Patch: &Patch{Path: "p.yaml", Target: "t.yaml", PreserveComments: "yes"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for invalid preserveComments")
+	}
+	if !strings.Contains(err.Error(), `invalid patch preserveComments "yes"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PatchPreserveCommentsValid(t *testing.T) {
+	for _, v := range []string{"", "true", "false"} {
+		lf := validLoomFile()
+		lf.Spec.Operations = []Operation{
+			{Name: "patch-op", Patch: &Patch{Path: "p.yaml", Target: "t.yaml", PreserveComments: v}},
+		}
+
+		if err := Validate(lf); err != nil {
+			t.Fatalf("preserveComments=%q: unexpected error: %v", v, err)
+		}
+	}
+}
+
+func TestValidate_PatchPreserveCommentsTemplatedSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "keep"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "patch-op", Patch: &Patch{Path: "p.yaml", Target: "t.yaml", PreserveComments: "{{ .keep }}"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 // --- error collection ---
 
 func TestValidate_CollectsAllErrors(t *testing.T) {

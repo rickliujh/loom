@@ -68,6 +68,9 @@ type Patch struct {
 	Engine string `yaml:"engine,omitempty"` // "smp" (default, strategic merge patch) or "json6902"
 	Path   string `yaml:"path"`
 	Target string `yaml:"target"`
+	// PreserveComments controls whether target comments survive an smp merge:
+	// "true" (default) or "false". String so it stays templatable (T4).
+	PreserveComments string `yaml:"preserveComments,omitempty"`
 }
 
 type Shell struct {

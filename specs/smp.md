@@ -13,6 +13,7 @@ The SMP engine deep-merges a partial YAML document (the **patch**) into an exist
 | `patch.path`  | Relative path (from module root) to the patch YAML file. Typically under `__functions/patches/`. |
 | `patch.target`| Relative path (from target repo root) to the YAML file to patch. |
 | `patch.engine`| Optional. Defaults to `"smp"`. Set to `"json6902"` for RFC 6902 mode. |
+| `patch.preserveComments`| Optional. `"true"` (default) or `"false"`. When true, comments in the target survive the merge (see B9). |
 
 ## Execution Flow
 
@@ -21,7 +22,8 @@ The SMP engine deep-merges a partial YAML document (the **patch**) into an exist
 3. **Read** the target file from `<targetDir>/<patch.target>`.
 4. **Expand scalar lists** — pre-process the patch so that scalar lists include the target's existing values (deduped) before merge (see below).
 5. **Merge** the expanded patch into the target using `kustomize/kyaml/yaml/merge2.MergeStrings`.
-6. **Write** the merged result back to the target file path, overwriting the original.
+6. **Restore comments** — unless `preserveComments` is `"false"`, copy target comments lost during the merge back onto the result (see B9).
+7. **Write** the merged result back to the target file path, overwriting the original.
 
 ## Merge Behaviors
 
@@ -125,6 +127,24 @@ metadata:                               metadata:
 
 If the expand-scalar-lists pre-processing fails to unmarshal either document (e.g., malformed YAML), the error is propagated immediately. There is no silent fallback — since expand and merge2 share the same YAML parser, any document that fails expand would also fail merge2.
 
+### B9: Comment preservation
+
+By default (`preserveComments: "true"` or unset), comments in the target document survive the merge. The merge itself drops target comments wherever the patch wins a node — changed scalar values, matched map-list items, and rebuilt scalar lists — so after merging, the engine walks the result alongside the original target and copies head/line/foot comments back onto matching nodes (mapping fields matched by key name, map-list items by inferred merge key, scalar list items by value). A comment already present on the result node is never overwritten.
+
+Note that a comment attached to a value the patch changed is kept next to the new value.
+
+```yaml
+# target                        # patch                     # result (preserveComments: true)
+replicas: 1 # scale with care   replicas: 2                 replicas: 2 # scale with care
+list:                           list:                       list:
+  - a # keep first                - c                         - a # keep first
+                                                              - c
+```
+
+With `preserveComments: "false"`, no restoration pass runs and only the comments merge2 itself keeps (untouched fields, head comments of surviving map entries) remain.
+
+The value must render to `"true"`, `"false"`, or empty; anything else fails the operation. The setting only affects the `smp` engine — `json6902` edits the target document in place and preserves comments natively.
+
 ## Dry-run Mode
 
 When `dryRun` is `true`, the patch action logs what it **would** do but does not read or modify the target file.
@@ -140,6 +160,7 @@ When `dryRun` is `true`, the patch action logs what it **would** do but does not
 | merge2 fails (e.g., type conflict) | `strategic merge patch failed: ...` |
 | Writing result fails | `writing patched file "<path>": ...` |
 | Unknown engine value | `unknown patch engine "<engine>" (supported: smp, json6902)` |
+| Invalid preserveComments value | `invalid patch preserveComments "<value>" (supported: true, false)` |
 
 ## End-to-End Example
 

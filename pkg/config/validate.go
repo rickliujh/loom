@@ -222,9 +222,18 @@ func validate(lf *LoomFile, moduleDir string) error {
 					fail("operation %q: unknown patch engine %q (supported: smp, json6902)", op.Name, op.Patch.Engine)
 				}
 			}
+			if op.Patch.PreserveComments != "" && !isTemplated(op.Patch.PreserveComments) {
+				switch op.Patch.PreserveComments {
+				case "true", "false":
+					// valid
+				default:
+					fail("operation %q: invalid patch preserveComments %q (supported: true, false)", op.Name, op.Patch.PreserveComments)
+				}
+			}
 			checkTmpl(fmt.Sprintf("operation %q patch.engine", op.Name), op.Patch.Engine)
 			checkTmpl(fmt.Sprintf("operation %q patch.path", op.Name), op.Patch.Path)
 			checkTmpl(fmt.Sprintf("operation %q patch.target", op.Name), op.Patch.Target)
+			checkTmpl(fmt.Sprintf("operation %q patch.preserveComments", op.Name), op.Patch.PreserveComments)
 		}
 
 		if op.Shell != nil {

@@ -175,7 +175,10 @@ func parseLocalRef(path string, snap SnapshotOptions, logger *slog.Logger) (*Sou
 			LocalPath: repo, BaseRev: base, HeadRev: head,
 		}}, nil
 	}
-	return nil, fmt.Errorf("local path %q is not a commit reference; snapshot sources are not supported yet", path)
+	logger.Debug("detected snapshot reference", "path", path)
+	return &Source{Kind: KindSnapshot, ChangeSource: &SnapshotSource{
+		Path: path, Include: snap.Include, Exclude: snap.Exclude, Base: snap.Base,
+	}}, nil
 }
 
 func isPathLike(ref string) bool {

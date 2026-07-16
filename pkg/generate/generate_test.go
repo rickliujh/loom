@@ -1539,6 +1539,21 @@ func TestRun_ComposesMultipleCommitSources(t *testing.T) {
 	}
 }
 
+func TestRun_SnapshotOnlyRequiresName(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "a/f.yaml", "x: 1\n")
+
+	opts := Options{
+		Refs:      []string{dir},
+		Include:   []string{"a/**"},
+		OutputDir: t.TempDir(),
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "--name is required") {
+		t.Errorf("expected name-required error, got %v", err)
+	}
+}
+
 func TestRun_SnapshotFlagsRequireSnapshotSource(t *testing.T) {
 	opts := Options{
 		Refs:    []string{"github:o/r#1"},

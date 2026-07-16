@@ -209,3 +209,111 @@ func TestCommitSource_NotARepo(t *testing.T) {
 		t.Error("expected error for non-repo path")
 	}
 }
+
+// --- SnapshotSource ---
+
+func TestSnapshotSource_NoBase_CapturesMatchedFiles(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "services/payments/deploy.yaml", "kind: Deployment\n")
+	mustWrite(t, dir, "services/payments/svc.yaml", "kind: Service\n")
+	mustWrite(t, dir, "services/billing/deploy.yaml", "kind: Deployment\n")
+	mustWrite(t, dir, "README.md", "docs\n")
+
+	src := &SnapshotSource{Path: dir, Include: []string{"services/payments/**"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cs.Files) != 2 {
+		t.Fatalf("expected 2 files, got %+v", cs.Files)
+	}
+	for _, f := range cs.Files {
+		if f.Type != ChangeAdded {
+			t.Errorf("%s: type = %v, want added", f.Path, f.Type)
+		}
+	}
+	// Not a git repo: no repo metadata, degraded module expected downstream.
+	if cs.RepoURL != "" || cs.Provider != "" {
+		t.Errorf("expected empty repo metadata, got %q / %q", cs.RepoURL, cs.Provider)
+	}
+}
+
+func TestSnapshotSource_Exclude(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "services/payments/deploy.yaml", "kind: Deployment\n")
+	mustWrite(t, dir, "services/payments/secret.yaml", "kind: Secret\n")
+
+	src := &SnapshotSource{Path: dir, Include: []string{"services/**"}, Exclude: []string{"**/secret.yaml"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.Files) != 1 || cs.Files[0].Path != "services/payments/deploy.yaml" {
+		t.Errorf("expected only deploy.yaml, got %+v", cs.Files)
+	}
+}
+
+func TestSnapshotSource_WithBase_DiffsWorkingTree(t *testing.T) {
+	r := newFixtureRepo(t)
+	r.write("config/app.yaml", "replicas: 1\n")
+	r.write("config/keep.yaml", "keep: true\n")
+	r.commit("initial")
+
+	// Uncommitted current state: modify, delete, and add an untracked file.
+	r.write("config/app.yaml", "replicas: 5\n")
+	if err := os.Remove(filepath.Join(r.dir, "config/keep.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	r.write("config/brand-new.yaml", "new: true\n")
+
+	src := &SnapshotSource{Path: r.dir, Include: []string{"config/**"}, Base: "main"}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cs.Files) != 3 {
+		t.Fatalf("expected 3 changes, got %+v", cs.Files)
+	}
+	mod := fileByPath(t, cs.Files, "config/app.yaml")
+	if mod.Type != ChangeModified || !strings.Contains(string(mod.OldContent), "replicas: 1") || !strings.Contains(string(mod.NewContent), "replicas: 5") {
+		t.Errorf("app.yaml: %v %q → %q", mod.Type, mod.OldContent, mod.NewContent)
+	}
+	if f := fileByPath(t, cs.Files, "config/keep.yaml"); f.Type != ChangeDeleted {
+		t.Errorf("keep.yaml type = %v, want deleted", f.Type)
+	}
+	if f := fileByPath(t, cs.Files, "config/brand-new.yaml"); f.Type != ChangeAdded {
+		t.Errorf("brand-new.yaml type = %v, want added (untracked)", f.Type)
+	}
+	if cs.BaseBranch != "main" {
+		t.Errorf("baseBranch = %q, want main", cs.BaseBranch)
+	}
+}
+
+func TestSnapshotSource_RequiresInclude(t *testing.T) {
+	src := &SnapshotSource{Path: t.TempDir()}
+	_, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err == nil || !strings.Contains(err.Error(), "--include") {
+		t.Errorf("expected include-required error, got %v", err)
+	}
+}
+
+func TestSnapshotSource_BaseRequiresGitRepo(t *testing.T) {
+	src := &SnapshotSource{Path: t.TempDir(), Include: []string{"**"}, Base: "main"}
+	_, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err == nil || !strings.Contains(err.Error(), "git repository") {
+		t.Errorf("expected git-repo-required error, got %v", err)
+	}
+}
+
+func mustWrite(t *testing.T, dir, rel, content string) {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

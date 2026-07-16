@@ -69,6 +69,38 @@ func TestParseSourceRef_LocalCommitRef(t *testing.T) {
 	}
 }
 
+func TestParseSourceRef_SnapshotRefs(t *testing.T) {
+	snap := SnapshotOptions{Include: []string{"a/**"}, Exclude: []string{"b/**"}, Base: "main"}
+	tests := []struct {
+		ref  string
+		path string
+	}{
+		{"./checkout", "./checkout"},
+		{"/abs/path", "/abs/path"},
+		{"file:relative/dir", "relative/dir"},
+		// Non-SHA suffix after @ on a path stays a snapshot path.
+		{"./release@v2", "./release@v2"},
+	}
+	for _, tt := range tests {
+		src, err := ParseSourceRef(tt.ref, snap, testLogger())
+		if err != nil {
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
+			continue
+		}
+		if src.Kind != KindSnapshot {
+			t.Errorf("ParseSourceRef(%q) kind = %v, want snapshot", tt.ref, src.Kind)
+			continue
+		}
+		ss := src.ChangeSource.(*SnapshotSource)
+		if ss.Path != tt.path {
+			t.Errorf("ParseSourceRef(%q) path = %q, want %q", tt.ref, ss.Path, tt.path)
+		}
+		if len(ss.Include) != 1 || len(ss.Exclude) != 1 || ss.Base != "main" {
+			t.Errorf("ParseSourceRef(%q) snapshot options not threaded: %+v", tt.ref, ss)
+		}
+	}
+}
+
 func TestParseSourceRef_PRShortFormStillWins(t *testing.T) {
 	// A '#' short-form must remain a PR source even though it contains no rev.
 	src, err := ParseSourceRef("github:owner/repo#123", SnapshotOptions{}, testLogger())
@@ -108,6 +140,32 @@ func TestInferProviderFromURL(t *testing.T) {
 	for _, tt := range tests {
 		if got := inferProviderFromURL(tt.url); got != tt.want {
 			t.Errorf("inferProviderFromURL(%q) = %q, want %q", tt.url, got, tt.want)
+		}
+	}
+}
+
+func TestMatchGlob(t *testing.T) {
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		{"services/payments/**", "services/payments/deploy.yaml", true},
+		{"services/payments/**", "services/payments/sub/dir/file.yaml", true},
+		{"services/payments/**", "services/billing/deploy.yaml", false},
+		{"**/*.yaml", "a/b/c.yaml", true},
+		{"**/*.yaml", "top.yaml", true},
+		{"**/*.yaml", "a/b/c.json", false},
+		{"*.yaml", "top.yaml", true},
+		{"*.yaml", "a/top.yaml", false},
+		// No wildcards → directory prefix convenience.
+		{"services/payments", "services/payments/deploy.yaml", true},
+		{"services/payments", "services/payments", true},
+		{"services/payments", "services/payments-v2/deploy.yaml", false},
+	}
+	for _, tt := range tests {
+		if got := matchGlob(tt.pattern, tt.path); got != tt.want {
+			t.Errorf("matchGlob(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
 		}
 	}
 }

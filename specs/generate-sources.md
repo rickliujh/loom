@@ -1,6 +1,6 @@
 # Generate Sources — Design Proposal (Draft)
 
-Status: **draft / not implemented**. Extends [`specs/generate.md`](generate.md).
+Status: **implemented**. Extends [`specs/generate.md`](generate.md).
 
 ## Problem
 
@@ -102,8 +102,8 @@ helpers) instead of API tokens. `--token-env` does not apply to commit sources.
    if the server refuses, fall back to a full fetch with a warning. Servers
    without partial-clone support fall back to a plain bare clone.
 3. **Single `sha`** is treated as range `sha^...sha` (first parent for merge
-   commits — the diff is "what this merge brought in"); the parent is covered
-   by fetching with `--depth=2`.
+   commits — the diff is "what this merge brought in"). The parent is always
+   available: the bare partial clone filters blobs, not history.
 
 Builds on `pkg/git`'s existing go-git-with-CLI-fallback pattern.
 
@@ -259,8 +259,10 @@ git-native and use the user's git credentials.
 | `--include`/`--base` without a snapshot ref | `--include/--base require a local path source` |
 | Snapshot path not a git repo with `--base` | `--base requires <path> to be a git repository` |
 | Snapshot-only sources without `-n` | `--name is required when generating from local files` |
-| Bad commit ref | `cannot resolve commit "<sha>" in <repo>: ...` |
+| Bad commit ref | `cannot resolve commit "<sha>": ...` |
 | Clone/fetch failure (auth, unreachable host) | `fetching <repo>: ...` (surfaces the underlying git error) |
+| A source has no file changes | `source "<ref>" has no file changes` |
+| Snapshot path is not the repo root with `--base` | `snapshot path <path> must be the repository root (<root>) when using --base` |
 
 ## Implementation phases
 

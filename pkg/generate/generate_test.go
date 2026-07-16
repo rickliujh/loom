@@ -1472,6 +1472,73 @@ func TestBuildModule_SynthesizesFeatureBranchAndTitle(t *testing.T) {
 
 // --- End-to-end: multiple sources composed through Run ---
 
+func TestRun_ComposesMultipleCommitSources(t *testing.T) {
+	r := newFixtureRepo(t)
+	c1, c2, c3 := seedHistory(r)
+	outputDir := filepath.Join(t.TempDir(), "module")
+
+	opts := Options{
+		Refs: []string{
+			r.dir + "@" + c1 + "..." + c2,
+			r.dir + "@" + c2 + "..." + c3,
+		},
+		OutputDir:  outputDir,
+		ModuleName: "combo",
+	}
+	if err := Run(t.Context(), opts, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "loom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lf config.LoomFile
+	if err := yaml.Unmarshal(data, &lf); err != nil {
+		t.Fatalf("invalid loom.yaml: %v", err)
+	}
+	if lf.Metadata.Name != "combo" {
+		t.Errorf("module name = %q", lf.Metadata.Name)
+	}
+
+	// Net effect of both ranges: renamed.yaml added (add+rename composed),
+	// base.yaml patched, app.json deleted. Fixture has no origin remote, so
+	// target and pr degrade away; commitPush remains.
+	var hasNewFiles, hasPatch, hasRm, hasCommit, hasPR bool
+	for _, op := range lf.Spec.Operations {
+		switch {
+		case op.NewFiles != nil:
+			hasNewFiles = true
+		case op.Patch != nil:
+			hasPatch = true
+			if op.Patch.Target != "config/base.yaml" {
+				t.Errorf("patch target = %q", op.Patch.Target)
+			}
+		case op.Shell != nil && strings.Contains(op.Shell.Command, "rm"):
+			hasRm = true
+		case op.CommitPush != nil:
+			hasCommit = true
+		case op.PR != nil:
+			hasPR = true
+		}
+	}
+	if !hasNewFiles || !hasPatch || !hasRm || !hasCommit {
+		t.Errorf("missing operations (newFiles=%v patch=%v rm=%v commit=%v): %+v",
+			hasNewFiles, hasPatch, hasRm, hasCommit, lf.Spec.Operations)
+	}
+	if hasPR {
+		t.Error("expected pr operation to be omitted (no remote)")
+	}
+	if lf.Spec.Target != nil {
+		t.Error("expected target to be omitted (no remote)")
+	}
+
+	// The added-then-renamed file lands as a template at its final path.
+	if _, err := os.Stat(filepath.Join(outputDir, "config", "renamed.yaml")); err != nil {
+		t.Errorf("expected template config/renamed.yaml: %v", err)
+	}
+}
+
 func TestRun_SnapshotFlagsRequireSnapshotSource(t *testing.T) {
 	opts := Options{
 		Refs:    []string{"github:o/r#1"},

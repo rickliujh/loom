@@ -96,12 +96,34 @@ var (
 func ParseSourceRef(ref string, snap SnapshotOptions, logger *slog.Logger) (*Source, error) {
 	logger.Debug("parsing source reference", "ref", ref)
 
+	// Local paths — snapshot, or commit source when an @<rev> suffix is
+	// present. Only hex SHAs are accepted as rev suffixes on paths so that
+	// directory names containing '@' are not misclassified.
+	if path, ok := strings.CutPrefix(ref, "file:"); ok {
+		return parseLocalRef(path, snap, logger)
+	}
+	if isPathLike(ref) {
+		return parseLocalRef(ref, snap, logger)
+	}
+
 	// Short-form references — unambiguous, checked first.
-	if strings.HasPrefix(ref, "github:") {
+	if body, ok := strings.CutPrefix(ref, "github:"); ok {
+		if repo, base, head, ok := splitRevSuffix(body, true); ok {
+			logger.Debug("detected GitHub short-form commit reference")
+			return &Source{Kind: KindCommit, Provider: "github", ChangeSource: &CommitSource{
+				RepoURL: fmt.Sprintf("git@github.com:%s.git", repo), BaseRev: base, HeadRev: head, Provider: "github",
+			}}, nil
+		}
 		logger.Debug("detected GitHub short-form reference")
 		return &Source{Kind: KindPR, Provider: "github", ChangeSource: &GitHubSource{}}, nil
 	}
-	if strings.HasPrefix(ref, "gitlab:") {
+	if body, ok := strings.CutPrefix(ref, "gitlab:"); ok {
+		if repo, base, head, ok := splitRevSuffix(body, true); ok {
+			logger.Debug("detected GitLab short-form commit reference")
+			return &Source{Kind: KindCommit, Provider: "gitlab", ChangeSource: &CommitSource{
+				RepoURL: fmt.Sprintf("git@gitlab.com:%s.git", repo), BaseRev: base, HeadRev: head, Provider: "gitlab",
+			}}, nil
+		}
 		logger.Debug("detected GitLab short-form reference")
 		return &Source{Kind: KindPR, Provider: "gitlab", ChangeSource: &GitLabSource{}}, nil
 	}
@@ -116,7 +138,86 @@ func ParseSourceRef(ref string, snap SnapshotOptions, logger *slog.Logger) (*Sou
 		return &Source{Kind: KindPR, Provider: "gitlab", ChangeSource: &GitLabSource{}}, nil
 	}
 
+	// Commit / compare URLs — sugar for <repo>@<range>, handled via git.
+	if m := commitURLPattern.FindStringSubmatch(ref); m != nil {
+		logger.Debug("detected commit URL")
+		repoURL := m[1] + ".git"
+		provider := inferProviderFromURL(repoURL)
+		return &Source{Kind: KindCommit, Provider: provider, ChangeSource: &CommitSource{
+			RepoURL: repoURL, HeadRev: m[2], Provider: provider,
+		}}, nil
+	}
+	if m := compareURLPattern.FindStringSubmatch(ref); m != nil {
+		logger.Debug("detected compare URL")
+		repoURL := m[1] + ".git"
+		provider := inferProviderFromURL(repoURL)
+		return &Source{Kind: KindCommit, Provider: provider, ChangeSource: &CommitSource{
+			RepoURL: repoURL, BaseRev: m[2], HeadRev: m[3], Provider: provider,
+		}}, nil
+	}
+
+	// Any other git URL with an @<rev> suffix — platform-agnostic commit ref.
+	if repo, base, head, ok := splitRevSuffix(ref, true); ok && looksLikeGitURL(repo) {
+		logger.Debug("detected git URL commit reference")
+		provider := inferProviderFromURL(repo)
+		return &Source{Kind: KindCommit, Provider: provider, ChangeSource: &CommitSource{
+			RepoURL: repo, BaseRev: base, HeadRev: head, Provider: provider,
+		}}, nil
+	}
+
 	return nil, fmt.Errorf("cannot detect source kind from reference %q; use a PR/MR URL, a <repo>@<sha> commit reference, a local path, or prefix with github: or gitlab:", ref)
+}
+
+func parseLocalRef(path string, snap SnapshotOptions, logger *slog.Logger) (*Source, error) {
+	if repo, base, head, ok := splitRevSuffix(path, false); ok {
+		logger.Debug("detected local commit reference", "path", repo)
+		return &Source{Kind: KindCommit, ChangeSource: &CommitSource{
+			LocalPath: repo, BaseRev: base, HeadRev: head,
+		}}, nil
+	}
+	return nil, fmt.Errorf("local path %q is not a commit reference; snapshot sources are not supported yet", path)
+}
+
+func isPathLike(ref string) bool {
+	return ref == "." || ref == ".." ||
+		strings.HasPrefix(ref, "./") || strings.HasPrefix(ref, "../") || strings.HasPrefix(ref, "/")
+}
+
+// splitRevSuffix splits "<repo>@<rev>" or "<repo>@<base>...<head>" on the
+// last '@'. When allowTags is false only hex SHAs are accepted (used for
+// local paths, where '@' may legitimately appear in directory names).
+func splitRevSuffix(s string, allowTags bool) (repo, base, head string, ok bool) {
+	i := strings.LastIndex(s, "@")
+	if i <= 0 || i == len(s)-1 {
+		return "", "", "", false
+	}
+	repo, rev := s[:i], s[i+1:]
+	validToken := func(t string) bool {
+		if shaPattern.MatchString(t) {
+			return true
+		}
+		return allowTags && revTokenPattern.MatchString(t)
+	}
+	if from, to, found := strings.Cut(rev, "..."); found {
+		if validToken(from) && validToken(to) {
+			return repo, from, to, true
+		}
+		return "", "", "", false
+	}
+	if validToken(rev) {
+		return repo, "", rev, true
+	}
+	return "", "", "", false
+}
+
+// looksLikeGitURL reports whether s is plausibly a remote git repository URL.
+func looksLikeGitURL(s string) bool {
+	if strings.Contains(s, "://") {
+		return true
+	}
+	// scp-like syntax: user@host:path
+	head, rest, found := strings.Cut(s, "@")
+	return found && head != "" && strings.Contains(rest, ":")
 }
 
 // inferProviderFromURL guesses the provider from the repository URL host.

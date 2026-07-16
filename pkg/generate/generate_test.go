@@ -182,7 +182,6 @@ func TestBuildModule_DefaultGitOps_ParameterizesTarget(t *testing.T) {
 	}
 }
 
-
 func TestEmitModule(t *testing.T) {
 	tmpDir := t.TempDir()
 	outputDir := filepath.Join(tmpDir, "test-module")
@@ -335,15 +334,18 @@ func TestParseSourceRef_GitHub(t *testing.T) {
 		{"github:owner/repo#1", "github"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParseSourceRef(tt.ref, testLogger())
+		src, err := ParseSourceRef(tt.ref, SnapshotOptions{}, testLogger())
 		if err != nil {
 			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
-		if provider != tt.provider {
-			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+		if src.Provider != tt.provider {
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, src.Provider, tt.provider)
 		}
-		if dp == nil {
+		if src.Kind != KindPR {
+			t.Errorf("ParseSourceRef(%q) kind = %v, want pr", tt.ref, src.Kind)
+		}
+		if src.ChangeSource == nil {
 			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
@@ -358,7 +360,7 @@ func TestParseSourceRef_RejectsBadURLs(t *testing.T) {
 		"this-has-/pull/42-in-the-middle",
 	}
 	for _, ref := range badRefs {
-		_, _, err := ParseSourceRef(ref, testLogger())
+		_, err := ParseSourceRef(ref, SnapshotOptions{}, testLogger())
 		if err == nil {
 			t.Errorf("ParseSourceRef(%q) should have been rejected", ref)
 		}
@@ -378,15 +380,18 @@ func TestParseSourceRef_GitLab(t *testing.T) {
 		{"gitlab:group/repo!5", "gitlab"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParseSourceRef(tt.ref, testLogger())
+		src, err := ParseSourceRef(tt.ref, SnapshotOptions{}, testLogger())
 		if err != nil {
 			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
-		if provider != tt.provider {
-			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+		if src.Provider != tt.provider {
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, src.Provider, tt.provider)
 		}
-		if dp == nil {
+		if src.Kind != KindPR {
+			t.Errorf("ParseSourceRef(%q) kind = %v, want pr", tt.ref, src.Kind)
+		}
+		if src.ChangeSource == nil {
 			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
@@ -400,7 +405,7 @@ func TestParseSourceRef_UnknownProvider(t *testing.T) {
 		"",
 	}
 	for _, ref := range refs {
-		_, _, err := ParseSourceRef(ref, testLogger())
+		_, err := ParseSourceRef(ref, SnapshotOptions{}, testLogger())
 		if err == nil {
 			t.Errorf("ParseSourceRef(%q) expected error for unknown provider", ref)
 		}
@@ -464,8 +469,8 @@ func TestParseGitHubPRRef(t *testing.T) {
 func TestParseGitHubPRRef_Errors(t *testing.T) {
 	badRefs := []string{
 		"https://github.com/myorg/myrepo/pull/notanumber",
-		"github:myorg/myrepo",  // missing #number
-		"github:myorg#42",      // missing /repo
+		"github:myorg/myrepo",   // missing #number
+		"github:myorg#42",       // missing /repo
 		"not-a-valid-reference", // no /pull/ or github: prefix
 	}
 	for _, ref := range badRefs {
@@ -508,8 +513,8 @@ func TestParseGitLabMRRef(t *testing.T) {
 
 func TestParseGitLabMRRef_Errors(t *testing.T) {
 	badRefs := []string{
-		"gitlab:group/repo",      // missing !number
-		"gitlab:group/repo!abc",  // non-numeric
+		"gitlab:group/repo",     // missing !number
+		"gitlab:group/repo!abc", // non-numeric
 	}
 	for _, ref := range badRefs {
 		_, _, _, err := parseGitLabMRRef(ref)
@@ -1395,6 +1400,86 @@ func TestChangeType_String(t *testing.T) {
 		if got := tt.ct.String(); got != tt.want {
 			t.Errorf("ChangeType(%d).String() = %q, want %q", tt.ct, got, tt.want)
 		}
+	}
+}
+
+// --- Degraded gitops paths (commit / snapshot sources) ---
+
+func TestBuildModule_NoRepoURL_OmitsTarget(t *testing.T) {
+	cs := &ChangeSet{
+		Title:    "local change",
+		Provider: "github",
+		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "test", nil, testLogger())
+
+	if mod.loomFile.Spec.Target != nil {
+		t.Error("expected target to be omitted when repo URL is unknown")
+	}
+	// commitPush is still emitted.
+	hasCommit := false
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.CommitPush != nil {
+			hasCommit = true
+		}
+	}
+	if !hasCommit {
+		t.Error("expected commitPush operation")
+	}
+}
+
+func TestBuildModule_NoProvider_OmitsPROp(t *testing.T) {
+	cs := &ChangeSet{
+		Title:      "bitbucket change",
+		RepoURL:    "git@bitbucket.org:o/r.git",
+		BaseBranch: "main",
+		Files:      []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "test", nil, testLogger())
+
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.PR != nil {
+			t.Error("expected pr operation to be omitted when provider is unknown")
+		}
+	}
+	if mod.loomFile.Spec.Target == nil {
+		t.Fatal("expected target (repo URL is known)")
+	}
+}
+
+func TestBuildModule_SynthesizesFeatureBranchAndTitle(t *testing.T) {
+	cs := &ChangeSet{
+		// No Title, no HeadBranch — e.g. a snapshot source.
+		RepoURL:    "https://github.com/o/r.git",
+		BaseBranch: "main",
+		Provider:   "github",
+		Files:      []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "my-module", nil, testLogger())
+
+	if mod.loomFile.Spec.Target.FeatureBranch != "loom/my-module" {
+		t.Errorf("featureBranch = %q, want loom/my-module", mod.loomFile.Spec.Target.FeatureBranch)
+	}
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.CommitPush != nil && op.CommitPush.Message != "apply my-module" {
+			t.Errorf("commit message = %q, want 'apply my-module'", op.CommitPush.Message)
+		}
+		if op.PR != nil && op.PR.Title != "apply my-module" {
+			t.Errorf("pr title = %q, want 'apply my-module'", op.PR.Title)
+		}
+	}
+}
+
+// --- End-to-end: multiple sources composed through Run ---
+
+func TestRun_SnapshotFlagsRequireSnapshotSource(t *testing.T) {
+	opts := Options{
+		Refs:    []string{"github:o/r#1"},
+		Include: []string{"a/**"},
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "require a local path source") {
+		t.Errorf("expected flag-validation error, got %v", err)
 	}
 }
 

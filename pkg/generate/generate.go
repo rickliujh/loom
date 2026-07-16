@@ -16,8 +16,9 @@ import (
 
 // Options configures module generation.
 type Options struct {
-	// Ref is the PR/MR URL or short reference.
-	Ref string
+	// Refs are the source references (PR/MR, commit, or local path), applied
+	// in the order given (oldest first).
+	Refs []string
 	// Params maps param names to concrete values to parameterize.
 	Params map[string]string
 	// OutputDir is the directory to write the generated module.
@@ -26,51 +27,91 @@ type Options struct {
 	ModuleName string
 	// TokenEnv is the name of the environment variable that holds the
 	// GitHub personal access token or GitLab private token used to
-	// authenticate API requests when fetching PR/MR data.
+	// authenticate API requests when fetching PR/MR data. Commit and
+	// snapshot sources are git-native and do not use it.
 	TokenEnv string
+	// Include, Exclude, and Base configure snapshot (local path) sources.
+	Include []string
+	Exclude []string
+	Base    string
 }
 
-// Run generates a loom module from a PR/MR.
+// Run generates a loom module from one or more sources.
 func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
-	// 1. Detect provider and parse reference.
-	provider, diffProvider, err := ParseSourceRef(opts.Ref, logger)
+	if len(opts.Refs) == 0 {
+		return fmt.Errorf("at least one source reference is required")
+	}
+
+	// 1. Parse all references.
+	snap := SnapshotOptions{Include: opts.Include, Exclude: opts.Exclude, Base: opts.Base}
+	sources := make([]*Source, 0, len(opts.Refs))
+	hasSnapshot := false
+	allSnapshots := true
+	for _, ref := range opts.Refs {
+		src, err := ParseSourceRef(ref, snap, logger)
+		if err != nil {
+			return err
+		}
+		if src.Kind == KindSnapshot {
+			hasSnapshot = true
+		} else {
+			allSnapshots = false
+		}
+		sources = append(sources, src)
+	}
+	if !hasSnapshot && (len(opts.Include) > 0 || len(opts.Exclude) > 0 || opts.Base != "") {
+		return fmt.Errorf("--include/--exclude/--base require a local path source")
+	}
+
+	// 2. Fetch each source's changes, in the order given.
+	sets := make([]*ChangeSet, 0, len(sources))
+	for i, src := range sources {
+		token := ""
+		if src.Kind == KindPR {
+			token = tokenFromEnv(opts.TokenEnv, src.Provider, logger)
+		}
+		logger.Info("fetching source", "ref", opts.Refs[i], "kind", src.Kind.String())
+		cs, err := src.ChangeSource.Fetch(ctx, opts.Refs[i], token, logger)
+		if err != nil {
+			return fmt.Errorf("fetching diff: %w", err)
+		}
+		if len(cs.Files) == 0 {
+			return fmt.Errorf("source %q has no file changes", opts.Refs[i])
+		}
+		logger.Info("found file changes", "ref", opts.Refs[i], "count", len(cs.Files))
+		sets = append(sets, cs)
+	}
+
+	// 3. Compose into a single net changeset.
+	merged, err := Compose(sets, logger)
 	if err != nil {
 		return err
 	}
-
-	token := tokenFromEnv(opts.TokenEnv, provider, logger)
-
-	// 2. Fetch PR/MR diff.
-	logger.Info("fetching PR/MR data", "ref", opts.Ref, "provider", provider)
-	prInfo, err := diffProvider.Fetch(ctx, opts.Ref, token, logger)
-	if err != nil {
-		return fmt.Errorf("fetching diff: %w", err)
+	if len(sets) > 1 {
+		logger.Info("composed sources", "sources", len(sets), "netChanges", len(merged.Files))
 	}
 
-	if len(prInfo.Files) == 0 {
-		return fmt.Errorf("PR/MR has no file changes")
-	}
-
-	logger.Info("found file changes", "count", len(prInfo.Files))
-
-	// 3. Derive module name.
+	// 4. Derive module name.
 	moduleName := opts.ModuleName
 	if moduleName == "" {
-		moduleName = slugify(prInfo.Title)
+		moduleName = slugify(merged.Title)
 	}
 	if moduleName == "" {
+		if allSnapshots {
+			return fmt.Errorf("--name is required when generating from local files")
+		}
 		moduleName = "generated-module"
 	}
 
-	// 4. Classify files and build module structure.
+	// 5. Classify files and build module structure.
 	outputDir := opts.OutputDir
 	if outputDir == "" {
 		outputDir = "."
 	}
 
-	module := buildModule(prInfo, moduleName, opts.Params, logger)
+	module := buildModule(merged, moduleName, opts.Params, logger)
 
-	// 5. Emit the module.
+	// 6. Emit the module.
 	return emitModule(outputDir, module, logger)
 }
 
@@ -225,29 +266,52 @@ func buildModule(pr *ChangeSet, name string, params map[string]string, logger *s
 		})
 	}
 
-	// Add target and gitops operations.
-	mod.loomFile.Spec.Target = &config.TargetSpec{
-		URL:           toSSHURL(pr.RepoURL),
-		Branch:        pr.BaseBranch,
-		FeatureBranch: Parameterize(pr.HeadBranch, params),
+	// Add target and gitops operations. Sources without PR metadata (commit
+	// ranges, local snapshots) get synthesized fallbacks; sources without a
+	// recognizable remote degrade by omitting the target and/or pr operation.
+	title := pr.Title
+	if title == "" {
+		title = "apply " + name
 	}
+	featureBranch := pr.HeadBranch
+	if featureBranch == "" {
+		featureBranch = "loom/" + name
+	}
+
+	if pr.RepoURL != "" {
+		mod.loomFile.Spec.Target = &config.TargetSpec{
+			URL:           toSSHURL(pr.RepoURL),
+			Branch:        pr.BaseBranch,
+			FeatureBranch: Parameterize(featureBranch, params),
+		}
+	} else {
+		logger.Warn("no repository URL detected; spec.target omitted (fill in manually before running)")
+	}
+
 	mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations,
 		config.Operation{
 			Name: "commit",
 			CommitPush: &config.CommitPush{
-				Message: Parameterize(pr.Title, params),
-			},
-		},
-		config.Operation{
-			Name: "open-pr",
-			PR: &config.PR{
-				Provider:   pr.Provider,
-				Title:      Parameterize(pr.Title, params),
-				Body:       Parameterize(pr.Body, params),
-				BaseBranch: pr.BaseBranch,
+				Message: Parameterize(title, params),
 			},
 		},
 	)
+
+	if pr.Provider != "" {
+		mod.loomFile.Spec.Operations = append(mod.loomFile.Spec.Operations,
+			config.Operation{
+				Name: "open-pr",
+				PR: &config.PR{
+					Provider:   pr.Provider,
+					Title:      Parameterize(title, params),
+					Body:       Parameterize(pr.Body, params),
+					BaseBranch: pr.BaseBranch,
+				},
+			},
+		)
+	} else {
+		logger.Warn("provider unknown; pr operation omitted (add manually if needed)")
+	}
 
 	return mod
 }
@@ -348,4 +412,3 @@ func toSSHURL(repoURL string) string {
 	path := strings.TrimPrefix(parsed.Path, "/")
 	return fmt.Sprintf("git@%s:%s", host, path)
 }
-

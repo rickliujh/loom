@@ -13,7 +13,7 @@ import (
 )
 
 func TestBuildModule_AddedFiles(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
 		HeadBranch: "feat/payments",
@@ -62,7 +62,7 @@ func TestBuildModule_AddedFiles(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update config",
 		Provider: "github",
 		Files: []FileChange{
@@ -96,7 +96,7 @@ func TestBuildModule_ModifiedYAML(t *testing.T) {
 }
 
 func TestBuildModule_DeletedFiles(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Cleanup",
 		Provider: "github",
 		Files: []FileChange{
@@ -117,7 +117,7 @@ func TestBuildModule_DeletedFiles(t *testing.T) {
 }
 
 func TestBuildModule_DefaultGitOps(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Add feature",
 		BaseBranch: "main",
 		HeadBranch: "feat/add-feature",
@@ -158,7 +158,7 @@ func TestBuildModule_DefaultGitOps(t *testing.T) {
 }
 
 func TestBuildModule_DefaultGitOps_ParameterizesTarget(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
 		HeadBranch: "feat/onboard-payments",
@@ -254,7 +254,7 @@ func TestEmitModule(t *testing.T) {
 // --- G3: Module name derivation priority ---
 
 func TestBuildModule_NamePriority_ExplicitName(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Some PR Title",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -266,7 +266,7 @@ func TestBuildModule_NamePriority_ExplicitName(t *testing.T) {
 }
 
 func TestBuildModule_NamePriority_SlugifiedTitle(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Add Payment Service",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -320,9 +320,9 @@ func TestSlugify_TruncatesAt60(t *testing.T) {
 	}
 }
 
-// --- PD1/PD2: Provider detection via ParsePRRef ---
+// --- PD1/PD2: Provider detection via ParseSourceRef ---
 
-func TestParsePRRef_GitHub(t *testing.T) {
+func TestParseSourceRef_GitHub(t *testing.T) {
 	tests := []struct {
 		ref      string
 		provider string
@@ -335,21 +335,21 @@ func TestParsePRRef_GitHub(t *testing.T) {
 		{"github:owner/repo#1", "github"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParsePRRef(tt.ref, testLogger())
+		provider, dp, err := ParseSourceRef(tt.ref, testLogger())
 		if err != nil {
-			t.Errorf("ParsePRRef(%q): %v", tt.ref, err)
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
 		if provider != tt.provider {
-			t.Errorf("ParsePRRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
 		}
 		if dp == nil {
-			t.Errorf("ParsePRRef(%q) returned nil DiffProvider", tt.ref)
+			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
 }
 
-func TestParsePRRef_RejectsBadURLs(t *testing.T) {
+func TestParseSourceRef_RejectsBadURLs(t *testing.T) {
 	// These contain "/pull/" or "/-/merge_requests/" as substrings but
 	// are not valid PR/MR URLs — the strict regex should reject them.
 	badRefs := []string{
@@ -358,14 +358,14 @@ func TestParsePRRef_RejectsBadURLs(t *testing.T) {
 		"this-has-/pull/42-in-the-middle",
 	}
 	for _, ref := range badRefs {
-		_, _, err := ParsePRRef(ref, testLogger())
+		_, _, err := ParseSourceRef(ref, testLogger())
 		if err == nil {
-			t.Errorf("ParsePRRef(%q) should have been rejected", ref)
+			t.Errorf("ParseSourceRef(%q) should have been rejected", ref)
 		}
 	}
 }
 
-func TestParsePRRef_GitLab(t *testing.T) {
+func TestParseSourceRef_GitLab(t *testing.T) {
 	tests := []struct {
 		ref      string
 		provider string
@@ -378,21 +378,21 @@ func TestParsePRRef_GitLab(t *testing.T) {
 		{"gitlab:group/repo!5", "gitlab"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParsePRRef(tt.ref, testLogger())
+		provider, dp, err := ParseSourceRef(tt.ref, testLogger())
 		if err != nil {
-			t.Errorf("ParsePRRef(%q): %v", tt.ref, err)
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
 		if provider != tt.provider {
-			t.Errorf("ParsePRRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
 		}
 		if dp == nil {
-			t.Errorf("ParsePRRef(%q) returned nil DiffProvider", tt.ref)
+			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
 }
 
-func TestParsePRRef_UnknownProvider(t *testing.T) {
+func TestParseSourceRef_UnknownProvider(t *testing.T) {
 	refs := []string{
 		"https://example.com/repo/changes/1",
 		"bitbucket:owner/repo#1",
@@ -400,9 +400,9 @@ func TestParsePRRef_UnknownProvider(t *testing.T) {
 		"",
 	}
 	for _, ref := range refs {
-		_, _, err := ParsePRRef(ref, testLogger())
+		_, _, err := ParseSourceRef(ref, testLogger())
 		if err == nil {
-			t.Errorf("ParsePRRef(%q) expected error for unknown provider", ref)
+			t.Errorf("ParseSourceRef(%q) expected error for unknown provider", ref)
 		}
 	}
 }
@@ -522,7 +522,7 @@ func TestParseGitLabMRRef_Errors(t *testing.T) {
 // --- FC1: Added files — single newFiles operation from root ---
 
 func TestBuildModule_AddedFiles_SingleNewFilesOp(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Add multiple dirs",
 		Provider: "github",
 		Files: []FileChange{
@@ -551,7 +551,7 @@ func TestBuildModule_AddedFiles_SingleNewFilesOp(t *testing.T) {
 }
 
 func TestBuildModule_AddedFiles_SourceIsDot(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Root files",
 		Provider: "github",
 		Files: []FileChange{
@@ -574,7 +574,7 @@ func TestBuildModule_AddedFiles_SourceIsDot(t *testing.T) {
 }
 
 func TestBuildModule_AddedFiles_NilContentSkipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Nil content",
 		Provider: "github",
 		Files: []FileChange{
@@ -596,7 +596,7 @@ func TestBuildModule_AddedFiles_NilContentSkipped(t *testing.T) {
 // --- FC2: Modified files — YAML with SMP only; others skipped with warning ---
 
 func TestBuildModule_ModifiedNonYAML_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update JSON",
 		Provider: "github",
 		Files: []FileChange{
@@ -620,7 +620,7 @@ func TestBuildModule_ModifiedNonYAML_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_NoOldContent_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update YAML without old",
 		Provider: "github",
 		Files: []FileChange{
@@ -644,7 +644,7 @@ func TestBuildModule_ModifiedYAML_NoOldContent_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_InvalidYAML_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Bad YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -668,7 +668,7 @@ func TestBuildModule_ModifiedYAML_InvalidYAML_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_YmlExtension(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update yml",
 		Provider: "github",
 		Files: []FileChange{
@@ -692,7 +692,7 @@ func TestBuildModule_ModifiedYAML_YmlExtension(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_NilNewContent_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "No new content",
 		Provider: "github",
 		Files: []FileChange{
@@ -717,7 +717,7 @@ func TestBuildModule_ModifiedYAML_NilNewContent_Skipped(t *testing.T) {
 // --- FC3: Deleted files → shell rm ---
 
 func TestBuildModule_DeletedFiles_Parameterized(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Remove payments config",
 		Provider: "github",
 		Files: []FileChange{
@@ -744,7 +744,7 @@ func TestBuildModule_DeletedFiles_Parameterized(t *testing.T) {
 // --- FC4: Renamed files → mv, then SMP patch if content also changed ---
 
 func TestBuildModule_RenamedFiles_MvOnly_NoOldContent(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename file",
 		Provider: "github",
 		Files: []FileChange{
@@ -788,7 +788,7 @@ func TestBuildModule_RenamedFiles_MvOnly_NoOldContent(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_MvAndPatch(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename and modify",
 		Provider: "github",
 		Files: []FileChange{
@@ -844,7 +844,7 @@ func TestBuildModule_RenamedFiles_MvAndPatch(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_NonYAML_ContentChanged(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename non-YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -873,7 +873,7 @@ func TestBuildModule_RenamedFiles_NonYAML_ContentChanged(t *testing.T) {
 
 func TestBuildModule_RenamedFiles_YAML_IdenticalContent(t *testing.T) {
 	content := []byte("key: value\nother: data")
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Pure rename YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -901,7 +901,7 @@ func TestBuildModule_RenamedFiles_YAML_IdenticalContent(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_Parameterized(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename payments",
 		Provider: "github",
 		Files: []FileChange{
@@ -927,7 +927,7 @@ func TestBuildModule_RenamedFiles_Parameterized(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_PureRename_NoNewContent(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Pure rename",
 		Provider: "github",
 		Files: []FileChange{
@@ -955,7 +955,7 @@ func TestBuildModule_RenamedFiles_PureRename_NoNewContent(t *testing.T) {
 // --- PM5/GO3/GO4: GitOps metadata parameterization ---
 
 func TestBuildModule_GitOps_ParameterizesCommitAndPR(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "onboard payments service",
 		Body:       "Adding payments to the platform",
 		BaseBranch: "main",
@@ -1034,7 +1034,7 @@ func TestToSSHURL(t *testing.T) {
 // --- E2: loom.yaml structure conformance ---
 
 func TestBuildModule_LoomFileStructure(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "test",
 		Provider:   "github",
 		BaseBranch: "main",
@@ -1058,7 +1058,7 @@ func TestBuildModule_LoomFileStructure(t *testing.T) {
 // --- PM6: All params declared as required ---
 
 func TestBuildModule_ParamDefs_AllRequired(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "test",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -1082,7 +1082,7 @@ func TestBuildModule_ParamDefs_AllRequired(t *testing.T) {
 // --- E3: Operation ordering ---
 
 func TestBuildModule_OperationOrdering(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Full change set",
 		Provider:   "github",
 		BaseBranch: "main",
@@ -1152,7 +1152,7 @@ func TestSanitizeFilename(t *testing.T) {
 // --- SMP5: Patch file path in operation ---
 
 func TestBuildModule_PatchFilePath(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Patch test",
 		Provider: "github",
 		Files: []FileChange{
@@ -1343,7 +1343,7 @@ func TestEmitModule_LoomYAMLRoundTrip(t *testing.T) {
 // --- Mixed change types in a single PR ---
 
 func TestBuildModule_MixedChangeTypes(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Mixed changes",
 		Provider: "github",
 		Files: []FileChange{

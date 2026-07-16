@@ -10,9 +10,9 @@ import (
 	"strings"
 )
 
-// DiffProvider fetches file changes from a PR/MR.
-type DiffProvider interface {
-	FetchDiff(ctx context.Context, ref string, token string, logger *slog.Logger) (*PRInfo, error)
+// ChangeSource fetches file changes from a PR/MR.
+type ChangeSource interface {
+	Fetch(ctx context.Context, ref string, token string, logger *slog.Logger) (*ChangeSet, error)
 }
 
 // Regex patterns for URL-based provider detection.
@@ -24,8 +24,8 @@ var (
 	gitlabMRURLPattern = regexp.MustCompile(`^https?://[^/]+/.+/-/merge_requests/\d+/?$`)
 )
 
-// ParsePRRef parses a PR/MR URL and returns the provider type and a
-// DiffProvider suitable for fetching PR/MR data.
+// ParseSourceRef parses a PR/MR URL and returns the provider type and a
+// ChangeSource suitable for fetching PR/MR data.
 //
 // Short-form references (unambiguous, preferred for self-hosted instances):
 //   - github:owner/repo#123
@@ -37,27 +37,27 @@ var (
 //
 // For self-hosted instances where URL patterns may be ambiguous, use the
 // short-form prefix (github: or gitlab:) to explicitly specify the provider.
-func ParsePRRef(ref string, logger *slog.Logger) (provider string, _ DiffProvider, _ error) {
+func ParseSourceRef(ref string, logger *slog.Logger) (provider string, _ ChangeSource, _ error) {
 	logger.Debug("parsing PR/MR reference", "ref", ref)
 
 	// Short-form references — unambiguous, checked first.
 	if strings.HasPrefix(ref, "github:") {
 		logger.Debug("detected GitHub short-form reference")
-		return "github", &GitHubDiffProvider{}, nil
+		return "github", &GitHubSource{}, nil
 	}
 	if strings.HasPrefix(ref, "gitlab:") {
 		logger.Debug("detected GitLab short-form reference")
-		return "gitlab", &GitLabDiffProvider{}, nil
+		return "gitlab", &GitLabSource{}, nil
 	}
 
 	// URL-based detection with strict pattern matching.
 	if githubPRURLPattern.MatchString(ref) {
 		logger.Debug("detected GitHub PR URL")
-		return "github", &GitHubDiffProvider{}, nil
+		return "github", &GitHubSource{}, nil
 	}
 	if gitlabMRURLPattern.MatchString(ref) {
 		logger.Debug("detected GitLab MR URL")
-		return "gitlab", &GitLabDiffProvider{}, nil
+		return "gitlab", &GitLabSource{}, nil
 	}
 
 	return "", nil, fmt.Errorf("cannot detect provider from reference %q; use a full URL or prefix with github: or gitlab:", ref)

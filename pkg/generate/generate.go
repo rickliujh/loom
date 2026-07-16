@@ -33,7 +33,7 @@ type Options struct {
 // Run generates a loom module from a PR/MR.
 func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	// 1. Detect provider and parse reference.
-	provider, diffProvider, err := ParsePRRef(opts.Ref, logger)
+	provider, diffProvider, err := ParseSourceRef(opts.Ref, logger)
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 
 	// 2. Fetch PR/MR diff.
 	logger.Info("fetching PR/MR data", "ref", opts.Ref, "provider", provider)
-	prInfo, err := diffProvider.FetchDiff(ctx, opts.Ref, token, logger)
+	prInfo, err := diffProvider.Fetch(ctx, opts.Ref, token, logger)
 	if err != nil {
 		return fmt.Errorf("fetching diff: %w", err)
 	}
@@ -81,7 +81,7 @@ type generatedModule struct {
 	patchFiles    map[string][]byte // relative path (under __functions/patches/) -> content
 }
 
-func buildModule(pr *PRInfo, name string, params map[string]string, logger *slog.Logger) *generatedModule {
+func buildModule(pr *ChangeSet, name string, params map[string]string, logger *slog.Logger) *generatedModule {
 	mod := &generatedModule{
 		loomFile: config.LoomFile{
 			APIVersion: "loom.rickliujh.github.io/v1beta1",

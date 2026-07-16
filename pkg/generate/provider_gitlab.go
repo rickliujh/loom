@@ -13,10 +13,10 @@ import (
 	gogitlab "gitlab.com/gitlab-org/api/client-go"
 )
 
-// GitLabDiffProvider fetches MR diffs from GitLab.
-type GitLabDiffProvider struct{}
+// GitLabSource fetches MR diffs from GitLab.
+type GitLabSource struct{}
 
-func (p *GitLabDiffProvider) FetchDiff(ctx context.Context, ref, token string, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitLabSource) Fetch(ctx context.Context, ref, token string, logger *slog.Logger) (*ChangeSet, error) {
 	baseURL, projectPath, mrIID, err := parseGitLabMRRef(ref)
 	if err != nil {
 		return nil, err
@@ -47,7 +47,7 @@ func (p *GitLabDiffProvider) FetchDiff(ctx context.Context, ref, token string, l
 	return nil, fmt.Errorf("GitLab API failed: %w; glab CLI is not available", apiErr)
 }
 
-func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath string, mrIID int64, token string, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitLabSource) fetchAPI(ctx context.Context, baseURL, projectPath string, mrIID int64, token string, logger *slog.Logger) (*ChangeSet, error) {
 	logger.Debug("creating GitLab API client", "baseURL", baseURL, "project", projectPath)
 	client, err := gogitlab.NewClient(token, gogitlab.WithBaseURL(baseURL))
 	if err != nil {
@@ -80,7 +80,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 	}
 	logger.Debug("using refs for file content", "headRef", headRef, "baseRef", baseRef)
 
-	info := &PRInfo{
+	info := &ChangeSet{
 		Title:      mr.Title,
 		Body:       mr.Description,
 		BaseBranch: mr.TargetBranch,
@@ -156,7 +156,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 	return info, nil
 }
 
-func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath string, mrIID int64, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitLabSource) fetchCLI(ctx context.Context, baseURL, projectPath string, mrIID int64, logger *slog.Logger) (*ChangeSet, error) {
 	encodedProject := url.PathEscape(projectPath)
 
 	// Extract hostname from baseURL for --hostname flag.
@@ -213,7 +213,7 @@ func (p *GitLabDiffProvider) fetchCLI(ctx context.Context, baseURL, projectPath 
 	}
 	logger.Debug("using refs for file content (CLI)", "headRef", headRef, "baseRef", baseRef)
 
-	info := &PRInfo{
+	info := &ChangeSet{
 		Title:      mrMeta.Title,
 		Body:       mrMeta.Description,
 		BaseBranch: mrMeta.TargetBranch,

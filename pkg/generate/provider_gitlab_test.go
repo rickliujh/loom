@@ -2,7 +2,7 @@ package generate
 
 import "testing"
 
-// Regression: the glab CLI fallback used to build PRInfo without RepoURL,
+// Regression: the glab CLI fallback used to build ChangeSet without RepoURL,
 // leaving the generated module's target.url empty. Both fetch paths must
 // derive the same clone URL.
 func TestGitlabRepoURL(t *testing.T) {

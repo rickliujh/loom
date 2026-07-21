@@ -21,7 +21,7 @@ parameterization, emission — only consumes `PRInfo` (metadata + `[]FileChange`
 with old/new content). The design therefore:
 
 1. Generalizes the source abstraction: `DiffProvider` → `ChangeSource`, `PRInfo` → `ChangeSet`.
-2. Adds two new source kinds (commits, local snapshot).
+2. Adds two new source kinds (commits, snapshots — local or remote).
 3. Adds one new step: **composition** of multiple `ChangeSet`s into a single net
    `ChangeSet`, which then flows through the existing pipeline unchanged.
 
@@ -59,7 +59,8 @@ and recognizes the grammars below.
 | `<repo>@<base>...<head>` | commit range | `github:o/r@abc1234...def5678` |
 | commit URL (sugar) | single commit | `https://github.com/o/r/commit/abc1234` |
 | compare URL (sugar) | commit range | `https://gitlab.com/g/r/-/compare/abc...def` |
-| local path (`./…`, `/…`, or `file:` prefix) | snapshot | `./checkout-of-target-repo` |
+| local path (`./…`, `/…`, or `file:` prefix) | snapshot (working tree) | `./checkout-of-target-repo` |
+| `snapshot:<repo-or-path>[@<ref>]` | snapshot (committed tree; working tree for a local path without `@<ref>`) | `snapshot:github:o/r@v1.2.3` |
 
 `<repo>` in commit refs is any of:
 - a short-form repo (`github:o/r`, `gitlab:g/r`) — sugar that expands to the
@@ -74,10 +75,16 @@ SHA (7–40 chars) or a tag name. Commit/compare URLs from known hosts are
 accepted as sugar and normalized to `<repo>@<range>` — they are parsed, not
 fetched via API.
 
-Detection order: `file:` prefix / path-like without `@rev` → snapshot;
-trailing `@<rev>` → commit; short-form with `#`/`!` → PR (existing); then
-PR/MR URL patterns. Malformed refs are rejected, never misclassified (same
-philosophy as PD2).
+Detection order: `snapshot:` prefix → snapshot; `file:` prefix / path-like
+without `@rev` → snapshot; trailing `@<rev>` → commit; short-form with
+`#`/`!` → PR (existing); then PR/MR URL patterns. Malformed refs are
+rejected, never misclassified (same philosophy as PD2).
+
+`snapshot:` is the canonical snapshot form; a bare local path is sugar for
+`snapshot:<path>`. Under the explicit prefix, the `@<ref>` suffix accepts tag
+and branch names (bare paths require hex SHAs, so directory names containing
+`@` are not misclassified), and a range is rejected: snapshots capture one
+state.
 
 ### 1. PR source (existing, unchanged)
 
@@ -125,28 +132,44 @@ Builds on `pkg/git`'s existing go-git-with-CLI-fallback pattern.
 
 ### 3. Snapshot source (current state of files)
 
-Points at a **local checkout** of the target repo. Selection and baseline come
-from flags (snapshot refs get no inline grammar for these):
+Captures the state of files in the target repo — from a **local checkout**
+(bare path, or `snapshot:<path>`) or a **remote repository**
+(`snapshot:<repo>[@<ref>]`, git-native like the commit source: bare partial
+clone, user's git credentials, any host). Selection and baseline come from
+flags (snapshot refs carry only the optional `@<ref>` inline):
 
 - `--include <glob>` (repeatable, required for snapshot refs): files to capture,
-  relative to the checkout root. `--exclude <glob>` optional.
+  relative to the repository root. `--exclude <glob>` optional.
 - `--base <git-ref>` (optional): baseline to diff against.
 
-Two modes:
+At most **one snapshot ref per invocation**: the flags are invocation-wide,
+and same-repo composition (CS3) makes multiple snapshots redundant.
 
-- **No `--base`** — every matched file becomes `ChangeAdded` with its current
-  working-tree content. Use when the module should *stamp out* these files.
-- **With `--base`** — run `git diff --name-status <base> -- <paths>` in the
-  checkout; old content via `git show <base>:<path>`, new content from the
-  working tree (captures uncommitted state too). Produces real
-  added/modified/deleted/renamed classification, so modified YAML becomes SMP
-  patches. Use when the module should *transform* an existing repo.
+**What is captured:**
 
-Metadata: `RepoURL` from `git remote get-url origin` (empty if none);
-`BaseBranch` = `--base` if it names a branch, else the current branch;
-`Provider` inferred from the remote host (`github.com` → github, `gitlab` in
-host → gitlab, else empty). `Title`/`Body` empty — `--name` is required when
-the only sources are snapshots.
+- **Local path without `@<ref>`** — the **working tree**, including
+  uncommitted and untracked files. This is the only form that can see
+  uncommitted state.
+- **`@<ref>` (local or remote), or a remote without `@<ref>`** — the
+  **committed tree** at that ref (default branch when omitted), listed via
+  `git ls-tree -r`. Symlinks and submodules are skipped with a warning.
+
+**Two modes** (orthogonal to the above):
+
+- **No `--base`** — every matched file becomes `ChangeAdded` with its
+  captured content. Use when the module should *stamp out* these files.
+- **With `--base`** — the captured state is diffed against the base ref
+  (`git diff` against the working tree or between the two revs). Produces
+  real added/modified/deleted/renamed classification, so modified YAML
+  becomes SMP patches. Use when the module should *transform* an existing
+  repo.
+
+Metadata: `RepoURL` from the ref itself (remote) or
+`git remote get-url origin` (local, empty if none); `BaseBranch` = `--base`
+or the `@<ref>` if either names a branch, else the current/default branch;
+`Provider` inferred from the repo host (`github` in host → github, `gitlab`
+in host → gitlab, else empty). `Title`/`Body` empty — `--name` is required
+when the only sources are snapshots.
 
 ## Composition
 
@@ -242,6 +265,12 @@ loom generate ./gitops-checkout --include 'services/payments/**' -n onboard-paym
 
 # current state diffed against a baseline (transform module)
 loom generate ./gitops-checkout --base main --include 'argocd/**' -n update-argo ...
+
+# committed tree of a remote repo at a tag — no local checkout needed
+loom generate 'snapshot:github:org/gitops@v1.2.3' --include 'services/payments/**' -n onboard-payments ...
+
+# remote snapshot diffed against a baseline
+loom generate 'snapshot:git@bitbucket.org:org/gitops.git' --base v1.0.0 --include 'argocd/**' -n update-argo ...
 ```
 
 New flags: `--include`, `--exclude`, `--base` (apply to snapshot refs; error if
@@ -263,7 +292,9 @@ git-native and use the user's git credentials.
 | Bad commit ref | `cannot resolve commit "<sha>": ...` |
 | Clone/fetch failure (auth, unreachable host) | `fetching <repo>: ...` (surfaces the underlying git error) |
 | A source has no file changes | `source "<ref>" has no file changes` |
-| Snapshot path is not the repo root with `--base` | `snapshot path <path> must be the repository root (<root>) when using --base` |
+| Snapshot path is not the repo root with `--base` or `@<ref>` | `snapshot path <path> must be the repository root (<root>) when using --base or a ref` |
+| Snapshot ref with a range | `snapshot references take a single ref, not a range: "<ref>"` |
+| Local snapshot `@<ref>` outside a git repo | `snapshot ref "<ref>" requires <path> to be a git repository` |
 
 ## Implementation phases
 
@@ -275,5 +306,7 @@ git-native and use the user's git credentials.
    checkout), single-commit sugar, commit/compare URL normalization.
 4. **Snapshot source**: local git integration, `--include/--exclude/--base`,
    target-less emission path.
+5. **Remote snapshots**: `snapshot:` prefix, committed-tree capture via
+   `git ls-tree` (local `@<ref>` and remote repos), single-snapshot guard.
 
 Each phase is independently shippable and spec-testable.

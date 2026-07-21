@@ -291,6 +291,97 @@ func TestSnapshotSource_WithBase_DiffsWorkingTree(t *testing.T) {
 	}
 }
 
+// Remote snapshots see only committed state — worktree edits in the source
+// repo must not leak into the captured files.
+func TestSnapshotSource_Remote_CapturesCommittedTree(t *testing.T) {
+	r := newFixtureRepo(t)
+	r.write("config/app.yaml", "replicas: 1\n")
+	r.write("docs/readme.md", "hi\n")
+	r.commit("initial")
+	// Uncommitted change that must NOT appear in the snapshot.
+	r.write("config/app.yaml", "replicas: 99\n")
+
+	src := &SnapshotSource{RepoURL: "file://" + r.dir, Include: []string{"config/**"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(cs.Files) != 1 {
+		t.Fatalf("expected 1 file, got %+v", cs.Files)
+	}
+	f := cs.Files[0]
+	if f.Type != ChangeAdded || f.Path != "config/app.yaml" {
+		t.Errorf("unexpected file: %+v", f)
+	}
+	if string(f.NewContent) != "replicas: 1\n" {
+		t.Errorf("expected committed content, got %q", f.NewContent)
+	}
+	if cs.RepoURL != "file://"+r.dir || cs.BaseBranch != "main" {
+		t.Errorf("metadata: repo=%q branch=%q", cs.RepoURL, cs.BaseBranch)
+	}
+}
+
+func TestSnapshotSource_Remote_AtRef(t *testing.T) {
+	r := newFixtureRepo(t)
+	c1, _, _ := seedHistory(r)
+
+	src := &SnapshotSource{RepoURL: "file://" + r.dir, Ref: c1, Include: []string{"config/**"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// At c1 only config/base.yaml exists, with the original content.
+	if len(cs.Files) != 1 {
+		t.Fatalf("expected 1 file at c1, got %+v", cs.Files)
+	}
+	if !strings.Contains(string(cs.Files[0].NewContent), "replicas: 1") {
+		t.Errorf("expected content at c1, got %q", cs.Files[0].NewContent)
+	}
+}
+
+func TestSnapshotSource_Remote_WithBase(t *testing.T) {
+	r := newFixtureRepo(t)
+	c1, c2, _ := seedHistory(r)
+
+	src := &SnapshotSource{RepoURL: "file://" + r.dir, Ref: c2, Base: c1, Include: []string{"config/**"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// c1→c2 touched config/base.yaml (modified) and config/new.yaml (added);
+	// app.json is outside the include globs.
+	if len(cs.Files) != 2 {
+		t.Fatalf("expected 2 files, got %+v", cs.Files)
+	}
+	if f := fileByPath(t, cs.Files, "config/base.yaml"); f.Type != ChangeModified {
+		t.Errorf("base.yaml type = %v, want modified", f.Type)
+	}
+	if f := fileByPath(t, cs.Files, "config/new.yaml"); f.Type != ChangeAdded {
+		t.Errorf("new.yaml type = %v, want added", f.Type)
+	}
+}
+
+// A local snapshot pinned to a ref captures the committed tree, not the
+// working tree — same semantics as the remote form.
+func TestSnapshotSource_LocalAtRef(t *testing.T) {
+	r := newFixtureRepo(t)
+	r.write("config/app.yaml", "replicas: 1\n")
+	c1 := r.commit("initial")
+	r.write("config/app.yaml", "replicas: 99\n") // uncommitted
+
+	src := &SnapshotSource{Path: r.dir, Ref: c1, Include: []string{"config/**"}}
+	cs, err := src.Fetch(context.Background(), "", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.Files) != 1 || string(cs.Files[0].NewContent) != "replicas: 1\n" {
+		t.Errorf("expected committed content at ref, got %+v", cs.Files)
+	}
+}
+
 func TestSnapshotSource_RequiresInclude(t *testing.T) {
 	src := &SnapshotSource{Path: t.TempDir()}
 	_, err := src.Fetch(context.Background(), "", "", testLogger())

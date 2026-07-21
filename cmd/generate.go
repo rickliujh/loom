@@ -39,8 +39,11 @@ Supported references:
     git@bitbucket.org:owner/repo.git@abc1234...def5678
     https://github.com/owner/repo/commit/abc1234
     ./checkout@abc1234...def5678
-  Current state of local files (with --include, optionally --base):
-    ./checkout    /abs/path    file:relative/path
+  Snapshot of files (with --include, optionally --base):
+    ./checkout    /abs/path    file:relative/path      (local working tree)
+    snapshot:github:owner/repo@v1.2.3                  (remote, committed tree at ref)
+    snapshot:git@host:owner/repo.git                   (remote, default branch)
+    snapshot:./checkout@release-2024                   (local, committed tree at ref)
 
 By default, files are generated into the current directory. Use -o to specify
 a different output directory.`,
@@ -53,9 +56,9 @@ func init() {
 	generateCmd.Flags().StringVarP(&genOutput, "output", "o", "", "Output directory (default: current directory)")
 	generateCmd.Flags().StringVarP(&genName, "name", "n", "", "Module name (default: derived from PR title or commit subject)")
 	generateCmd.Flags().StringVar(&genTokenEnv, "token-env", "", "Env var holding the API token for PR/MR sources (default: GITHUB_TOKEN or GITLAB_TOKEN)")
-	generateCmd.Flags().StringArrayVar(&genInclude, "include", nil, "Glob of files to capture from a local path source (can be repeated; ** matches directories)")
-	generateCmd.Flags().StringArrayVar(&genExclude, "exclude", nil, "Glob of files to skip from a local path source (can be repeated)")
-	generateCmd.Flags().StringVar(&genBase, "base", "", "Git ref to diff a local path source against (default: capture files as-is)")
+	generateCmd.Flags().StringArrayVar(&genInclude, "include", nil, "Glob of files to capture from a snapshot source (can be repeated; ** matches directories)")
+	generateCmd.Flags().StringArrayVar(&genExclude, "exclude", nil, "Glob of files to skip from a snapshot source (can be repeated)")
+	generateCmd.Flags().StringVar(&genBase, "base", "", "Git ref to diff a snapshot source against (default: capture files as-is)")
 	rootCmd.AddCommand(generateCmd)
 }
 

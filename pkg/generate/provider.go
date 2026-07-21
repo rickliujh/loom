@@ -96,6 +96,12 @@ var (
 func ParseSourceRef(ref string, snap SnapshotOptions, logger *slog.Logger) (*Source, error) {
 	logger.Debug("parsing source reference", "ref", ref)
 
+	// Explicit snapshot references — canonical form for both remote repos
+	// and local paths; a trailing @<ref> pins the committed tree at that ref.
+	if body, ok := strings.CutPrefix(ref, "snapshot:"); ok {
+		return parseSnapshotRef(body, snap, logger)
+	}
+
 	// Local paths — snapshot, or commit source when an @<rev> suffix is
 	// present. Only hex SHAs are accepted as rev suffixes on paths so that
 	// directory names containing '@' are not misclassified.
@@ -166,6 +172,34 @@ func ParseSourceRef(ref string, snap SnapshotOptions, logger *slog.Logger) (*Sou
 	}
 
 	return nil, fmt.Errorf("cannot detect source kind from reference %q; use a PR/MR URL, a <repo>@<sha> commit reference, a local path, or prefix with github: or gitlab:", ref)
+}
+
+// parseSnapshotRef parses the body of a snapshot:<repo-or-path>[@<ref>]
+// reference. Because the snapshot: prefix is explicit, tag and branch names
+// are accepted as refs (unlike bare local paths, which require hex SHAs).
+func parseSnapshotRef(body string, snap SnapshotOptions, logger *slog.Logger) (*Source, error) {
+	repo, refName := body, ""
+	if r, base, head, ok := splitRevSuffix(body, true); ok {
+		if base != "" {
+			return nil, fmt.Errorf("snapshot references take a single ref, not a range: %q", body)
+		}
+		repo, refName = r, head
+	}
+	if r, ok := strings.CutPrefix(repo, "github:"); ok {
+		repo = fmt.Sprintf("git@github.com:%s.git", r)
+	} else if r, ok := strings.CutPrefix(repo, "gitlab:"); ok {
+		repo = fmt.Sprintf("git@gitlab.com:%s.git", r)
+	}
+
+	src := &SnapshotSource{Ref: refName, Include: snap.Include, Exclude: snap.Exclude, Base: snap.Base}
+	if looksLikeGitURL(repo) {
+		logger.Debug("detected remote snapshot reference", "repo", repo, "ref", refName)
+		src.RepoURL = repo
+		return &Source{Kind: KindSnapshot, Provider: inferProviderFromURL(repo), ChangeSource: src}, nil
+	}
+	logger.Debug("detected local snapshot reference", "path", repo, "ref", refName)
+	src.Path = repo
+	return &Source{Kind: KindSnapshot, ChangeSource: src}, nil
 }
 
 func parseLocalRef(path string, snap SnapshotOptions, logger *slog.Logger) (*Source, error) {

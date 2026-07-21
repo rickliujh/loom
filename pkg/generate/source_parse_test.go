@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -98,6 +99,55 @@ func TestParseSourceRef_SnapshotRefs(t *testing.T) {
 		if len(ss.Include) != 1 || len(ss.Exclude) != 1 || ss.Base != "main" {
 			t.Errorf("ParseSourceRef(%q) snapshot options not threaded: %+v", tt.ref, ss)
 		}
+	}
+}
+
+func TestParseSourceRef_SnapshotPrefix(t *testing.T) {
+	tests := []struct {
+		ref      string
+		repoURL  string
+		path     string
+		refName  string
+		provider string
+	}{
+		// Remote: short-form sugar, git URLs, with and without a ref.
+		{"snapshot:github:o/r@v1.2.3", "git@github.com:o/r.git", "", "v1.2.3", "github"},
+		{"snapshot:gitlab:g/r", "git@gitlab.com:g/r.git", "", "", "gitlab"},
+		{"snapshot:git@bitbucket.org:o/r.git", "git@bitbucket.org:o/r.git", "", "", ""},
+		{"snapshot:https://gitea.example.com/o/r.git@abc1234", "https://gitea.example.com/o/r.git", "", "abc1234", ""},
+		// Local: committed tree at a ref; tags/branches allowed under the
+		// explicit prefix.
+		{"snapshot:./checkout@release-2024", "", "./checkout", "release-2024", ""},
+		{"snapshot:./checkout", "", "./checkout", "", ""},
+	}
+	for _, tt := range tests {
+		src, err := ParseSourceRef(tt.ref, SnapshotOptions{Include: []string{"**"}}, testLogger())
+		if err != nil {
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
+			continue
+		}
+		if src.Kind != KindSnapshot {
+			t.Errorf("%q: kind = %v, want snapshot", tt.ref, src.Kind)
+			continue
+		}
+		ss := src.ChangeSource.(*SnapshotSource)
+		if ss.RepoURL != tt.repoURL || ss.Path != tt.path || ss.Ref != tt.refName {
+			t.Errorf("%q: repo=%q path=%q ref=%q, want repo=%q path=%q ref=%q",
+				tt.ref, ss.RepoURL, ss.Path, ss.Ref, tt.repoURL, tt.path, tt.refName)
+		}
+		if src.Provider != tt.provider {
+			t.Errorf("%q: provider = %q, want %q", tt.ref, src.Provider, tt.provider)
+		}
+		if len(ss.Include) != 1 {
+			t.Errorf("%q: snapshot options not threaded", tt.ref)
+		}
+	}
+}
+
+func TestParseSourceRef_SnapshotPrefixRejectsRange(t *testing.T) {
+	_, err := ParseSourceRef("snapshot:github:o/r@abc1234...def5678", SnapshotOptions{}, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "single ref, not a range") {
+		t.Errorf("expected range-rejection error, got %v", err)
 	}
 }
 

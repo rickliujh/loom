@@ -11,12 +11,21 @@ import (
 	"strings"
 )
 
-// SnapshotSource captures the current state of files in a local checkout.
+// SnapshotSource captures the state of files in a repository. The source is
+// either a local checkout (Path) or a remote repository (RepoURL, cloned
+// bare with lazy blobs).
+//
+// Without Ref, a local snapshot captures the working tree — including
+// uncommitted and untracked files. With Ref (always for remotes, where no
+// working tree exists), it captures the committed tree at that ref.
+//
 // Without Base every matched file becomes an added file (a stamp-out module);
-// with Base the working tree is diffed against that git ref (a transform
+// with Base the captured state is diffed against that git ref (a transform
 // module), so modified YAML still produces SMP patches.
 type SnapshotSource struct {
-	Path    string
+	Path    string // local checkout; mutually exclusive with RepoURL
+	RepoURL string // remote repository URL
+	Ref     string // committed ref to capture; empty = worktree (local) or default branch (remote)
 	Include []string
 	Exclude []string
 	Base    string
@@ -25,7 +34,14 @@ type SnapshotSource struct {
 // Fetch implements ChangeSource.
 func (s *SnapshotSource) Fetch(ctx context.Context, _ string, _ string, logger *slog.Logger) (*ChangeSet, error) {
 	if len(s.Include) == 0 {
-		return nil, fmt.Errorf("snapshot source %q requires at least one --include", s.Path)
+		name := s.Path
+		if name == "" {
+			name = s.RepoURL
+		}
+		return nil, fmt.Errorf("snapshot source %q requires at least one --include", name)
+	}
+	if s.RepoURL != "" {
+		return s.fetchRemote(ctx, logger)
 	}
 	info, err := os.Stat(s.Path)
 	if err != nil || !info.IsDir() {
@@ -37,6 +53,23 @@ func (s *SnapshotSource) Fetch(ctx context.Context, _ string, _ string, logger *
 		if _, err := gitOut(ctx, s.Path, "rev-parse", "--git-dir"); err == nil {
 			isGit = true
 		}
+	}
+
+	if s.Ref != "" {
+		// Committed tree at a ref — same semantics as a remote snapshot,
+		// minus the clone.
+		if !isGit {
+			return nil, fmt.Errorf("snapshot ref %q requires %s to be a git repository", s.Ref, s.Path)
+		}
+		if err := s.requireRepoRoot(ctx); err != nil {
+			return nil, err
+		}
+		cs, err := s.snapshotAtRef(ctx, s.Path, logger)
+		if err != nil {
+			return nil, err
+		}
+		s.addOriginMetadata(ctx, cs)
+		return cs, nil
 	}
 
 	var files []FileChange
@@ -54,13 +87,125 @@ func (s *SnapshotSource) Fetch(ctx context.Context, _ string, _ string, logger *
 
 	cs := &ChangeSet{Files: files}
 	if isGit {
-		if out, err := gitOut(ctx, s.Path, "remote", "get-url", "origin"); err == nil {
-			cs.RepoURL = strings.TrimSpace(string(out))
-			cs.Provider = inferProviderFromURL(cs.RepoURL)
-		}
+		s.addOriginMetadata(ctx, cs)
 		cs.BaseBranch = s.baseBranch(ctx)
 	}
 	return cs, nil
+}
+
+// fetchRemote clones the repository bare (blobs fetched lazily) and captures
+// the committed tree at Ref, or its diff against Base.
+func (s *SnapshotSource) fetchRemote(ctx context.Context, logger *slog.Logger) (*ChangeSet, error) {
+	if !hasBinary("git", logger) {
+		return nil, fmt.Errorf("git CLI is required for remote snapshot sources")
+	}
+	tmp, err := os.MkdirTemp("", "loom-snapshot-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	if err := cloneBare(ctx, s.RepoURL, tmp, logger); err != nil {
+		return nil, fmt.Errorf("fetching %s: %w", s.RepoURL, err)
+	}
+	cs, err := s.snapshotAtRef(ctx, tmp, logger)
+	if err != nil {
+		return nil, err
+	}
+	cs.RepoURL = s.RepoURL
+	cs.Provider = inferProviderFromURL(s.RepoURL)
+	return cs, nil
+}
+
+// snapshotAtRef captures the committed state at Ref (HEAD when empty) in the
+// given git dir: the full matched tree, or its diff against Base.
+func (s *SnapshotSource) snapshotAtRef(ctx context.Context, dir string, logger *slog.Logger) (*ChangeSet, error) {
+	ref := s.Ref
+	if ref == "" {
+		ref = "HEAD"
+	} else if err := ensureRev(ctx, dir, ref, logger); err != nil {
+		return nil, err
+	}
+
+	var files []FileChange
+	if s.Base != "" {
+		if err := ensureRev(ctx, dir, s.Base, logger); err != nil {
+			return nil, err
+		}
+		all, err := gitDiffFiles(ctx, dir, s.Base, ref, logger)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range all {
+			if s.matches(f.Path) {
+				files = append(files, f)
+			}
+		}
+	} else {
+		var err error
+		files, err = s.lsTreeFiles(ctx, dir, ref, logger)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	cs := &ChangeSet{Files: files}
+	for _, cand := range []string{s.Base, s.Ref} {
+		if cand == "" {
+			continue
+		}
+		if _, err := gitOut(ctx, dir, "show-ref", "--verify", "--quiet", "refs/heads/"+cand); err == nil {
+			cs.BaseBranch = cand
+			break
+		}
+	}
+	if cs.BaseBranch == "" {
+		cs.BaseBranch = defaultBranch(ctx, dir, logger)
+	}
+	return cs, nil
+}
+
+// lsTreeFiles captures every matched regular file in the tree at ref.
+func (s *SnapshotSource) lsTreeFiles(ctx context.Context, dir, ref string, logger *slog.Logger) ([]FileChange, error) {
+	out, err := gitOut(ctx, dir, "ls-tree", "-r", "-z", ref)
+	if err != nil {
+		return nil, err
+	}
+	var files []FileChange
+	for _, entry := range strings.Split(strings.TrimSuffix(string(out), "\x00"), "\x00") {
+		meta, rel, ok := strings.Cut(entry, "\t")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(meta) // <mode> <type> <sha>
+		if len(fields) < 2 {
+			continue
+		}
+		if !s.matches(rel) {
+			continue
+		}
+		// Only regular files: skip symlinks (mode 120000) and submodules
+		// (type commit) — neither can be reproduced as a template.
+		if fields[1] != "blob" || fields[0] == "120000" {
+			logger.Warn("skipping non-regular file in snapshot", "file", rel, "mode", fields[0], "type", fields[1])
+			continue
+		}
+		content, err := gitOut(ctx, dir, "show", ref+":"+rel)
+		if err != nil {
+			logger.Warn("cannot read file at ref; skipped", "file", rel, "error", err)
+			continue
+		}
+		files = append(files, FileChange{Type: ChangeAdded, Path: rel, NewContent: content})
+	}
+	return files, nil
+}
+
+// addOriginMetadata fills repo URL and provider from the local checkout's
+// origin remote, when it has one.
+func (s *SnapshotSource) addOriginMetadata(ctx context.Context, cs *ChangeSet) {
+	if out, err := gitOut(ctx, s.Path, "remote", "get-url", "origin"); err == nil {
+		cs.RepoURL = strings.TrimSpace(string(out))
+		cs.Provider = inferProviderFromURL(cs.RepoURL)
+	}
 }
 
 // walkFiles snapshots every matched file in the working tree as added.
@@ -95,18 +240,27 @@ func (s *SnapshotSource) walkFiles(logger *slog.Logger) ([]FileChange, error) {
 	return files, err
 }
 
+// requireRepoRoot rejects snapshot paths below the repository root: git
+// reports paths relative to the root, so includes and reads would not line up.
+func (s *SnapshotSource) requireRepoRoot(ctx context.Context) error {
+	top, err := gitOut(ctx, s.Path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil
+	}
+	topPath, _ := filepath.EvalSymlinks(strings.TrimSpace(string(top)))
+	absPath, _ := filepath.Abs(s.Path)
+	absPath, _ = filepath.EvalSymlinks(absPath)
+	if topPath != absPath {
+		return fmt.Errorf("snapshot path %s must be the repository root (%s) when using --base or a ref", s.Path, topPath)
+	}
+	return nil
+}
+
 // diffAgainstBase diffs the working tree (including uncommitted and untracked
 // files) against the base ref and keeps the matched entries.
 func (s *SnapshotSource) diffAgainstBase(ctx context.Context, logger *slog.Logger) ([]FileChange, error) {
-	// git reports diff paths relative to the repository root, so the
-	// snapshot path must be the root for includes and reads to line up.
-	if top, err := gitOut(ctx, s.Path, "rev-parse", "--show-toplevel"); err == nil {
-		topPath, _ := filepath.EvalSymlinks(strings.TrimSpace(string(top)))
-		absPath, _ := filepath.Abs(s.Path)
-		absPath, _ = filepath.EvalSymlinks(absPath)
-		if topPath != absPath {
-			return nil, fmt.Errorf("snapshot path %s must be the repository root (%s) when using --base", s.Path, topPath)
-		}
+	if err := s.requireRepoRoot(ctx); err != nil {
+		return nil, err
 	}
 
 	if _, err := gitOut(ctx, s.Path, "rev-parse", "--verify", "--quiet", s.Base+"^{commit}"); err != nil {

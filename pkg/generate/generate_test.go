@@ -1560,8 +1560,24 @@ func TestRun_SnapshotFlagsRequireSnapshotSource(t *testing.T) {
 		Include: []string{"a/**"},
 	}
 	err := Run(t.Context(), opts, testLogger())
-	if err == nil || !strings.Contains(err.Error(), "require a local path source") {
+	if err == nil || !strings.Contains(err.Error(), "require a snapshot source") {
 		t.Errorf("expected flag-validation error, got %v", err)
+	}
+}
+
+func TestRun_AtMostOneSnapshotSource(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	mustWrite(t, dirA, "a/f.yaml", "x: 1\n")
+	mustWrite(t, dirB, "a/f.yaml", "x: 2\n")
+
+	opts := Options{
+		Refs:       []string{dirA, dirB},
+		Include:    []string{"a/**"},
+		ModuleName: "two-snaps",
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "at most one snapshot source") {
+		t.Errorf("expected single-snapshot guard error, got %v", err)
 	}
 }
 

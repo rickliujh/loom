@@ -256,7 +256,8 @@ git-native and use the user's git credentials.
 | Sources resolve to different repos | `sources reference different repositories: <a> vs <b>` |
 | Net changeset empty | `no net file changes after composing sources` |
 | Snapshot ref without `--include` | `snapshot source <path> requires at least one --include` |
-| `--include`/`--base` without a snapshot ref | `--include/--base require a local path source` |
+| `--include`/`--base` without a snapshot ref | `--include/--exclude/--base require a snapshot source` |
+| More than one snapshot ref | `at most one snapshot source per invocation; combine --include globs instead` |
 | Snapshot path not a git repo with `--base` | `--base requires <path> to be a git repository` |
 | Snapshot-only sources without `-n` | `--name is required when generating from local files` |
 | Bad commit ref | `cannot resolve commit "<sha>": ...` |

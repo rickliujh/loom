@@ -45,7 +45,7 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	// 1. Parse all references.
 	snap := SnapshotOptions{Include: opts.Include, Exclude: opts.Exclude, Base: opts.Base}
 	sources := make([]*Source, 0, len(opts.Refs))
-	hasSnapshot := false
+	snapshotCount := 0
 	allSnapshots := true
 	for _, ref := range opts.Refs {
 		src, err := ParseSourceRef(ref, snap, logger)
@@ -53,14 +53,20 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 			return err
 		}
 		if src.Kind == KindSnapshot {
-			hasSnapshot = true
+			snapshotCount++
 		} else {
 			allSnapshots = false
 		}
 		sources = append(sources, src)
 	}
-	if !hasSnapshot && (len(opts.Include) > 0 || len(opts.Exclude) > 0 || opts.Base != "") {
-		return fmt.Errorf("--include/--exclude/--base require a local path source")
+	if snapshotCount == 0 && (len(opts.Include) > 0 || len(opts.Exclude) > 0 || opts.Base != "") {
+		return fmt.Errorf("--include/--exclude/--base require a snapshot source")
+	}
+	// --include/--exclude/--base are invocation-wide, so several snapshot
+	// sources would silently share them — and same-repo composition makes
+	// multiple snapshots redundant anyway (CS3).
+	if snapshotCount > 1 {
+		return fmt.Errorf("at most one snapshot source per invocation; combine --include globs instead")
 	}
 
 	// 2. Fetch each source's changes, in the order given.

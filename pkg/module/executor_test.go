@@ -1,10 +1,13 @@
 package module
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rickliujh/loom/pkg/action"
@@ -599,6 +602,81 @@ spec:
 
 	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
 		t.Fatalf("Execute with templated child params failed: %v", err)
+	}
+}
+
+// TestExecute_ChildLogsLabeledByInstanceName guards bulk-run readability: when
+// several items share one source (and thus one metadata name), each item's log
+// lines must be tagged with its unique instance name (childRef.Name), not the
+// shared metadata name — otherwise the interleaved output is indistinguishable.
+func TestExecute_ChildLogsLabeledByInstanceName(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both instances point at this one child module named "greeter".
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: greeter
+spec:
+  params:
+    - name: who
+      required: true
+  operations:
+    - name: hello
+      shell:
+        command: echo hi
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: bulk-greeter
+spec:
+  modules:
+    - name: greeter-alice
+      source: ./child
+      params:
+        who: alice
+    - name: greeter-bob
+      source: ./child
+      params:
+        who: bob
+  operations: []
+`)
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	mod, err := Load(parentDir, nil, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, parentDir, RunOptions{}); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		`module=greeter-alice`,
+		`module=greeter-bob`,
+		`msg=(1/2) module=bulk-greeter module=greeter-alice`,
+		`msg=(2/2) module=bulk-greeter module=greeter-bob`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("child log output missing %q:\n%s", want, out)
+		}
+	}
+
+	// The shared metadata name must not leak in as a standalone label — every
+	// child line carries an instance name instead.
+	if strings.Contains(out, "module=greeter ") || strings.HasSuffix(out, "module=greeter") {
+		t.Errorf("child logs used shared metadata name instead of instance name:\n%s", out)
 	}
 }
 

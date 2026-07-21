@@ -24,18 +24,18 @@ const (
 	colorGray    = "\033[90m"
 )
 
-// modulePalette assigns each module a stable color so interleaved output
-// from parent/child modules stays visually separable.
-var modulePalette = [...]string{colorCyan, colorMagenta, colorBlue, colorGreen, colorYellow}
-
-func moduleColor(name string) string {
-	var h uint32 = 2166136261
-	for i := 0; i < len(name); i++ {
-		h ^= uint32(name[i])
-		h *= 16777619
-	}
-	return modulePalette[h%uint32(len(modulePalette))]
-}
+// colorModule is the single color every worker (leaf) module chip shares.
+// Modules are told apart by the chip's inverted shape and its name, not by hue
+// — one consistent color reads calmer than a per-module palette, and leaves
+// color free to mean severity (a chip only changes hue for a warning/error).
+//
+// colorRootModule sets the run's root/orchestrator apart with its own reserved
+// hue, so the module that fans work out reads distinctly from the workers it
+// drives — reinforcing the bold "≡ … ≡" chip.
+const (
+	colorModule     = colorCyan
+	colorRootModule = colorBlue
+)
 
 // modePrefixes are message prefixes that mark an execution mode; the pretty
 // handler highlights them so skipped/simulated steps stand out from real ones.
@@ -52,16 +52,25 @@ var modePrefixes = []struct {
 // keep it as a regular attribute.
 const KeySection = "section"
 
-// keyModule is the attribute carrying the executing module's name (set via
-// Logger.With in module.Load). The pretty handler renders it as a dim
-// "[name]" prefix instead of a trailing key=value pair.
-const keyModule = "module"
+// KeyModule is the attribute carrying the executing module's name (set via
+// Logger.With in module.Load, or the per-instance name in the executor). The
+// pretty handler renders it as a colored "[name]" prefix instead of a trailing
+// key=value pair, so interleaved output from different modules stays separable.
+const KeyModule = "module"
+
+// sharedState is shared by a handler and every handler derived from it via
+// WithAttrs/WithGroup, so the output mutex and run-wide observations survive
+// the per-logger cloning that slog does.
+type sharedState struct {
+	mu        sync.Mutex
+	w         io.Writer
+	sawNested bool // a nested (depth > 1) module record has been seen this run
+}
 
 // PrettyHandler formats log output for human readability.
 type PrettyHandler struct {
-	w     io.Writer
+	st    *sharedState
 	opts  slog.HandlerOptions
-	mu    sync.Mutex
 	attrs []slog.Attr
 	group string
 	color bool
@@ -73,7 +82,7 @@ func NewPrettyHandler(w io.Writer, opts *slog.HandlerOptions) *PrettyHandler {
 		opts = &slog.HandlerOptions{}
 	}
 	return &PrettyHandler{
-		w:     w,
+		st:    &sharedState{w: w},
 		opts:  *opts,
 		color: isTerminal(w),
 	}
@@ -90,8 +99,9 @@ func (h *PrettyHandler) Enabled(_ context.Context, level slog.Level) bool {
 func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	// Split attrs by rendering role before writing anything.
 	var moduleName string
+	var moduleDepth int // count of module attrs: 1 = root, >1 = nested child
 	var section bool
-	var inline []slog.Attr // rendered as trailing key=value pairs
+	var inline []slog.Attr // rendered as aligned bullets below the message
 	var blocks []slog.Attr // multi-line values, rendered as indented blocks
 
 	classify := func(a slog.Attr) {
@@ -99,8 +109,9 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		case a.Equal(slog.Attr{}):
 		case a.Key == KeySection && h.group == "":
 			section = a.Value.Kind() != slog.KindBool || a.Value.Bool()
-		case a.Key == keyModule && h.group == "":
+		case a.Key == KeyModule && h.group == "":
 			moduleName = a.Value.String()
+			moduleDepth++
 		case strings.Contains(a.Value.String(), "\n"):
 			blocks = append(blocks, a)
 		default:
@@ -115,13 +126,33 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
+	h.st.mu.Lock()
+	defer h.st.mu.Unlock()
+
+	// A depth-1 module is the run's root, but it is only worth marking as such
+	// once the run has actual nesting to contrast against — otherwise a plain
+	// single-module run would decorate every line for no reason. Children log
+	// before a parent's own operations, so by the time the root logs its ops
+	// the nested flag is already set.
+	if moduleDepth > 1 {
+		h.st.sawNested = true
+	}
+	root := moduleDepth == 1 && h.st.sawNested
+
 	var b strings.Builder
 
 	if section {
 		b.WriteByte('\n')
 	}
 
-	// Level prefix with color.
+	// Module chip: the leftmost gutter, so the executing module is the first
+	// thing the eye lands on. Inverted and colored by the module (severity
+	// overrides on warn/error); the root module is marked distinctly.
+	if moduleName != "" {
+		h.writeChip(&b, moduleName, root, r.Level)
+	}
+
+	// Level prefix.
 	prefix, color := h.levelPrefix(r.Level)
 	if h.color && color != "" {
 		b.WriteString(color)
@@ -131,40 +162,32 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		b.WriteString(colorReset)
 	}
 
-	if moduleName != "" {
-		if h.color {
-			b.WriteString(moduleColor(moduleName))
-		}
-		b.WriteString("[" + moduleName + "] ")
-		if h.color {
-			b.WriteString(colorReset)
-		}
-	}
-
-	if section && h.color {
+	// Message. Section headers are emphasized; but when a chip is present it is
+	// already an inverted anchor, so bold alone avoids a second reverse-video
+	// bar on the same line. Headerless sections keep the full inverted bar.
+	switch {
+	case section && h.color && moduleName != "":
+		b.WriteString(colorBold + r.Message + colorReset)
+	case section && h.color:
 		b.WriteString(colorInvert + colorBold + " " + r.Message + " " + colorReset)
-	} else {
+	default:
 		h.writeMessage(&b, r.Message)
-	}
-
-	for _, a := range inline {
-		h.writeAttr(&b, a)
 	}
 	b.WriteByte('\n')
 
+	// Attributes render as aligned, dim bullets below the message.
+	h.writeAttrs(&b, inline)
 	for _, a := range blocks {
 		h.writeBlock(&b, a)
 	}
 
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, err := io.WriteString(h.w, b.String())
+	_, err := io.WriteString(h.st.w, b.String())
 	return err
 }
 
 func (h *PrettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	return &PrettyHandler{
-		w:     h.w,
+		st:    h.st,
 		opts:  h.opts,
 		attrs: append(append([]slog.Attr{}, h.attrs...), attrs...),
 		group: h.group,
@@ -178,7 +201,7 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 		prefix = h.group + "." + name
 	}
 	return &PrettyHandler{
-		w:     h.w,
+		st:    h.st,
 		opts:  h.opts,
 		attrs: append([]slog.Attr{}, h.attrs...),
 		group: prefix,
@@ -213,22 +236,73 @@ func (h *PrettyHandler) writeMessage(b *strings.Builder, msg string) {
 	b.WriteString(msg)
 }
 
-func (h *PrettyHandler) writeAttr(b *strings.Builder, a slog.Attr) {
-	key := a.Key
-	if h.group != "" {
-		key = h.group + "." + key
+// writeChip renders the module gutter: an inverted, colored "[name]" chip.
+// The color is the module's stable palette color, overridden by red/yellow on
+// error/warning so severity reads at a glance. Root modules (a single module
+// attr on the logger) are wrapped in "≡ … ≡" and bolded to stand apart from
+// their nested children.
+func (h *PrettyHandler) writeChip(b *strings.Builder, name string, root bool, level slog.Level) {
+	label := name
+	if root {
+		label = "≡ " + name + " ≡"
 	}
 
-	val := a.Value.String()
-	if strings.ContainsAny(val, " \t") || val == "" {
-		val = fmt.Sprintf("%q", val)
+	if !h.color {
+		b.WriteString("[" + label + "] ")
+		return
 	}
 
-	if h.color {
-		// Gray key, plain value — the values are what the reader scans for.
-		fmt.Fprintf(b, " %s%s=%s%s", colorGray, key, colorReset, val)
-	} else {
-		fmt.Fprintf(b, " %s=%s", key, val)
+	color := colorModule
+	if root {
+		color = colorRootModule
+	}
+	switch {
+	case level >= slog.LevelError:
+		color = colorRed
+	case level >= slog.LevelWarn:
+		color = colorYellow
+	}
+
+	b.WriteString(colorInvert + color)
+	if root {
+		b.WriteString(colorBold)
+	}
+	b.WriteString(" " + label + " " + colorReset + " ")
+}
+
+// writeAttrs renders inline attributes as aligned, dim-key bullets beneath the
+// message. Keys are padded to a common width within the record so values form
+// a readable column; multi-line values are handled separately by writeBlock.
+func (h *PrettyHandler) writeAttrs(b *strings.Builder, attrs []slog.Attr) {
+	if len(attrs) == 0 {
+		return
+	}
+
+	keys := make([]string, len(attrs))
+	maxKey := 0
+	for i, a := range attrs {
+		k := a.Key
+		if h.group != "" {
+			k = h.group + "." + k
+		}
+		keys[i] = k
+		if len(k) > maxKey {
+			maxKey = len(k)
+		}
+	}
+
+	for i, a := range attrs {
+		key := keys[i]
+		pad := strings.Repeat(" ", maxKey-len(key))
+		val := a.Value.String()
+		if val == "" {
+			val = `""`
+		}
+		if h.color {
+			fmt.Fprintf(b, "  %s%s%s%s  %s\n", colorGray, key, colorReset, pad, val)
+		} else {
+			fmt.Fprintf(b, "  %s%s  %s\n", key, pad, val)
+		}
 	}
 }
 

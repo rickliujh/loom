@@ -12,14 +12,40 @@ import (
 
 // color codes
 const (
-	colorReset  = "\033[0m"
-	colorBold   = "\033[1m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorCyan   = "\033[36m"
-	colorGray   = "\033[90m"
+	colorReset   = "\033[0m"
+	colorBold    = "\033[1m"
+	colorInvert  = "\033[7m"
+	colorRed     = "\033[31m"
+	colorGreen   = "\033[32m"
+	colorYellow  = "\033[33m"
+	colorBlue    = "\033[34m"
+	colorMagenta = "\033[35m"
+	colorCyan    = "\033[36m"
+	colorGray    = "\033[90m"
 )
+
+// modulePalette assigns each module a stable color so interleaved output
+// from parent/child modules stays visually separable.
+var modulePalette = [...]string{colorCyan, colorMagenta, colorBlue, colorGreen, colorYellow}
+
+func moduleColor(name string) string {
+	var h uint32 = 2166136261
+	for i := 0; i < len(name); i++ {
+		h ^= uint32(name[i])
+		h *= 16777619
+	}
+	return modulePalette[h%uint32(len(modulePalette))]
+}
+
+// modePrefixes are message prefixes that mark an execution mode; the pretty
+// handler highlights them so skipped/simulated steps stand out from real ones.
+var modePrefixes = []struct {
+	prefix string
+	color  string
+}{
+	{"dry-run:", colorYellow},
+	{"local-run:", colorMagenta},
+}
 
 // KeySection marks a log record as a section header. The pretty handler
 // renders it with a leading blank line and bold text; structured handlers
@@ -107,7 +133,7 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 
 	if moduleName != "" {
 		if h.color {
-			b.WriteString(colorGray)
+			b.WriteString(moduleColor(moduleName))
 		}
 		b.WriteString("[" + moduleName + "] ")
 		if h.color {
@@ -116,11 +142,9 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 
 	if section && h.color {
-		b.WriteString(colorBold)
-	}
-	b.WriteString(r.Message)
-	if section && h.color {
-		b.WriteString(colorReset)
+		b.WriteString(colorInvert + colorBold + " " + r.Message + " " + colorReset)
+	} else {
+		h.writeMessage(&b, r.Message)
 	}
 
 	for _, a := range inline {
@@ -175,6 +199,20 @@ func (h *PrettyHandler) levelPrefix(level slog.Level) (string, string) {
 	}
 }
 
+// writeMessage writes the record message, highlighting a leading mode
+// marker ("dry-run:", "local-run:") when color is enabled.
+func (h *PrettyHandler) writeMessage(b *strings.Builder, msg string) {
+	if h.color {
+		for _, m := range modePrefixes {
+			if strings.HasPrefix(msg, m.prefix) {
+				b.WriteString(m.color + m.prefix + colorReset + msg[len(m.prefix):])
+				return
+			}
+		}
+	}
+	b.WriteString(msg)
+}
+
 func (h *PrettyHandler) writeAttr(b *strings.Builder, a slog.Attr) {
 	key := a.Key
 	if h.group != "" {
@@ -187,7 +225,8 @@ func (h *PrettyHandler) writeAttr(b *strings.Builder, a slog.Attr) {
 	}
 
 	if h.color {
-		fmt.Fprintf(b, " %s%s=%s%s", colorGray, key, val, colorReset)
+		// Gray key, plain value — the values are what the reader scans for.
+		fmt.Fprintf(b, " %s%s=%s%s", colorGray, key, colorReset, val)
 	} else {
 		fmt.Fprintf(b, " %s=%s", key, val)
 	}

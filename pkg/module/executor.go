@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
 	tmpl "github.com/rickliujh/loom/pkg/template"
@@ -100,8 +101,9 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 	}
 
 	// Execute operations.
-	for _, op := range mod.Config.Spec.Operations {
-		mod.Logger.Info("executing operation", "name", op.Name)
+	ops := mod.Config.Spec.Operations
+	for i, op := range ops {
+		mod.Logger.Info(fmt.Sprintf("operation %s (%d/%d)", op.Name, i+1, len(ops)), prettylog.KeySection, true)
 
 		act, err := action.FromOperation(op)
 		if err != nil {

@@ -35,7 +35,8 @@ type Repo struct {
 
 // Clone clones a repository. It tries go-git first, then falls back to git CLI.
 func Clone(ctx context.Context, url, dir, branch string, logger *slog.Logger) (Repository, error) {
-	logger.Info("cloning repository", "url", url, "dir", dir, "branch", branch)
+	logger.Info("cloning repository", "url", url, "branch", branch)
+	logger.Debug("clone destination", "dir", dir)
 
 	// Try go-git.
 	opts := &gogit.CloneOptions{URL: url}

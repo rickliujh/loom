@@ -47,16 +47,17 @@ func (a *PRAction) Execute(ctx context.Context, execCtx *ExecutionContext) error
 		labels = append(labels, rendered)
 	}
 
-	execCtx.Logger.Info("opening PR", "title", title, "provider", provider)
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would open PR", "title", title, "provider", provider)
 		return nil
 	}
 
 	if execCtx.LocalRun {
-		execCtx.Logger.Info("local: skipping PR creation", "title", title, "provider", provider)
+		execCtx.Logger.Info("local-run: skipping PR creation", "title", title)
 		return nil
 	}
+
+	execCtx.Logger.Info("opening PR", "title", title, "provider", provider)
 
 	return openPR(ctx, execCtx, provider, tokenEnv, baseBranch, labels, title, body)
 }

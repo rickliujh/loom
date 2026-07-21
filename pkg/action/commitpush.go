@@ -33,16 +33,16 @@ func (a *CommitPushAction) Execute(ctx context.Context, execCtx *ExecutionContex
 		email = execCtx.GitEmail
 	}
 
-	execCtx.Logger.Info("commit and push", "message", msg)
 	if execCtx.DryRun {
 		execCtx.Logger.Info("dry-run: would commit and push", "message", msg, "author", author)
 		return nil
 	}
 
 	if execCtx.LocalRun {
-		execCtx.Logger.Info("local: committing without push", "message", msg, "author", author)
+		execCtx.Logger.Info("local-run: committing without push", "message", msg)
 		return commitOnly(ctx, execCtx, msg, author, email)
 	}
 
+	execCtx.Logger.Info("committing and pushing", "message", msg)
 	return commitAndPush(ctx, execCtx, msg, author, email)
 }

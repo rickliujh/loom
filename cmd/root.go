@@ -18,15 +18,19 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "loom",
-	Short:        "Loom automates the last mile of your GitOps",
-	Long:         "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
-	SilenceUsage: true,
+	Use:   "loom",
+	Short: "Loom automates the last mile of your GitOps",
+	Long:  "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
+	// Silence cobra's own usage/error output so the top-level error is printed
+	// once, in our own colored style, rather than as a plain "Error: …" line.
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 // Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		prettylog.Failuref(os.Stderr, "%v", err)
 		os.Exit(1)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 
+	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
 	tmpl "github.com/rickliujh/loom/pkg/template"
@@ -57,7 +58,7 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 		Dir:    dir,
 		Config: cfg,
 		Params: params,
-		Logger: logger.With("module", cfg.Metadata.Name),
+		Logger: logger.With(prettylog.KeyModule, cfg.Metadata.Name),
 	}, nil
 }
 

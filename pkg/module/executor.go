@@ -53,18 +53,32 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 	execCtx := mod.NewExecutionContext(targetDir, opts)
 
 	// Execute child modules first.
-	for _, childRef := range mod.Config.Spec.Modules {
+	children := mod.Config.Spec.Modules
+	for i, childRef := range children {
 		childName, err := tmpl.RenderString(childRef.Name, mod.Params)
 		if err != nil {
 			return fmt.Errorf("rendering name for child module %q: %w", childRef.Name, err)
 		}
+
+		// Label every log line from this invocation with the instance name
+		// (childRef.Name), not the child's metadata name. In a bulk run all
+		// items share one source — and thus one metadata name — so only the
+		// instance name distinguishes item 0's output from item 1's. Deriving
+		// from mod.Logger keeps the breadcrumb one level deep instead of
+		// stacking the redundant metadata-name label. Threading it through
+		// source resolution and Load attributes the child's setup logs (dynamic
+		// params, target clone) to the instance too, not to the parent.
+		childLogger := mod.Logger.With(prettylog.KeyModule, childName)
+		// The module chip already names the instance; the header only needs to
+		// mark the boundary and its position in the batch.
+		childLogger.Info(fmt.Sprintf("(%d/%d)", i+1, len(children)), prettylog.KeySection, true)
 
 		renderedSource, err := tmpl.RenderString(childRef.Source, mod.Params)
 		if err != nil {
 			return fmt.Errorf("rendering source for child %q: %w", childName, err)
 		}
 
-		childDir, sourceCleanup, err := ResolveSource(renderedSource, mod.Dir, mod.Logger)
+		childDir, sourceCleanup, err := ResolveSource(renderedSource, mod.Dir, childLogger)
 		if err != nil {
 			return fmt.Errorf("resolving child module %q: %w", childName, err)
 		}
@@ -82,10 +96,13 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			childParams[k] = rendered
 		}
 
-		childMod, err := Load(childDir, childParams, mod.Logger)
+		childMod, err := Load(childDir, childParams, childLogger)
 		if err != nil {
 			return fmt.Errorf("loading child module %q: %w", childName, err)
 		}
+		// Load re-labels the logger with the child's metadata name; keep the
+		// instance identity for everything downstream.
+		childMod.Logger = childLogger
 
 		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, targetDir, &opts)
 		if err != nil {

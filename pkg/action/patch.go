@@ -59,14 +59,15 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	patchPath := util.ExpandPath(execCtx.ModuleDir, path)
 	targetPath := filepath.Join(execCtx.TargetDir, target)
 
-	execCtx.Logger.Info("applying patch", "engine", engine, "patch", patchPath, "target", targetPath)
+	// Log the config-relative paths; the joined absolute paths are noise.
 	if execCtx.DryRun {
-		execCtx.Logger.Info("dry-run: would apply patch", "engine", engine, "patch", patchPath, "target", targetPath)
+		execCtx.Logger.Info("dry-run: would apply patch", "engine", engine, "patch", path, "target", target)
 		if execCtx.ShowDiff {
 			return a.showPatchDiff(execCtx, engine, patchPath, targetPath, target, preserveComments)
 		}
 		return nil
 	}
+	execCtx.Logger.Info("applying patch", "engine", engine, "patch", path, "target", target)
 
 	// Read and template-render the patch file.
 	patchRaw, err := os.ReadFile(patchPath)

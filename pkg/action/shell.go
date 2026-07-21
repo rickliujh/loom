@@ -26,16 +26,17 @@ func (a *ShellAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 		return actionError("shell", err)
 	}
 
-	execCtx.Logger.Info("running shell command", "command", cmdStr)
 	if execCtx.DryRun {
-		execCtx.Logger.Info("dry-run: would execute", "command", cmdStr)
+		execCtx.Logger.Info("dry-run: would run shell command", "command", cmdStr)
 		return nil
 	}
 
 	if execCtx.LocalRun && !a.Config.Pure {
-		execCtx.Logger.Info("local: skipping shell command (not marked pure)", "command", cmdStr)
+		execCtx.Logger.Info("local-run: skipping shell command (not marked pure)", "command", cmdStr)
 		return nil
 	}
+
+	execCtx.Logger.Info("running shell command", "command", cmdStr)
 
 	if timeout != "" {
 		dur, err := time.ParseDuration(timeout)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
 	"github.com/rickliujh/loom/pkg/module"
@@ -123,6 +124,17 @@ func runModule(cmd *cobra.Command, args []string) error {
 	// failure are exactly what the user needs to track down.
 	if showSummary {
 		summary.Print(os.Stdout)
+	}
+	if execErr == nil {
+		fmt.Fprintln(os.Stderr)
+		switch {
+		case dryRun:
+			prettylog.Successf(os.Stderr, "dry run of %q complete — no changes were made", mod.Config.Metadata.Name)
+		case localRun:
+			prettylog.Successf(os.Stderr, "run of %q complete — results in %s", mod.Config.Metadata.Name, targetPath)
+		default:
+			prettylog.Successf(os.Stderr, "run of %q complete", mod.Config.Metadata.Name)
+		}
 	}
 	return execErr
 }

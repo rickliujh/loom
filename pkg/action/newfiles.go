@@ -57,18 +57,20 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 		}
 
 		destPath := filepath.Join(execCtx.TargetDir, dest, destRel)
+		displayPath := filepath.Join(dest, destRel)
 
-		execCtx.Logger.Info("writing file", "path", destPath)
 		if execCtx.DryRun {
 			if _, err := os.Stat(destPath); err == nil {
-				execCtx.Logger.Warn("dry-run: destination file already exists, would fail", "path", destPath)
+				execCtx.Logger.Warn("destination file already exists, a real run would fail", "path", displayPath)
 			}
-			execCtx.Logger.Info("dry-run: would write", "path", destPath, "size", len(rendered))
+			execCtx.Logger.Info("dry-run: would write file", "path", displayPath, "bytes", len(rendered))
 			if execCtx.ShowDiff {
 				printDiff(execCtx, destRel, "", string(rendered))
 			}
 			continue
 		}
+
+		execCtx.Logger.Info("writing file", "path", displayPath)
 
 		if _, err := os.Stat(destPath); err == nil {
 			return actionError("newFiles", fmt.Errorf("destination file already exists: %s", destPath))

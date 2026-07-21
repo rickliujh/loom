@@ -1,8 +1,9 @@
 package cmd
 
 import (
-	"fmt"
+	"os"
 
+	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -34,6 +35,6 @@ func validateModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Printf("module config in %s is valid\n", moduleDir)
+	prettylog.Successf(os.Stdout, "module config in %s is valid", moduleDir)
 	return nil
 }

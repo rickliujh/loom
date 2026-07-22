@@ -15,9 +15,9 @@ import (
 
 // RunOptions holds runtime flags for module execution.
 type RunOptions struct {
-	DryRun    bool
+	DryRun   bool
 	LocalRun bool
-	ShowDiff  bool
+	ShowDiff bool
 	// DiffWriter is the destination for diff output. Defaults to os.Stdout.
 	DiffWriter io.Writer
 	// TargetPath is the base directory for --local-run mode.

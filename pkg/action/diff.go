@@ -1,7 +1,6 @@
 package action
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -17,10 +16,12 @@ const (
 	diffColorCyan   = "\033[36m"
 )
 
-// printDiff writes a colored unified diff between old and new content
-// directly to execCtx.DiffWriter, bypassing the structured logger.
+// printDiff computes a unified diff between old and new content and hands it to
+// execCtx.Diffs, which holds it until the end of the run. It does not write to
+// the logger or stdout itself, so diffs stay out of the interleaved operation
+// logs and print together once the run finishes.
 func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
-	if execCtx.DiffWriter == nil {
+	if execCtx.Diffs == nil {
 		return
 	}
 
@@ -53,8 +54,7 @@ func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
 		return
 	}
 
-	colored := colorizeDiff(text, isTerminalWriter(execCtx.DiffWriter))
-	fmt.Fprint(execCtx.DiffWriter, colored)
+	execCtx.Diffs.Add(text)
 }
 
 // colorizeDiff applies ANSI colors to unified diff lines.

@@ -83,6 +83,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	summary := &action.RunSummary{}
+	diffs := &action.DiffCollector{}
 	opts := module.RunOptions{
 		DryRun:     dryRun,
 		LocalRun:   localRun,
@@ -91,6 +92,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,
 		Summary:    summary,
+		Diffs:      diffs,
 	}
 
 	// Resolve target directory.
@@ -119,6 +121,13 @@ func runModule(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	execErr := module.Execute(ctx, mod, targetDir, opts)
+
+	// Collected diffs print together at the very end, after all the per-operation
+	// logs — even on a partial failure, since the diffs computed before it are
+	// what the user is inspecting. Nothing prints when --diff was not requested.
+	if showDiff {
+		diffs.Print(os.Stdout)
+	}
 
 	// Print even when the run failed partway — PRs opened before the
 	// failure are exactly what the user needs to track down.

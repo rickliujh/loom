@@ -12,18 +12,25 @@ import (
 	"github.com/rickliujh/loom/pkg/config"
 )
 
-func diffExecCtx(t *testing.T, moduleDir, targetDir string) (*ExecutionContext, *bytes.Buffer) {
+func diffExecCtx(t *testing.T, moduleDir, targetDir string) (*ExecutionContext, *DiffCollector) {
 	t.Helper()
-	var diffBuf bytes.Buffer
+	diffs := &DiffCollector{}
 	return &ExecutionContext{
-		ModuleDir:  moduleDir,
-		TargetDir:  targetDir,
-		Params:     map[string]string{},
-		DryRun:     true,
-		ShowDiff:   true,
-		DiffWriter: &diffBuf,
-		Logger:     slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
-	}, &diffBuf
+		ModuleDir: moduleDir,
+		TargetDir: targetDir,
+		Params:    map[string]string{},
+		DryRun:    true,
+		ShowDiff:  true,
+		Diffs:     diffs,
+		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}, diffs
+}
+
+// diffString renders a collector's diffs the way the run would print them.
+func diffString(c *DiffCollector) string {
+	var b bytes.Buffer
+	c.Print(&b)
+	return b.String()
 }
 
 // --- NewFiles diff ---
@@ -40,13 +47,13 @@ func TestNewFilesAction_DiffShowsNewFileContent(t *testing.T) {
 		Config: configNewFiles("templates", ""),
 	}
 
-	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffs := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	diffOutput := diffBuf.String()
+	diffOutput := diffString(diffs)
 	if !strings.Contains(diffOutput, "hello world") {
 		t.Errorf("expected diff to contain file content, got:\n%s", diffOutput)
 	}
@@ -70,7 +77,7 @@ func TestNewFilesAction_DiffShowsTemplatedContent(t *testing.T) {
 		Config: configNewFiles("templates", ""),
 	}
 
-	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffs := diffExecCtx(t, moduleDir, targetDir)
 	execCtx.Params = map[string]string{"name": "World"}
 
 	err := action.Execute(context.Background(), execCtx)
@@ -78,7 +85,7 @@ func TestNewFilesAction_DiffShowsTemplatedContent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	diffOutput := diffBuf.String()
+	diffOutput := diffString(diffs)
 	if !strings.Contains(diffOutput, "Hello World!") {
 		t.Errorf("expected diff to contain rendered content, got:\n%s", diffOutput)
 	}
@@ -99,7 +106,7 @@ func TestNewFilesAction_DiffWithoutShowDiff_NoDiffOutput(t *testing.T) {
 	execCtx := testExecCtx(t, moduleDir, targetDir)
 	execCtx.DryRun = true
 	execCtx.ShowDiff = false
-	// DiffWriter intentionally nil — no diff output.
+	// Diffs intentionally nil — no diff output.
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
@@ -142,13 +149,13 @@ data:
 		},
 	}
 
-	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffs := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	diffOutput := diffBuf.String()
+	diffOutput := diffString(diffs)
 	if !strings.Contains(diffOutput, "added-by") {
 		t.Errorf("expected diff to show added label, got:\n%s", diffOutput)
 	}
@@ -184,13 +191,13 @@ metadata:
 		},
 	}
 
-	execCtx, diffBuf := diffExecCtx(t, moduleDir, targetDir)
+	execCtx, diffs := diffExecCtx(t, moduleDir, targetDir)
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	diffOutput := diffBuf.String()
+	diffOutput := diffString(diffs)
 	if !strings.Contains(diffOutput, "old-name") || !strings.Contains(diffOutput, "new-name") {
 		t.Errorf("expected diff to show old->new name change, got:\n%s", diffOutput)
 	}
@@ -218,7 +225,7 @@ func TestPatchAction_DiffWithoutShowDiff_NoDiffOutput(t *testing.T) {
 	execCtx := testExecCtx(t, moduleDir, targetDir)
 	execCtx.DryRun = true
 	execCtx.ShowDiff = false
-	// DiffWriter intentionally nil.
+	// Diffs intentionally nil — no diff output.
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {

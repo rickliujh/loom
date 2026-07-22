@@ -44,6 +44,36 @@ func (s *RunSummary) Print(w io.Writer) {
 	}
 }
 
+// DiffCollector accumulates file diffs across a whole run, shared by parent
+// and child module executions. Execution is sequential, so no locking is
+// needed. Diffs are held rather than written inline as each file is merged,
+// so the whole set can be printed once at the very end of the run — after the
+// per-operation logs — where they are easy to read.
+type DiffCollector struct {
+	// Diffs holds each captured file diff as uncolored unified-diff text.
+	Diffs []string
+}
+
+// Add records one file diff. Safe to call on a nil collector.
+func (c *DiffCollector) Add(diff string) {
+	if c == nil {
+		return
+	}
+	c.Diffs = append(c.Diffs, diff)
+}
+
+// Print writes all collected diffs to w, colorized when w is a terminal.
+// Nothing is written when the collector is nil or empty.
+func (c *DiffCollector) Print(w io.Writer) {
+	if c == nil || len(c.Diffs) == 0 {
+		return
+	}
+	color := isTerminalWriter(w)
+	for _, diff := range c.Diffs {
+		fmt.Fprint(w, colorizeDiff(diff, color))
+	}
+}
+
 // ExecutionContext holds runtime state shared across actions.
 type ExecutionContext struct {
 	// ModuleName is the metadata.name of the executing module.
@@ -64,9 +94,9 @@ type ExecutionContext struct {
 	LocalRun bool
 	// ShowDiff displays file diffs during dry-run.
 	ShowDiff bool
-	// DiffWriter is the destination for diff output (bypasses the logger).
-	// When nil, diff output is suppressed.
-	DiffWriter io.Writer
+	// Diffs collects file diffs across the run for printing at the very end,
+	// shared by parent and child executions. When nil, diff output is suppressed.
+	Diffs *DiffCollector
 	// GitAuthor is the default git author name for commitPush when not set in loom.yaml.
 	GitAuthor string
 	// GitEmail is the default git author email for commitPush when not set in loom.yaml.

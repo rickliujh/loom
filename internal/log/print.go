@@ -10,7 +10,7 @@ import (
 func Successf(w io.Writer, format string, args ...any) {
 	check := "✔"
 	if isTerminal(w) {
-		check = colorGreen + "✔" + colorReset
+		check = colorSuccess + "✔" + colorReset
 	}
 	fmt.Fprintf(w, "%s %s\n", check, fmt.Sprintf(format, args...))
 }
@@ -21,7 +21,7 @@ func Successf(w io.Writer, format string, args ...any) {
 func Failuref(w io.Writer, format string, args ...any) {
 	cross := "✖"
 	if isTerminal(w) {
-		cross = colorRed + "✖" + colorReset
+		cross = colorError + "✖" + colorReset
 	}
 	fmt.Fprintf(w, "%s %s\n", cross, fmt.Sprintf(format, args...))
 }

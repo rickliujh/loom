@@ -10,20 +10,18 @@ import (
 	"sync"
 )
 
-// color codes
+// Text attributes (SGR) — structural, not hues.
 const (
-	colorReset   = "\033[0m"
-	colorBold    = "\033[1m"
-	colorInvert  = "\033[7m"
-	colorRed     = "\033[31m"
-	colorGreen   = "\033[32m"
-	colorYellow  = "\033[33m"
-	colorBlue    = "\033[34m"
-	colorMagenta = "\033[35m"
-	colorCyan    = "\033[36m"
-	colorGray    = "\033[90m"
+	colorReset  = "\033[0m"
+	colorBold   = "\033[1m"
+	colorInvert = "\033[7m"
 )
 
+// Palette. A restrained, desaturated 256-color scheme: hue carries meaning
+// (which module, what severity) without the loud primary tones a plain 16-color
+// palette produces. Every value is a muted mid-tone, so a busy run reads as one
+// calm, serious surface rather than a string of alerts.
+//
 // colorModule is the single color every worker (leaf) module chip shares.
 // Modules are told apart by the chip's inverted shape and its name, not by hue
 // — one consistent color reads calmer than a per-module palette, and leaves
@@ -33,8 +31,13 @@ const (
 // hue, so the module that fans work out reads distinctly from the workers it
 // drives — reinforcing the bold "≡ … ≡" chip.
 const (
-	colorModule     = colorCyan
-	colorRootModule = colorBlue
+	colorModule     = "\033[38;5;66m"  // slate teal — worker chips
+	colorRootModule = "\033[38;5;61m"  // muted indigo — the orchestrator
+	colorError      = "\033[38;5;131m" // brick red — errors, failure line
+	colorWarn       = "\033[38;5;137m" // amber — warnings, dry-run marker
+	colorSuccess    = "\033[38;5;65m"  // sage — the success line
+	colorMuted      = "\033[38;5;244m" // mid gray — attr keys, debug
+	colorLocalRun   = "\033[38;5;96m"  // mauve — the local-run mode marker
 )
 
 // modePrefixes are message prefixes that mark an execution mode; the pretty
@@ -43,8 +46,8 @@ var modePrefixes = []struct {
 	prefix string
 	color  string
 }{
-	{"dry-run:", colorYellow},
-	{"local-run:", colorMagenta},
+	{"dry-run:", colorWarn},
+	{"local-run:", colorLocalRun},
 }
 
 // KeySection marks a log record as a section header. The pretty handler
@@ -219,13 +222,13 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 func (h *PrettyHandler) levelPrefix(level slog.Level) (string, string) {
 	switch {
 	case level >= slog.LevelError:
-		return "error: ", colorRed
+		return "error: ", colorError
 	case level >= slog.LevelWarn:
-		return "warning: ", colorYellow
+		return "warning: ", colorWarn
 	case level >= slog.LevelInfo:
 		return "", ""
 	default:
-		return "debug: ", colorGray
+		return "debug: ", colorMuted
 	}
 }
 
@@ -265,9 +268,9 @@ func (h *PrettyHandler) writeChip(b *strings.Builder, name string, root bool, le
 	}
 	switch {
 	case level >= slog.LevelError:
-		color = colorRed
+		color = colorError
 	case level >= slog.LevelWarn:
-		color = colorYellow
+		color = colorWarn
 	}
 
 	b.WriteString(colorInvert + color)
@@ -306,7 +309,7 @@ func (h *PrettyHandler) writeAttrs(b *strings.Builder, attrs []slog.Attr) {
 			val = `""`
 		}
 		if h.color {
-			fmt.Fprintf(b, "  %s%s%s%s  %s\n", colorGray, key, colorReset, pad, val)
+			fmt.Fprintf(b, "  %s%s%s%s  %s\n", colorMuted, key, colorReset, pad, val)
 		} else {
 			fmt.Fprintf(b, "  %s%s  %s\n", key, pad, val)
 		}
@@ -322,7 +325,7 @@ func (h *PrettyHandler) writeBlock(b *strings.Builder, a slog.Attr) {
 	}
 
 	if h.color {
-		fmt.Fprintf(b, "  %s%s:%s\n", colorGray, key, colorReset)
+		fmt.Fprintf(b, "  %s%s:%s\n", colorMuted, key, colorReset)
 	} else {
 		fmt.Fprintf(b, "  %s:\n", key)
 	}

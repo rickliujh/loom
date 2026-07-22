@@ -167,7 +167,7 @@ func TestColorChildChipRecoloredBySeverity(t *testing.T) {
 	logger.With("module", "bulk").With("module", "child-0").Warn("push rejected")
 
 	got := buf.String()
-	want := "\033[7m" + colorYellow + " child-0 " + "\033[0m" + " " + "\033[33m" + "warning: " + "\033[0m" + "push rejected\n"
+	want := "\033[7m" + colorWarn + " child-0 " + "\033[0m" + " " + colorWarn + "warning: " + "\033[0m" + "push rejected\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -195,8 +195,8 @@ func TestColorModeMarkerHighlighted(t *testing.T) {
 
 	got := buf.String()
 	for _, want := range []string{
-		"\033[33mdry-run:\033[0m would write file\n",
-		"\033[35mlocal-run:\033[0m skipping PR creation\n",
+		colorWarn + "dry-run:" + "\033[0m would write file\n",
+		colorLocalRun + "local-run:" + "\033[0m skipping PR creation\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%q", want, got)
@@ -209,7 +209,7 @@ func TestColorAttrKeyGrayValuePlain(t *testing.T) {
 	logger.Info("writing file", "path", "argocd/app.yaml")
 
 	got := buf.String()
-	want := "writing file\n  \033[90mpath\033[0m  argocd/app.yaml\n"
+	want := "writing file\n  " + colorMuted + "path\033[0m  argocd/app.yaml\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

@@ -11,8 +11,7 @@ import (
 var (
 	verbose   bool
 	dryRun    bool
-	localRun bool
-	showDiff  bool
+	localRun  bool
 	logLevel  string
 	logFormat string
 )
@@ -44,7 +43,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Simulate operations without making changes")
 	rootCmd.PersistentFlags().BoolVar(&localRun, "local-run", false, "Run all operations locally but skip remote push and PR creation")
-	rootCmd.PersistentFlags().BoolVar(&showDiff, "diff", false, "Show file diffs during dry-run (implies --dry-run)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "pretty", "Log format (pretty, text, json)")
 }

@@ -17,7 +17,6 @@ loom run [path] [flags]
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--summary` | Print a list of PRs/MRs created during the run at the end |
 | `--dry-run` | Show what would happen without writing anything |
-| `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--local-run` | Run all operations locally but skip remote push and PR creation |
 | `-v, --verbose` | Enable debug logging |
 | `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
@@ -59,15 +58,9 @@ loom run ./onboard-service \
   --dry-run
 ```
 
-### Dry run with diffs
+### See the diffs
 
-See exactly what files would be created and changed:
-
-```bash
-loom run ./onboard-service \
-  -p serviceName=payments \
-  --diff
-```
+To see exactly what files would be created and changed, use [`loom diff`](/reference/cli-diff).
 
 ### Local mode
 

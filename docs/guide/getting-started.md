@@ -101,12 +101,12 @@ loom run ./onboard-service \
   --dry-run
 ```
 
-Add `--diff` to see the rendered file contents:
+Use `loom diff` to see the rendered file contents:
 
 ```bash
-loom run ./onboard-service \
+loom diff ./onboard-service \
   -p serviceName=payments \
-  --diff
+  --quick
 ```
 
 ### 4. Run it for real

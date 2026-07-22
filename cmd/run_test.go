@@ -46,13 +46,19 @@ func initGitRepo(t *testing.T, dir string) {
 func resetFlags() {
 	dryRun = false
 	localRun = false
-	showDiff = false
 	targetPath = ""
 	params = nil
 	paramsFile = ""
 	verbose = false
 	logLevel = "info"
 	logFormat = "pretty"
+
+	diffQuick = false
+	diffTargetPath = ""
+	diffParams = nil
+	diffParamsFile = ""
+	diffAuthor = ""
+	diffEmail = ""
 }
 
 // L1: --local-run without --target-path errors (with target spec).
@@ -287,40 +293,5 @@ spec:
 	}
 	if string(content) != "from subdir" {
 		t.Errorf("expected 'from subdir', got %q", string(content))
-	}
-}
-
-// DR2: --diff implies --dry-run — no files written.
-func TestRun_DiffImpliesDryRun(t *testing.T) {
-	resetFlags()
-
-	moduleDir := t.TempDir()
-	targetDir := t.TempDir()
-
-	srcDir := filepath.Join(moduleDir, "templates")
-	os.MkdirAll(srcDir, 0o755)
-	os.WriteFile(filepath.Join(srcDir, "new.txt"), []byte("new content\n"), 0o644)
-
-	writeLoomYAML(t, moduleDir, `
-apiVersion: loom.rickliujh.github.io/v1beta1
-kind: Loom
-metadata:
-  name: test-diff
-spec:
-  operations:
-    - name: write-files
-      newFiles:
-        source: "templates"
-        dest: ""
-`)
-
-	rootCmd.SetArgs([]string{"run", moduleDir, "--diff", "--target-path", targetDir})
-	err := rootCmd.Execute()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if _, err := os.Stat(filepath.Join(targetDir, "new.txt")); !os.IsNotExist(err) {
-		t.Error("--diff should imply --dry-run, file should not be written")
 	}
 }

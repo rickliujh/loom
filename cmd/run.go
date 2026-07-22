@@ -72,11 +72,6 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// --diff implies --dry-run.
-	if showDiff {
-		dryRun = true
-	}
-
 	// In --local-run mode, require --target-path so the user can inspect results.
 	if localRun && targetPath == "" {
 		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
@@ -86,7 +81,6 @@ func runModule(cmd *cobra.Command, args []string) error {
 	opts := module.RunOptions{
 		DryRun:     dryRun,
 		LocalRun:   localRun,
-		ShowDiff:   showDiff,
 		TargetPath: targetPath,
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,

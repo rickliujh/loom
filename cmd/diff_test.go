@@ -119,6 +119,11 @@ spec:
 	if !strings.Contains(out, "-hello") || !strings.Contains(out, "+HELLO") {
 		t.Errorf("expected shell-op change (notes.txt) in diff, got:\n%s", out)
 	}
+	// DF4: the diff must carry a header identifying the module and target repo,
+	// so it stays legible away from the surrounding operation logs.
+	if !strings.Contains(out, "demo") || !strings.Contains(out, upstream) {
+		t.Errorf("expected module/repo header in diff, got:\n%s", out)
+	}
 }
 
 // DF2: --quick simulates the run (dry-run) — it prints newFiles/patch unified
@@ -155,6 +160,10 @@ spec:
 
 	if !strings.Contains(out, "new content") {
 		t.Errorf("expected rendered content in quick diff, got:\n%s", out)
+	}
+	// Quick diffs carry a module header for context, just like full mode.
+	if !strings.Contains(out, "quick-demo") {
+		t.Errorf("expected module header in quick diff, got:\n%s", out)
 	}
 	if _, err := os.Stat(filepath.Join(targetDir, "new.txt")); !os.IsNotExist(err) {
 		t.Error("--quick must not write files to the target")

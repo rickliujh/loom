@@ -922,6 +922,13 @@ Full mode clones into a workspace: a temporary directory that is removed once th
 diff is printed, unless `--target-path` is supplied, in which case the clones are
 kept there for inspection.
 
+#### DF4: Diffs are headed with module and target
+
+Because diffs print together at the end — away from the per-operation logs —
+each diff is preceded by a header naming the module that produced it and the
+target it applies to (repo URL and branch, or the target directory). Consecutive
+diffs sharing the same module and target reuse a single header.
+
 ---
 
 ## Validation Rules

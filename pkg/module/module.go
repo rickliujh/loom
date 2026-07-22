@@ -162,19 +162,38 @@ func evalParamCommand(name, command, moduleDir string, logger *slog.Logger) (str
 // NewExecutionContext creates an ExecutionContext for this module.
 func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.ExecutionContext {
 	return &action.ExecutionContext{
-		ModuleName: m.Config.Metadata.Name,
-		ModuleDir:  m.Dir,
-		TargetDir:  targetDir,
-		Params:     m.Params,
-		Excludes:   m.Config.Spec.Excludes,
-		Includes:   m.Config.Spec.Includes,
-		DryRun:     opts.DryRun,
-		LocalRun:   opts.LocalRun,
-		ShowDiff:   opts.ShowDiff,
-		Diffs:      opts.Diffs,
-		GitAuthor:  opts.GitAuthor,
-		GitEmail:   opts.GitEmail,
-		Summary:    opts.Summary,
-		Logger:     m.Logger,
+		ModuleName:  m.Config.Metadata.Name,
+		ModuleDir:   m.Dir,
+		TargetDir:   targetDir,
+		TargetLabel: m.targetLabel(targetDir),
+		Params:      m.Params,
+		Excludes:    m.Config.Spec.Excludes,
+		Includes:    m.Config.Spec.Includes,
+		DryRun:      opts.DryRun,
+		LocalRun:    opts.LocalRun,
+		ShowDiff:    opts.ShowDiff,
+		Diffs:       opts.Diffs,
+		GitAuthor:   opts.GitAuthor,
+		GitEmail:    opts.GitEmail,
+		Summary:     opts.Summary,
+		Logger:      m.Logger,
 	}
+}
+
+// targetLabel is a human-readable identity for the module's target, used as a
+// header above collected diffs: the rendered repo URL and branch when the
+// module has a target spec, otherwise the target directory it runs against.
+func (m *Module) targetLabel(targetDir string) string {
+	t := m.Config.Spec.Target
+	if t == nil {
+		return targetDir
+	}
+	url, err := tmpl.RenderString(t.URL, m.Params)
+	if err != nil || url == "" {
+		return targetDir
+	}
+	if branch, err := tmpl.RenderString(t.Branch, m.Params); err == nil && branch != "" {
+		return url + " (" + branch + ")"
+	}
+	return url
 }

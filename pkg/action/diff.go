@@ -10,10 +10,12 @@ import (
 
 // ANSI color codes for diff output.
 const (
-	diffColorReset = "\033[0m"
-	diffColorRed   = "\033[31m"
-	diffColorGreen = "\033[32m"
-	diffColorCyan  = "\033[36m"
+	diffColorReset  = "\033[0m"
+	diffColorRed    = "\033[31m"
+	diffColorGreen  = "\033[32m"
+	diffColorCyan   = "\033[36m"
+	diffColorInvert = "\033[7m"
+	diffColorMuted  = "\033[38;5;244m" // mid gray — matches the log handler's muted tone
 )
 
 // printDiff computes a unified diff between old and new content and hands it to
@@ -54,7 +56,7 @@ func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
 		return
 	}
 
-	execCtx.Diffs.Add(text)
+	execCtx.Diffs.Add(execCtx.ModuleName, execCtx.TargetLabel, text)
 }
 
 // colorizeDiff applies ANSI colors to unified diff lines.

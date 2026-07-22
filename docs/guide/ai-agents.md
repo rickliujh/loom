@@ -10,12 +10,13 @@ Never jump straight to a real run. Always:
 
 ```bash
 loom validate ./my-module                                  # 1. schema + semantic checks
-loom run ./my-module -p key=val --diff                     # 2. dry-run with file diffs
+loom diff ./my-module -p key=val                           # 2. full diff (local run, incl. shell effects)
+loom diff ./my-module -p key=val --quick                   # 2b. fast preview, executes nothing
 loom run ./my-module -p key=val --local-run --target-path ./preview   # 3. real files, local clone, no push/PR
 loom run ./my-module -p key=val                            # 4. real run (only after the user confirms)
 ```
 
-- `--diff` implies `--dry-run`: nothing is written, unified diffs are printed.
+- `loom diff` (full) runs the module in local mode and prints a real `git diff` of each target — including files rewritten by shell ops. `--quick` simulates instead (dry-run): nothing is written or executed, unified diffs for `newFiles`/`patch` are printed.
 - `--local-run` **requires** `--target-path`. Each module with a `spec.target` clones into a numbered subdirectory (`00-<name>/`, `01-<name>/`, execution order, never cleaned up). Commits happen locally; push and PR are skipped; shell ops are skipped unless marked `pure: true`.
 - A real run that includes `commitPush` or `pr` pushes branches and opens pull requests — an agent should treat this as an outward-facing action and confirm with the user first.
 
@@ -129,7 +130,8 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 
 - `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--exclude-git-ops`.
 - `loom bulk <module> [-o dir] [--items file.yaml] [--name-param param]` — scaffold a jsonnet bulk wrapper from a module's declared params; prefer this over hand-writing wrappers. It refuses to overwrite existing configs and self-verifies the output.
-- Global flags on all commands: `--dry-run`, `--diff`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
+- `loom diff <module> [--quick]` — show the changes a run would produce; full mode runs locally and diffs each target, `--quick` is a fast no-execution preview. See [loom diff](/reference/cli-diff).
+- Global flags on all commands: `--dry-run`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
 
 ## Debugging Quick Map
 
@@ -142,4 +144,4 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 | `both loom.yaml and loom.jsonnet found` | Keep exactly one config file |
 | `--local-run requires --target-path` | Add `--target-path ./preview` |
 | Patch error `reading target file` | `patch.target` is relative to the **target** dir and must exist |
-| Literal `<no value>` in rendered output | Unresolved param renders silently (no error) — check the param name and that it resolved; catch it with `--diff` before a real run |
+| Literal `<no value>` in rendered output | Unresolved param renders silently (no error) — check the param name and that it resolved; catch it with `loom diff` before a real run |

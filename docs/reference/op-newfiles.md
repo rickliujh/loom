@@ -32,7 +32,7 @@ Every file in the source directory is treated as a Go template, subject to the [
 
 ## Dry Run
 
-In dry-run mode, `newFiles` logs what would be written but does not create any files. If `--diff` is enabled, a unified diff is displayed showing the rendered content.
+In dry-run mode, `newFiles` logs what would be written but does not create any files. Run [`loom diff`](/reference/cli-diff) to see a unified diff of the rendered content.
 
 ## Examples
 

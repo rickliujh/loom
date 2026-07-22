@@ -57,7 +57,7 @@ local items = [
 Edit the `items` list (one object per run), then execute the batch:
 
 ```bash
-loom run ./bulk-onboard --diff        # preview
+loom diff ./bulk-onboard              # preview
 loom run ./bulk-onboard               # run all items in order
 ```
 

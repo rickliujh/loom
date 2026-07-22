@@ -785,7 +785,6 @@ is logged.
 | `--verbose`, `-v` | bool | `false` | Enable verbose output (sets log level to debug) |
 | `--dry-run` | bool | `false` | Simulate operations without making changes |
 | `--local-run` | bool | `false` | Run locally: skip push and PR, clone into `--target-path` |
-| `--diff` | bool | `false` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--log-level` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error` |
 | `--log-format` | string | `"pretty"` | Log format: `pretty`, `text`, `json` |
 
@@ -876,15 +875,8 @@ No files are written, no commits are made, no PRs are opened. Each operation log
 | `commitPush` | Logs the commit that would be made. |
 | `pr` | Logs the PR that would be opened. |
 
-#### DR2: `--diff` implies `--dry-run`
-
-When `--diff` is set, `--dry-run` is automatically enabled.
-
-#### DR3: Diff shows unified diffs
-
-In addition to dry-run logging:
-- `newFiles`: unified diff of rendered content vs empty (new file).
-- `patch`: unified diff of patched result vs original target file.
+To preview the actual file diffs a run would produce, use the `loom diff`
+command (below), not `run`.
 
 ---
 

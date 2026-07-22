@@ -10,10 +10,10 @@ import (
 
 // ANSI color codes for diff output.
 const (
-	diffColorReset  = "\033[0m"
-	diffColorRed    = "\033[31m"
-	diffColorGreen  = "\033[32m"
-	diffColorCyan   = "\033[36m"
+	diffColorReset = "\033[0m"
+	diffColorRed   = "\033[31m"
+	diffColorGreen = "\033[32m"
+	diffColorCyan  = "\033[36m"
 )
 
 // printDiff computes a unified diff between old and new content and hands it to

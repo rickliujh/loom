@@ -72,27 +72,19 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// --diff implies --dry-run.
-	if showDiff {
-		dryRun = true
-	}
-
 	// In --local-run mode, require --target-path so the user can inspect results.
 	if localRun && targetPath == "" {
 		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
 	}
 
 	summary := &action.RunSummary{}
-	diffs := &action.DiffCollector{}
 	opts := module.RunOptions{
 		DryRun:     dryRun,
 		LocalRun:   localRun,
-		ShowDiff:   showDiff,
 		TargetPath: targetPath,
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,
 		Summary:    summary,
-		Diffs:      diffs,
 	}
 
 	// Resolve target directory.
@@ -121,13 +113,6 @@ func runModule(cmd *cobra.Command, args []string) error {
 
 	ctx := context.Background()
 	execErr := module.Execute(ctx, mod, targetDir, opts)
-
-	// Collected diffs print together at the very end, after all the per-operation
-	// logs — even on a partial failure, since the diffs computed before it are
-	// what the user is inspecting. Nothing prints when --diff was not requested.
-	if showDiff {
-		diffs.Print(os.Stdout)
-	}
 
 	// Print even when the run failed partway — PRs opened before the
 	// failure are exactly what the user needs to track down.

@@ -87,7 +87,7 @@ When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
 4. Walks through operations in order — rendering templates, running shell commands, committing, pushing, opening a PR
 5. Reports what it did
 
-With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. Add `--diff` to also see the rendered file contents and patch diffs in the output.
+With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. To see the actual file diffs a run would produce, use the [`loom diff`](#loom-diff) command.
 
 With `--local-run`, Loom runs all local operations (rendering templates, writing files, committing) but skips anything that touches a remote — no push, no PR creation. Shell commands are also skipped by default in `--local-run` mode unless explicitly marked with `pure: true` in the operation config. `--local-run` requires `--target-path` so you have a persistent directory to inspect the results.
 
@@ -724,7 +724,6 @@ loom run [path] [flags]
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--dry-run` | Show what would happen without writing anything |
-| `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--local-run` | Run all operations locally but skip remote push and PR creation |
 | `-v, --verbose` | Enable debug logging |
 | `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
@@ -739,11 +738,9 @@ loom run ./onboard-service \
   --target-path ~/repos/gitops \
   --dry-run
 
-# Dry run with diffs — see exactly what files would be created and changed
-loom run ./onboard-service \
-  -p serviceName=payments \
-  --target-path ~/repos/gitops \
-  --diff
+# See exactly what files would be created and changed
+loom diff ./onboard-service \
+  -p serviceName=payments
 
 # Local mode — render, write, and commit, but don't push or open a PR
 # --target-path is required with --local-run so you can inspect the results
@@ -755,6 +752,36 @@ loom run ./onboard-service \
 # Parameters from file
 loom run ./onboard-service --params-file params.yaml
 ```
+
+### `loom diff`
+
+Show the changes a module run would produce, without opening a PR.
+
+By default, `loom diff` runs the module in local mode — it clones each target, executes every operation (including `pure: true` shell commands), commits locally, and skips push and PR creation — then prints a `git diff` of each target against its base branch. Because operations actually run, this is the complete picture, including files rewritten by shell commands (formatters, codegen).
+
+```bash
+# Full diff: the complete change, including shell-op effects
+loom diff ./onboard-service -p serviceName=payments
+
+# Keep the clones for inspection instead of a temp dir
+loom diff ./onboard-service -p serviceName=payments --target-path ./preview
+```
+
+Add `--quick` for a fast, no-execution preview: it simulates the run (dry-run) and prints unified diffs for `newFiles` and `patch` operations only. It never executes anything, so it cannot show changes made by shell commands.
+
+```bash
+# Quick preview: newFiles/patch diffs, executes nothing
+loom diff ./onboard-service -p serviceName=payments --quick
+```
+
+| Flag | Description |
+|------|-------------|
+| `--quick` | Simulate the run (dry-run); show `newFiles`/`patch` diffs only, execute nothing |
+| `-p, --param key=value` | Set a parameter (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--target-path /path` | Keep target clones here for inspection instead of a temp dir |
+| `--author name` | Default git author name for `commitPush` |
+| `--email email` | Default git author email for `commitPush` |
 
 ### `loom generate`
 

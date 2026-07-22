@@ -53,6 +53,13 @@ func resetFlags() {
 	verbose = false
 	logLevel = "info"
 	logFormat = "pretty"
+
+	diffQuick = false
+	diffTargetPath = ""
+	diffParams = nil
+	diffParamsFile = ""
+	diffAuthor = ""
+	diffEmail = ""
 }
 
 // L1: --local-run without --target-path errors (with target spec).

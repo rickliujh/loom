@@ -888,6 +888,50 @@ In addition to dry-run logging:
 
 ---
 
+## Diff Command (`loom diff`)
+
+`loom diff [path]` shows the changes a module run would produce. It has two
+fidelity levels.
+
+### `diff` Command Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--quick` | bool | `false` | Simulate the run (dry-run) and show `newFiles`/`patch` diffs only, without executing anything |
+| `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
+| `--params-file` | string | `""` | YAML file with parameters |
+| `--target-path` | string | `""` | Directory for target clones; when set it is kept for inspection instead of a cleaned-up temp dir |
+| `--author` | string | `""` | Default git author name for `commitPush` operations |
+| `--email` | string | `""` | Default git author email for `commitPush` operations |
+
+### Behaviors
+
+#### DF1: Full mode — local run plus `git diff`
+
+By default (no `--quick`), `diff` runs the module in local mode (see Local Mode:
+clone into numbered subdirectories, pure shell runs, `pr` skipped, `commitPush`
+commits locally, no push). It then prints a `git diff` of each cloned target
+against its base branch. Because operations actually execute, this includes
+files rewritten by `shell` commands — the complete change a run would make. A
+git identity is defaulted (`loom-diff`) so `commitPush` can commit even when the
+module and CLI supply none.
+
+#### DF2: Quick mode — simulated diffs
+
+With `--quick`, `diff` simulates the run (dry-run semantics, DR1): it executes
+nothing and writes nothing. It prints unified diffs for the operations that can
+be computed without running — `newFiles` (rendered content vs empty) and `patch`
+(patched result vs original target). It cannot show changes made by `shell`
+commands, which do not run under dry-run.
+
+#### DF3: Workspace lifecycle
+
+Full mode clones into a workspace: a temporary directory that is removed once the
+diff is printed, unless `--target-path` is supplied, in which case the clones are
+kept there for inspection.
+
+---
+
 ## Validation Rules
 
 The following constraints are enforced when loading a module. All violations

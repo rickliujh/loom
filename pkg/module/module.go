@@ -27,7 +27,12 @@ type Module struct {
 }
 
 // Load loads a module from a directory, merging provided params with defaults.
-func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*Module, error) {
+func Load(dir string, providedParams map[string]string, logger *slog.Logger, opts ...LoadOption) (*Module, error) {
+	var lo loadOptions
+	for _, o := range opts {
+		o(&lo)
+	}
+
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return nil, err
@@ -35,6 +40,15 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger) (*M
 
 	if err := config.ValidateInDir(cfg, dir); err != nil {
 		return nil, fmt.Errorf("validating %s: %w", dir, err)
+	}
+
+	// P8: with a prompter (root module + --interactive only), fill missing
+	// required static params from interactive input before resolution.
+	if lo.prompter != nil {
+		providedParams, err = promptMissingRequired(cfg.Spec.Params, providedParams, lo.prompter)
+		if err != nil {
+			return nil, fmt.Errorf("prompting params for %s: %w", cfg.Metadata.Name, err)
+		}
 	}
 
 	params, err := resolveParams(cfg.Spec.Params, cfg.Spec.DynamicParams, providedParams, logger)

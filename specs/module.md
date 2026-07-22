@@ -160,6 +160,25 @@ params:
 # missing → error: required parameter "env" not provided: Target environment (staging|production)
 ```
 
+#### P8: Missing required static params can be prompted interactively
+
+By default a missing required static param fails fast (P1/P7). When the **root** module is run with `--interactive` (`-i`), each required static param that is neither provided nor has a default is prompted for on stdin, using its name and `description`; the typed value is used as if it had been supplied via `--param`. Prompting is scoped to:
+
+- **The root module only.** Child modules never prompt — their params are the parent's responsibility (M-rules), so a child's missing required param is still a hard error.
+- **Static params only.** Dynamic params derive from commands and are never prompted.
+- **Genuinely missing params.** Params already provided (CLI/file) or carrying a `default` are never prompted.
+
+Prompt text is written to stderr. If stdin reaches EOF with no value (e.g. `--interactive` with piped/closed input), the run fails rather than blocking. Without `--interactive`, behavior is unchanged. `bulk` never prompts.
+
+```yaml
+params:
+  - name: env
+    required: true
+    description: "Target environment (staging|production)"
+# loom run --interactive        → prompts: Enter value for env — Target environment (staging|production):
+# loom run                      → error (P1/P7), no prompt
+```
+
 ### Error Conditions
 
 | Condition | Error |
@@ -811,6 +830,7 @@ is logged.
 | `--author` | string | `""` | Default git author name for `commitPush` operations |
 | `--email` | string | `""` | Default git author email for `commitPush` operations |
 | `--summary` | bool | `false` | Print a list of PRs/MRs created during the run at the end (see PR4) |
+| `--interactive`, `-i` | bool | `false` | Prompt for missing required params on the root module instead of failing (see P8) |
 
 ---
 

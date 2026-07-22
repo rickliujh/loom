@@ -2,6 +2,7 @@ package module
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -76,6 +77,60 @@ func TestResolveParams_RequiredParamErrorIncludesDescription(t *testing.T) {
 	want := `required parameter "env" not provided: Target environment (staging|production)`
 	if err.Error() != want {
 		t.Errorf("expected %q, got %q", want, err.Error())
+	}
+}
+
+// fakePrompter records which params it was asked for and returns canned answers.
+type fakePrompter struct {
+	answers map[string]string
+	err     error
+	asked   []string
+}
+
+func (f *fakePrompter) Prompt(p config.ParamDef) (string, error) {
+	f.asked = append(f.asked, p.Name)
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.answers[p.Name], nil
+}
+
+// P8: only required params that are missing and have no default are prompted;
+// provided/default/optional params are left alone and the caller's map is not
+// mutated.
+func TestPromptMissingRequired_FillsOnlyMissing(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "provided", Required: true},
+		{Name: "withDefault", Required: true, Default: "d"},
+		{Name: "optional"},
+		{Name: "missing", Required: true, Description: "needs a value"},
+	}
+	provided := map[string]string{"provided": "x"}
+	fp := &fakePrompter{answers: map[string]string{"missing": "answered"}}
+
+	out, err := promptMissingRequired(declared, provided, fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["missing"] != "answered" {
+		t.Errorf("expected prompted value, got %q", out["missing"])
+	}
+	if len(fp.asked) != 1 || fp.asked[0] != "missing" {
+		t.Errorf("expected only \"missing\" to be prompted, got %v", fp.asked)
+	}
+	if _, ok := provided["missing"]; ok {
+		t.Error("caller's provided map must not be mutated")
+	}
+}
+
+// P8: a prompter error aborts the load.
+func TestPromptMissingRequired_ErrorPropagates(t *testing.T) {
+	declared := []config.ParamDef{{Name: "x", Required: true}}
+	fp := &fakePrompter{err: fmt.Errorf("no input")}
+
+	_, err := promptMissingRequired(declared, nil, fp)
+	if err == nil {
+		t.Fatal("expected error from prompter to propagate")
 	}
 }
 

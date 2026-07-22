@@ -23,6 +23,7 @@ var (
 	gitAuthor   string
 	gitEmail    string
 	showSummary bool
+	interactive bool
 )
 
 var runCmd = &cobra.Command{
@@ -40,6 +41,7 @@ func init() {
 	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
 	runCmd.Flags().StringVar(&gitEmail, "email", "", "Default git author email for commitPush operations")
 	runCmd.Flags().BoolVar(&showSummary, "summary", false, "Print a list of PRs/MRs created during the run at the end")
+	runCmd.Flags().BoolVarP(&interactive, "interactive", "i", false, "Prompt for missing required params instead of failing (root module only)")
 	rootCmd.AddCommand(runCmd)
 }
 
@@ -66,8 +68,13 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Load module.
-	mod, err := module.Load(moduleDir, paramMap, logger)
+	// Load module. With --interactive, prompt for missing required params on
+	// the root module only (child modules never receive a prompter).
+	var loadOpts []module.LoadOption
+	if interactive {
+		loadOpts = append(loadOpts, module.WithPrompter(newStdinPrompter()))
+	}
+	mod, err := module.Load(moduleDir, paramMap, logger, loadOpts...)
 	if err != nil {
 		return err
 	}

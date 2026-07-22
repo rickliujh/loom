@@ -78,10 +78,12 @@ spec:
 - `shell.command` runs via `sh -c` in the **target** directory. Mark side-effect-free commands (lint, format) `pure: true` so they still run under `--local-run`.
 - `patch` engines: `smp` (strategic merge, default; scalar lists append-unique, map-lists merge by key) or `json6902` (RFC 6902 op list). Patch file content is templated before applying; the target file must already exist.
 - `llm` generates or modifies a file via LLM inference (`provider`, `model`, `prompt`, `target` required; `mode: generate` fails on an existing target, `mode: modify` prepends existing content). See the [llm reference](/reference/op-llm).
+- Optional `if`: a shell predicate (templated, then `sh -c`) that gates the operation — exit `0` runs it, non-zero skips it. Runs in the target dir; evaluated in every mode including `--dry-run`, so keep it side-effect-free. Omitted = always runs.
 
 ### Composition (spec.modules)
 
 - Children execute **before** parent operations, in declaration order, recursively.
+- A child (like an operation) accepts an `if` shell predicate — rendered with the **parent's** params, run in the child's resolved target dir; a non-zero exit skips the whole child. See the [reference](/reference/loom-yaml#conditional-execution-if).
 - A child **never inherits** the parent's `spec.target`. Child with its own target → own clone/branch/PR. Child without a target → writes into the parent's target directory (this is how you batch into one PR).
 - Child `params` values are rendered with the parent's params before passing down; there is no implicit param inheritance.
 - `source`: `./relative`, `/absolute`, git URL, or git URL with a `//subdir` suffix (Terraform convention; the full repo is cloned, so sibling relative paths work).

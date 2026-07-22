@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestEvalCondition_EmptyRuns(t *testing.T) {
+func TestEvalCondition_IF1_EmptyRuns(t *testing.T) {
 	for _, raw := range []string{"", "   ", "\t\n"} {
 		run, err := evalCondition(raw, nil, t.TempDir())
 		if err != nil {
@@ -19,7 +19,7 @@ func TestEvalCondition_EmptyRuns(t *testing.T) {
 	}
 }
 
-func TestEvalCondition_ExitCodeSemantics(t *testing.T) {
+func TestEvalCondition_IF3_ExitCodeSemantics(t *testing.T) {
 	cases := []struct {
 		name    string
 		cmd     string
@@ -45,7 +45,7 @@ func TestEvalCondition_ExitCodeSemantics(t *testing.T) {
 	}
 }
 
-func TestEvalCondition_Templated(t *testing.T) {
+func TestEvalCondition_IF2_Templated(t *testing.T) {
 	params := map[string]string{"env": "prod"}
 	// Rendered to `[ prod = prod ]`, which succeeds.
 	run, err := evalCondition(`[ {{ .env }} = prod ]`, params, t.TempDir())
@@ -66,7 +66,7 @@ func TestEvalCondition_Templated(t *testing.T) {
 	}
 }
 
-func TestEvalCondition_RunsInWorkDir(t *testing.T) {
+func TestEvalCondition_IF4_RunsInWorkDir(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "marker"), nil, 0o644); err != nil {
 		t.Fatal(err)

@@ -493,7 +493,7 @@ spec:
 // otherwise a dry-run would misreport which steps a real run would perform.
 // The predicate here writes a marker and then returns false: after a dry run
 // the marker proves the predicate ran, while the operation was skipped.
-func TestExecute_ConditionEvaluatedInDryRun(t *testing.T) {
+func TestExecute_IF5_ConditionEvaluatedInDryRun(t *testing.T) {
 	dir := t.TempDir()
 	writeLoomYAML(t, dir, `
 apiVersion: loom.rickliujh.github.io/v1beta1
@@ -593,7 +593,7 @@ spec:
 	}
 }
 
-func TestExecute_ChildModuleConditionInspectsTargetDir(t *testing.T) {
+func TestExecute_IF4_ChildModuleConditionInspectsTargetDir(t *testing.T) {
 	parentDir := t.TempDir()
 	childDir := filepath.Join(parentDir, "child")
 	if err := os.Mkdir(childDir, 0o755); err != nil {

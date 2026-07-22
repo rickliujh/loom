@@ -286,6 +286,27 @@ The ordered list of steps. Each operation has a `name` and exactly one action ty
 
 ## Operations Reference
 
+### Conditional execution (`if`)
+
+Any operation can carry an optional `if` predicate — a shell expression that decides whether the operation runs. The string is templated with your params, then run via `sh -c`: **exit `0` runs the operation, any non-zero exit skips it** (standard shell semantics). Omit `if` and the operation always runs.
+
+```yaml
+operations:
+  - name: apply-overlay
+    if: "test -f {{ .service }}/kustomization.yaml"   # only if the file exists
+    patch:
+      path: "__functions/patches/overlay.yaml"
+      target: "{{ .service }}/kustomization.yaml"
+  - name: deploy
+    if: '[ {{ .env }} = prod ]'                        # only in prod
+    shell:
+      command: "kubectl apply -f ."
+```
+
+An operation's `if` runs in the target directory, so predicates can inspect the repository being changed. Child modules take the same `if` field (see [Module Composition](#module-composition)). The predicate is evaluated in every mode, including `--dry-run`, since it determines which steps a run would perform — keep it side-effect-free (`test`, `grep`, file checks).
+
+> Like `shell` and `dynamicParams`, param values are templated into the shell string, so treat untrusted params (e.g. from `bulk` data) with care.
+
 ### `newFiles` — Render and Write Templates
 
 Copies template files from the module directory into the target repository, rendering Go template expressions along the way.
@@ -662,6 +683,15 @@ spec:
         message: "feat: full onboard for {{ .serviceName }}"
         author: "loom-bot"
         email: "loom@example.com"
+```
+
+A child reference also accepts an [`if`](#conditional-execution-if) predicate to skip the whole module (and its operations and sub-modules) when the shell expression exits non-zero. It runs in the child's resolved target directory, so it can inspect that repository before deciding:
+
+```yaml
+modules:
+  - name: argocd-app
+    source: "./modules/argocd-app"
+    if: "test -d argocd"          # skip unless the target has an argocd/ dir
 ```
 
 Execution order:

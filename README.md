@@ -104,6 +104,7 @@ spec:
   params:
     - name: serviceName
       required: true
+      description: "Name of the service to onboard"
     - name: namespace
       default: "default"
 
@@ -169,8 +170,11 @@ Parameters are the inputs to your module. They're injected into every template �
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
 | `required` | If `true`, the run fails when this param is not provided |
 | `default` | Fallback value when the param is not provided |
+| `description` | Optional explanation of the param, shown in the missing-required error and in interactive prompts |
 
 Resolution priority: **provided (`-p`) → default → required error**.
+
+When a required param is missing, the error includes its `description`. Pass `-i` / `--interactive` to `loom run` to be prompted for missing required params instead of failing — handy locally, while the default fail-fast keeps CI runs deterministic. Prompting is root-module-only.
 
 ### `spec.dynamicParams`
 
@@ -181,6 +185,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
 | `default` | Fallback value if the command fails |
+| `description` | Optional explanation of the param. Documentary only — dynamic params are never prompted. |
 
 ```yaml
 dynamicParams:

@@ -16,6 +16,7 @@ loom run [path] [flags]
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--summary` | Print a list of PRs/MRs created during the run at the end |
+| `-i, --interactive` | Prompt for missing required params instead of failing. Root module only; static params only. On EOF (piped/closed stdin) the run fails rather than blocking. |
 | `--dry-run` | Show what would happen without writing anything |
 | `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--local-run` | Run all operations locally but skip remote push and PR creation |
@@ -93,3 +94,14 @@ serviceName: payments
 namespace: fintech
 env: prod
 ```
+
+### Interactive prompts for missing params
+
+With `-i` / `--interactive`, any required param you didn't pass via `-p` or `--params-file` is prompted for on the terminal, using its `description`:
+
+```bash
+loom run ./onboard-service -i
+# Enter value for serviceName — Name of the service to onboard: payments
+```
+
+Prompting applies to the root module only, and to static params (not `dynamicParams`). Without `-i`, a missing required param fails fast — the default, CI-friendly behavior.

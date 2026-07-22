@@ -62,6 +62,7 @@ spec:
   params:
     - name: serviceName
       required: true
+      description: "Name of the service to onboard"
     - name: namespace
       default: "default"
 
@@ -116,6 +117,21 @@ loom run ./onboard-service -p serviceName=payments
 ```
 
 Loom clones the target repo, renders templates, creates a feature branch, commits, pushes, and opens a PR.
+
+If you forget a required param, the run fails and names it, including the `description` you gave it:
+
+```
+required parameter "serviceName" not provided: Name of the service to onboard
+```
+
+To fill missing required params interactively instead of failing, add `-i` / `--interactive` — Loom prompts for each one using its description:
+
+```bash
+loom run ./onboard-service -i
+# Enter value for serviceName — Name of the service to onboard: payments
+```
+
+Fail-fast is the default so CI runs stay deterministic; reach for `-i` when running by hand.
 
 ### 5. Or test locally first
 

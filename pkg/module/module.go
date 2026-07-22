@@ -85,6 +85,9 @@ func resolveParams(declared []config.ParamDef, dynamicDeclared []config.DynamicP
 		} else if p.Default != "" {
 			result[p.Name] = p.Default
 		} else if p.Required {
+			if p.Description != "" {
+				return nil, fmt.Errorf("required parameter %q not provided: %s", p.Name, p.Description)
+			}
 			return nil, fmt.Errorf("required parameter %q not provided", p.Name)
 		}
 	}

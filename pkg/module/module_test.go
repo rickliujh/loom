@@ -63,6 +63,22 @@ func TestResolveParams_RequiredParamErrors(t *testing.T) {
 	}
 }
 
+// P7: Missing required param error includes the declared description.
+func TestResolveParams_RequiredParamErrorIncludesDescription(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "env", Required: true, Description: "Target environment (staging|production)"},
+	}
+
+	_, err := resolveParams(declared, nil, nil, testLogger())
+	if err == nil {
+		t.Fatal("expected error for missing required param")
+	}
+	want := `required parameter "env" not provided: Target environment (staging|production)`
+	if err.Error() != want {
+		t.Errorf("expected %q, got %q", want, err.Error())
+	}
+}
+
 // P3: Undeclared params provided via CLI are rejected.
 func TestResolveParams_UndeclaredParamRejected(t *testing.T) {
 	declared := []config.ParamDef{

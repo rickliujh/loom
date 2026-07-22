@@ -148,11 +148,23 @@ dynamicParams:
 
 If a dynamic param's name is provided via CLI, the command is never executed. A warning is logged to inform the user that the dynamic command was skipped due to the CLI override.
 
+#### P7: Params carry an optional description
+
+Both static and dynamic params accept an optional `description` — a human-readable explanation of the param's purpose. It is documentary only and never affects resolution. When a required static param is missing, its description is appended to the error so the failure is self-explanatory: `required parameter "<name>" not provided: <description>`.
+
+```yaml
+params:
+  - name: env
+    required: true
+    description: "Target environment (staging|production)"
+# missing → error: required parameter "env" not provided: Target environment (staging|production)
+```
+
 ### Error Conditions
 
 | Condition | Error |
 |-----------|-------|
-| Required param not provided and no default | `required parameter "<name>" not provided` |
+| Required param not provided and no default | `required parameter "<name>" not provided` (with `: <description>` suffix when a description is declared, per P7) |
 | Empty param name | `param name cannot be empty` |
 | Duplicate name across `params` and `dynamicParams` | `duplicate param name "<name>"` |
 | Dynamic param missing `command` | `dynamicParam "<name>": command is required` |

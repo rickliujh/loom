@@ -26,6 +26,9 @@ type ParamDef struct {
 	Name     string `yaml:"name"`
 	Required bool   `yaml:"required,omitempty"`
 	Default  string `yaml:"default,omitempty"`
+	// Description is a human-readable explanation of the param's purpose.
+	// Surfaced in missing-required errors and interactive prompts.
+	Description string `yaml:"description,omitempty"`
 }
 
 // DynamicParamDef defines a parameter whose value comes from a shell command.
@@ -35,6 +38,8 @@ type DynamicParamDef struct {
 	Name    string `yaml:"name"`
 	Command string `yaml:"command"`
 	Default string `yaml:"default,omitempty"` // Fallback if not needed; command takes priority.
+	// Description is a human-readable explanation of the param's purpose.
+	Description string `yaml:"description,omitempty"`
 }
 
 type TargetSpec struct {

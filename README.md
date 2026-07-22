@@ -777,6 +777,7 @@ loom diff ./onboard-service -p serviceName=payments --quick
 | Flag | Description |
 |------|-------------|
 | `--quick` | Simulate the run (dry-run); show `newFiles`/`patch` diffs only, execute nothing |
+| `--partial` | On failure, still print the diff of changes made before the error (below a warning) |
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Keep target clones here for inspection instead of a temp dir |

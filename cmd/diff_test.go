@@ -170,6 +170,69 @@ spec:
 	}
 }
 
+// DF5: on failure, the error is reported and the run exits non-zero. By
+// default no diff is printed; with --partial the pre-failure diff follows a
+// warning.
+func TestDiff_DF5_FailureOrdering(t *testing.T) {
+	upstream := t.TempDir()
+	initGitRepoBranch(t, upstream, "main", map[string]string{"a.yaml": "name: cm\ndata:\n  k: v\n"})
+
+	moduleDir := t.TempDir()
+	patchDir := filepath.Join(moduleDir, "__functions", "patches")
+	os.MkdirAll(patchDir, 0o755)
+	os.WriteFile(filepath.Join(patchDir, "p.yaml"),
+		[]byte("name: cm\ndata:\n  k: v\n  added: loom\n"), 0o644)
+
+	// First op patches an existing file (succeeds), second targets a missing
+	// file (fails), so there is a pre-failure change to show.
+	writeLoomYAML(t, moduleDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: failz
+spec:
+  target:
+    url: "file://`+upstream+`"
+    branch: main
+  operations:
+    - name: label
+      patch:
+        engine: smp
+        path: __functions/patches/p.yaml
+        target: a.yaml
+    - name: boom
+      patch:
+        engine: smp
+        path: __functions/patches/p.yaml
+        target: does-not-exist.yaml
+`)
+
+	// Default: no diff on failure, non-zero exit.
+	resetFlags()
+	out := captureStdout(t, func() {
+		rootCmd.SetArgs([]string{"diff", moduleDir})
+		if err := rootCmd.Execute(); err == nil {
+			t.Fatal("expected non-zero exit on a failed run")
+		}
+	})
+	if strings.Contains(out, "added: loom") {
+		t.Errorf("default failure should not print the diff, got:\n%s", out)
+	}
+
+	// --partial: the pre-failure diff is printed (below a warning on stderr).
+	resetFlags()
+	diffPartial = true
+	out = captureStdout(t, func() {
+		rootCmd.SetArgs([]string{"diff", moduleDir, "--partial"})
+		if err := rootCmd.Execute(); err == nil {
+			t.Fatal("expected non-zero exit on a failed run")
+		}
+	})
+	if !strings.Contains(out, "+  added: loom") {
+		t.Errorf("--partial should print the pre-failure diff, got:\n%s", out)
+	}
+}
+
 // DF3: full mode cleans up its temp workspace when --target-path is not given,
 // and keeps a caller-supplied --target-path for inspection.
 func TestDiff_DF3_WorkspaceCleanupAndKeep(t *testing.T) {

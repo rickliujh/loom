@@ -890,6 +890,7 @@ fidelity levels.
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--quick` | bool | `false` | Simulate the run (dry-run) and show `newFiles`/`patch` diffs only, without executing anything |
+| `--partial` | bool | `false` | When the run fails, still print the diff of changes made before the error (below a warning) |
 | `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
 | `--params-file` | string | `""` | YAML file with parameters |
 | `--target-path` | string | `""` | Directory for target clones; when set it is kept for inspection instead of a cleaned-up temp dir |
@@ -928,6 +929,13 @@ Because diffs print together at the end — away from the per-operation logs —
 each diff is preceded by a header naming the module that produced it and the
 target it applies to (repo URL and branch, or the target directory). Consecutive
 diffs sharing the same module and target reuse a single header.
+
+#### DF5: Failure ordering
+
+When the run fails, `diff` exits non-zero. By default no diff is printed — only
+the error — so the failure is not buried. With `--partial`, the diff of the
+changes made before the failure is printed beneath a warning that marks it as
+incomplete, with the error shown above it (next to the failing module's logs).
 
 ---
 

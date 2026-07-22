@@ -54,6 +54,7 @@ func resetFlags() {
 	logFormat = "pretty"
 
 	diffQuick = false
+	diffPartial = false
 	diffTargetPath = ""
 	diffParams = nil
 	diffParamsFile = ""

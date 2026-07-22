@@ -24,6 +24,7 @@ var (
 	diffAuthor     string
 	diffEmail      string
 	diffQuick      bool
+	diffPartial    bool
 )
 
 var diffCmd = &cobra.Command{
@@ -50,6 +51,7 @@ func init() {
 	diffCmd.Flags().StringVar(&diffAuthor, "author", "", "Default git author name for commitPush operations")
 	diffCmd.Flags().StringVar(&diffEmail, "email", "", "Default git author email for commitPush operations")
 	diffCmd.Flags().BoolVar(&diffQuick, "quick", false, "Simulate the run (dry-run) and show newFiles/patch diffs only, without executing anything")
+	diffCmd.Flags().BoolVar(&diffPartial, "partial", false, "When the run fails, still print the diff of changes made before the error (below a warning)")
 	rootCmd.AddCommand(diffCmd)
 }
 
@@ -90,12 +92,14 @@ func runDiffQuick(ctx context.Context, source string, paramMap map[string]string
 	defer cleanup()
 
 	execErr := module.Execute(ctx, mod, targetDir, opts)
-	diffs.Print(os.Stdout)
-	if execErr == nil {
-		fmt.Fprintln(os.Stderr)
-		prettylog.Successf(os.Stderr, "diff of %q complete — no changes were made", mod.Config.Metadata.Name)
+	if execErr != nil {
+		return reportDiffFailure(execErr, func() { diffs.Print(os.Stdout) })
 	}
-	return execErr
+
+	diffs.Print(os.Stdout)
+	fmt.Fprintln(os.Stderr)
+	prettylog.Successf(os.Stderr, "diff of %q complete — no changes were made", mod.Config.Metadata.Name)
+	return nil
 }
 
 // runDiffFull runs the module in local mode into a workspace, then prints a git
@@ -142,14 +146,12 @@ func runDiffFull(ctx context.Context, source string, paramMap map[string]string,
 	defer cleanup()
 
 	execErr := module.Execute(ctx, mod, targetDir, opts)
+	if execErr != nil {
+		return reportDiffFailure(execErr, func() { printTargetDiffs(workspace, os.Stdout) })
+	}
 
-	// Print diffs even on a partial failure — the changes made before it are
-	// exactly what the user is inspecting.
 	n, diffErr := printTargetDiffs(workspace, os.Stdout)
 	if diffErr != nil {
-		if execErr != nil {
-			return execErr
-		}
 		return diffErr
 	}
 
@@ -158,6 +160,21 @@ func runDiffFull(ctx context.Context, source string, paramMap map[string]string,
 		prettylog.Successf(os.Stderr, "diff of %q complete — no changes (local-only modules: try --quick)", mod.Config.Metadata.Name)
 	} else {
 		prettylog.Successf(os.Stderr, "diff of %q complete — %d target(s) changed", mod.Config.Metadata.Name, n)
+	}
+	return nil
+}
+
+// reportDiffFailure handles a failed run. By default no diff is printed and the
+// returned error is reported once by Execute. With --partial, the error is shown
+// first — next to the failing module's logs — then the changes made before it,
+// beneath a warning; Execute prints the error again as the closing status line.
+func reportDiffFailure(execErr error, printDiffs func()) error {
+	if diffPartial {
+		fmt.Fprintln(os.Stderr)
+		prettylog.Failuref(os.Stderr, "%v", execErr)
+		fmt.Fprintln(os.Stderr)
+		prettylog.Warningf(os.Stderr, "run failed before finishing — the diff below shows only the changes made before the error")
+		printDiffs()
 	}
 	return execErr
 }

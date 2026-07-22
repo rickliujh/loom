@@ -16,6 +16,7 @@ loom diff [path] [flags]
 | Flag | Description |
 |------|-------------|
 | `--quick` | Simulate the run (dry-run); show `newFiles`/`patch` diffs only, execute nothing |
+| `--partial` | When the run fails, still print the diff of changes made before the error (below a warning) |
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Keep target clones here for inspection instead of a cleaned-up temp dir |
@@ -49,6 +50,14 @@ A fast, no-execution preview of `newFiles`/`patch` changes:
 
 ```bash
 loom diff ./onboard-service -p serviceName=payments --quick
+```
+
+### Failures
+
+When the run fails, `loom diff` prints the error right after the failing module's logs and exits non-zero — no diff is printed, so the error is not buried beneath it. To still inspect the changes made before the failure, add `--partial`; the partial diff is printed after the error, beneath a warning marking it incomplete:
+
+```bash
+loom diff ./onboard-service -p serviceName=payments --partial
 ```
 
 ::: tip

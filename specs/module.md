@@ -231,6 +231,7 @@ Exhaustive list of templatable fields:
 - `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
 - `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].if`, `operations[].if`
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
 - `shell.command`, `shell.timeout`
@@ -333,6 +334,7 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 | `modules[].name` | Required. Unique identifier for the child. |
 | `modules[].source` | Required. Local path or git URL to the child module directory. |
 | `modules[].params` | Optional. `map[string]string` of params to pass to the child. Values are templatable with the parent's params. |
+| `modules[].if` | Optional. Shell predicate gating the child. Templatable. See [Conditional Execution](#conditional-execution-if). |
 
 ### Behaviors
 
@@ -426,7 +428,7 @@ modules:
 
 ## Operations (`spec.operations`)
 
-Operations execute sequentially in declaration order. Each operation has exactly **one** action type.
+Operations execute sequentially in declaration order. Each operation has exactly **one** action type. An operation may carry an optional `if` predicate that gates whether it runs — see [Conditional Execution](#conditional-execution-if).
 
 ### `newFiles` — Render and Write Template Files
 
@@ -703,6 +705,77 @@ The summary is printed even when a later operation fails — PRs opened before t
 
 ---
 
+## Conditional Execution (`if`)
+
+Operations and child modules may carry an optional `if` predicate that gates
+whether they run. It is a shell expression evaluated with standard shell
+exit-code semantics — a thin, familiar way to say "only run this when …".
+
+### Inputs
+
+| Input | Description |
+|-------|-------------|
+| `operations[].if` | Optional shell predicate gating a single operation. Templatable. |
+| `spec.modules[].if` | Optional shell predicate gating a child module (and therefore all of its operations and sub-modules). Templatable. |
+
+### Behaviors
+
+#### IF1: Optional — default is to run
+
+`if` is optional. When omitted or empty (after trimming whitespace), the step
+always runs. Existing configs without `if` are unaffected.
+
+#### IF2: Templated before evaluation
+
+The predicate string is rendered with the resolved params (the same Go
+templating and functions as every other field) before it is executed. An
+operation's `if` renders with its own module's params; a child module's `if`
+renders with the **parent's** params — it is authored in the parent's
+`loom.yaml`, exactly like `modules[].name`, `modules[].source`, and
+`modules[].params` values (M4).
+
+```yaml
+operations:
+  - name: apply
+    if: "test -f {{ .service }}/config.yaml"   # rendered, then run
+    shell:
+      command: "kubectl apply -f {{ .service }}"
+```
+
+#### IF3: Shell exit-code semantics
+
+The rendered predicate is run via `sh -c`. **Exit 0 → the step runs; any
+non-zero exit → the step is skipped.** A non-zero exit is a decision, not a
+failure: it is never reported as an error. Only a template render error, or an
+inability to launch the shell, fails the run.
+
+#### IF4: Working directory
+
+| Predicate | Runs in |
+|-----------|---------|
+| `operations[].if` | The module's target directory (same as the operation's own working dir). |
+| `spec.modules[].if` | The child module's **resolved** target directory — its own `spec.target` clone if it has one, otherwise the parent target dir it inherits. |
+
+A module's `if` runs after the child target is resolved, so the predicate can
+inspect the very repository the child would operate on. (Consequence: a child
+with its own `spec.target` is cloned before its `if` is evaluated.)
+
+#### IF5: Always evaluated, including dry-run and local mode
+
+The predicate is control flow, so it is evaluated in **all** modes —
+`--dry-run` and `--local-run` included. Skipping it would misrepresent which
+steps a real run would perform. As with `dynamicParams` commands (which also
+run under dry-run), an `if` predicate is expected to be a side-effect-free
+check (`test`, `grep`, file existence). A skipped step performs no action and
+is logged.
+
+> Security: like `shell.command` and `dynamicParams`, param values are
+> templated into the shell string, so untrusted param values (e.g. from `bulk`
+> provider data) are an injection vector. Keep predicates simple and trust your
+> params. Cross-cutting hardening is tracked separately.
+
+---
+
 ## CLI Flags
 
 ### Global Flags (available on all commands)
@@ -891,10 +964,14 @@ loom run <moduleSource> [flags]
     b. Render child params through parent template context.
     c. Load child module (validate, resolve params).
     d. Resolve child target (same logic as step 6).
-    e. Execute child module recursively (from step 7).
+    e. Evaluate the child's `if` predicate (if any) in the resolved target dir;
+       skip the child when it exits non-zero (IF1–IF4).
+    f. Execute child module recursively (from step 7).
  8. For each operation (in declaration order):
-    a. Create action from operation config.
-    b. Execute action against the resolved target directory.
+    a. Evaluate the operation's `if` predicate (if any) in the target dir; skip
+       the operation when it exits non-zero (IF1–IF4).
+    b. Create action from operation config.
+    c. Execute action against the resolved target directory.
  9. Cleanup:
     - Normal mode: remove temp dirs.
     - Local mode: no cleanup (dirs persist for inspection).

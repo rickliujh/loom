@@ -204,6 +204,7 @@ Child modules to execute before this module's operations. See [Module Compositio
 | `name` | Identifier for the child module. Templatable. |
 | `source` | Path to the child module. Accepts local paths, git URLs, or git URLs with `//subdir` separator. Templatable — rendered before source resolution. |
 | `params` | Parameters to pass down, rendered through the parent's context |
+| `if` | Optional shell predicate gating the child. Templatable (parent's params). Runs via `sh -c` in the child's resolved target dir — exit `0` runs the child, non-zero skips it. See [`if`](#conditional-execution-if). |
 
 Source formats:
 
@@ -223,6 +224,35 @@ The ordered list of steps. Each operation has a `name` and exactly one action ty
 - [`llm`](/reference/op-llm) -- generate or modify a file using LLM inference
 - [`commitPush`](/reference/op-commitpush) -- commit and push
 - [`pr`](/reference/op-pr) -- open a pull request
+
+An operation may also carry an optional [`if`](#conditional-execution-if) predicate.
+
+## Conditional execution (`if`)
+
+Both operations and child modules (`spec.modules[]`) accept an optional `if` field: a shell expression that decides whether the step runs.
+
+- **Templated first.** The string is rendered with the resolved params (an operation's own params; a child module's *parent* params), then executed via `sh -c`.
+- **Shell exit code decides.** Exit `0` runs the step; any non-zero exit skips it. A non-zero exit is a normal "no", not an error — only a template error or a shell that fails to launch fails the run.
+- **Omitted means always run**, so existing configs are unaffected.
+- **Working directory:** an operation's `if` runs in the target dir; a child module's `if` runs in the child's resolved target dir, so it can inspect the repo the child would change.
+- **Always evaluated**, including under `--dry-run` and `--local-run`, since it is control flow. Keep predicates side-effect-free (`test`, `grep`, file checks), the same expectation as `dynamicParams` commands.
+
+```yaml
+spec:
+  modules:
+    - name: argocd-app
+      source: "./modules/argocd-app"
+      if: "test -d argocd"                 # skip unless the target has argocd/
+  operations:
+    - name: deploy
+      if: '[ {{ .env }} = prod ]'          # only in prod
+      shell:
+        command: "kubectl apply -f ."
+```
+
+::: warning
+Param values are templated into the shell string, exactly like `shell` and `dynamicParams`. Treat untrusted params (e.g. from `bulk` provider data) with care — they are an injection vector.
+:::
 
 ## `loom.jsonnet`
 

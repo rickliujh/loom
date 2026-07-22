@@ -15,9 +15,9 @@ import (
 
 // RunOptions holds runtime flags for module execution.
 type RunOptions struct {
-	DryRun    bool
+	DryRun   bool
 	LocalRun bool
-	ShowDiff  bool
+	ShowDiff bool
 	// DiffWriter is the destination for diff output. Defaults to os.Stdout.
 	DiffWriter io.Writer
 	// TargetPath is the base directory for --local-run mode.
@@ -112,6 +112,18 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			defer cleanup()
 		}
 
+		// The if predicate is authored in the parent's loom.yaml, so it renders
+		// with the parent's params — but it runs against the child's resolved
+		// target dir, so it can inspect the repo the child would operate on.
+		run, err := evalCondition(childRef.If, mod.Params, childTargetDir)
+		if err != nil {
+			return fmt.Errorf("evaluating condition for child module %q: %w", childName, err)
+		}
+		if !run {
+			childLogger.Info("skipping module (if condition false)")
+			continue
+		}
+
 		if err := Execute(ctx, childMod, childTargetDir, opts); err != nil {
 			return fmt.Errorf("executing child module %q: %w", childName, err)
 		}
@@ -121,6 +133,15 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 	ops := mod.Config.Spec.Operations
 	for i, op := range ops {
 		mod.Logger.Info(fmt.Sprintf("operation %s (%d/%d)", op.Name, i+1, len(ops)), prettylog.KeySection, true)
+
+		run, err := evalCondition(op.If, mod.Params, targetDir)
+		if err != nil {
+			return fmt.Errorf("operation %q: evaluating condition: %w", op.Name, err)
+		}
+		if !run {
+			mod.Logger.Info("skipping operation (if condition false)")
+			continue
+		}
 
 		act, err := action.FromOperation(op)
 		if err != nil {

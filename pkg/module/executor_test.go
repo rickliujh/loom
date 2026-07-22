@@ -405,6 +405,242 @@ spec:
 	}
 }
 
+func TestExecute_OperationRunsWhenConditionTrue(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-true
+spec:
+  operations:
+    - name: create-file
+      if: "true"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); err != nil {
+		t.Errorf("expected output.txt when condition true: %v", err)
+	}
+}
+
+func TestExecute_OperationSkippedWhenConditionFalse(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-false
+spec:
+  operations:
+    - name: create-file
+      if: "false"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected output.txt NOT created when condition false, stat err: %v", err)
+	}
+}
+
+func TestExecute_OperationConditionTemplatedWithParams(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-templated
+spec:
+  params:
+    - name: enabled
+      default: "yes"
+  operations:
+    - name: create-file
+      if: '[ {{ .enabled }} = yes ]'
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, map[string]string{"enabled": "no"}, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected output.txt NOT created when enabled=no, stat err: %v", err)
+	}
+}
+
+// The condition is control flow, so it is evaluated even under --dry-run —
+// otherwise a dry-run would misreport which steps a real run would perform.
+// The predicate here writes a marker and then returns false: after a dry run
+// the marker proves the predicate ran, while the operation was skipped.
+func TestExecute_IF5_ConditionEvaluatedInDryRun(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-dryrun
+spec:
+  operations:
+    - name: gated
+      if: "touch cond-ran.txt; false"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{DryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cond-ran.txt")); err != nil {
+		t.Errorf("expected condition to be evaluated in dry-run (cond-ran.txt): %v", err)
+	}
+}
+
+// A malformed if template surfaces as an error on the runtime render path.
+// The Module is built directly (bypassing Load's validation) so Execute itself
+// reaches evalCondition — the operation-level if is not walked by any T4
+// reflection harness, so this is its runtime-render coverage.
+func TestExecute_OperationConditionTemplateError(t *testing.T) {
+	dir := t.TempDir()
+	mod := &Module{
+		Dir: dir,
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "cond-bad-tmpl"},
+			Spec: config.Spec{
+				Operations: []config.Operation{
+					{Name: "gated", If: "test {{ .x", Shell: &config.Shell{Command: "true"}},
+				},
+			},
+		},
+		Params: map[string]string{},
+		Logger: testLogger(),
+	}
+
+	err := Execute(context.Background(), mod, dir, RunOptions{})
+	if err == nil {
+		t.Fatal("expected error from malformed condition template")
+	}
+	if !strings.Contains(err.Error(), "template") {
+		t.Errorf("expected template error, got: %v", err)
+	}
+}
+
+func TestExecute_ChildModuleSkippedWhenConditionFalse(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+      if: "false"
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "marker.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected child ops skipped when module condition false, stat err: %v", err)
+	}
+}
+
+func TestExecute_IF4_ChildModuleConditionInspectsTargetDir(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Child inherits the parent target dir; the predicate inspects a file there.
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targetDir, "trigger"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+      if: "test -f trigger"
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "marker.txt")); err != nil {
+		t.Errorf("expected child to run when predicate finds trigger in target dir: %v", err)
+	}
+}
+
 func TestExecute_ChildModuleInheritsParentTarget(t *testing.T) {
 	// Parent module references a local child module without its own target.
 	// The child should use the parent's targetDir.

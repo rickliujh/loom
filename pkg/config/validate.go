@@ -140,6 +140,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 		}
 		checkTmpl(fmt.Sprintf("module %q name", m.Name), m.Name)
 		checkTmpl(fmt.Sprintf("module %q source", m.Name), m.Source)
+		checkTmpl(fmt.Sprintf("module %q if", m.Name), m.If)
 		paramKeys := make([]string, 0, len(m.Params))
 		for k := range m.Params {
 			paramKeys = append(paramKeys, k)
@@ -160,6 +161,8 @@ func validate(lf *LoomFile, moduleDir string) error {
 			}
 			opNames[op.Name] = true
 		}
+
+		checkTmpl(fmt.Sprintf("operation %q if", op.Name), op.If)
 
 		count := 0
 		if op.NewFiles != nil {

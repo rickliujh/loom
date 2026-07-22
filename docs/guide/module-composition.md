@@ -40,6 +40,8 @@ spec:
 3. Then the parent's operations run
 4. All modules write into the same target directory
 
+A child (or an individual operation) can be gated with an [`if`](#conditional-modules) predicate — a shell expression that skips the step when it exits non-zero.
+
 ## Module Sources
 
 Sources can be:
@@ -100,6 +102,24 @@ modules:
 ```
 
 Each child module resolves its own `spec.params` independently -- only the values passed in `params` are available. There is no implicit inheritance of parent parameters.
+
+## Conditional Modules
+
+A child reference accepts an optional `if` predicate that decides whether the module runs. The string is rendered with the **parent's** params (like `name`, `source`, and `params`), then executed via `sh -c`: exit `0` runs the child, any non-zero exit skips it — along with all of its operations and sub-modules.
+
+```yaml
+modules:
+  - name: argocd-app
+    source: "./modules/argocd-app"
+    if: "test -d argocd"          # skip unless the target has an argocd/ dir
+  - name: prod-only
+    source: "./modules/prod-only"
+    if: '[ {{ .env }} = prod ]'   # params are templated before the shell runs
+```
+
+The predicate runs in the child's **resolved target directory** — its own `spec.target` clone if it has one, otherwise the parent target it inherits — so it can inspect the very repository the child would change. (A child with its own `target` is therefore cloned before its `if` is evaluated.)
+
+The same `if` field works on individual operations; see the [operations reference](/reference/loom-yaml#conditional-execution-if). Predicates are evaluated in every mode, including `--dry-run`, so keep them side-effect-free (`test`, `grep`, file checks).
 
 ## Bulk Runs
 

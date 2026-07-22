@@ -47,10 +47,18 @@ type ModuleRef struct {
 	Name   string            `yaml:"name"`
 	Source string            `yaml:"source"`
 	Params map[string]string `yaml:"params,omitempty"`
+	// If is an optional shell predicate gating child execution. Empty means
+	// always run. Templated with the parent's params, then run via sh -c in
+	// the child's resolved target dir: exit 0 runs the child, non-zero skips it.
+	If string `yaml:"if,omitempty"`
 }
 
 type Operation struct {
-	Name       string      `yaml:"name"`
+	Name string `yaml:"name"`
+	// If is an optional shell predicate gating this operation. Empty means
+	// always run. Templated with the module's params, then run via sh -c in
+	// the target dir: exit 0 runs the operation, non-zero skips it.
+	If         string      `yaml:"if,omitempty"`
 	NewFiles   *NewFiles   `yaml:"newFiles,omitempty"`
 	Patch      *Patch      `yaml:"patch,omitempty"`
 	Shell      *Shell      `yaml:"shell,omitempty"`

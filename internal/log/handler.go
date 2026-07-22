@@ -58,13 +58,21 @@ const KeySection = "section"
 // key=value pair, so interleaved output from different modules stays separable.
 const KeyModule = "module"
 
+// KeyRoot marks a logger as the run's root/orchestrator — a module that fans
+// work out to child modules. The executor sets it (Logger.With(KeyRoot, true))
+// on any module that has children, so the top-level module's own lines render
+// with the reserved "≡ … ≡" chip. It is a structural signal, not inferred from
+// log order, so it holds even for the very first line an orchestrator emits and
+// for a pure orchestrator that never runs operations of its own. Children
+// inherit the attr but stay plain: root marking is gated on module depth == 1.
+const KeyRoot = "root"
+
 // sharedState is shared by a handler and every handler derived from it via
-// WithAttrs/WithGroup, so the output mutex and run-wide observations survive
-// the per-logger cloning that slog does.
+// WithAttrs/WithGroup, so the output mutex survives the per-logger cloning that
+// slog does.
 type sharedState struct {
-	mu        sync.Mutex
-	w         io.Writer
-	sawNested bool // a nested (depth > 1) module record has been seen this run
+	mu sync.Mutex
+	w  io.Writer
 }
 
 // PrettyHandler formats log output for human readability.
@@ -100,6 +108,7 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	// Split attrs by rendering role before writing anything.
 	var moduleName string
 	var moduleDepth int // count of module attrs: 1 = root, >1 = nested child
+	var orchestrator bool
 	var section bool
 	var inline []slog.Attr // rendered as aligned bullets below the message
 	var blocks []slog.Attr // multi-line values, rendered as indented blocks
@@ -112,6 +121,8 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		case a.Key == KeyModule && h.group == "":
 			moduleName = a.Value.String()
 			moduleDepth++
+		case a.Key == KeyRoot && h.group == "":
+			orchestrator = a.Value.Bool()
 		case strings.Contains(a.Value.String(), "\n"):
 			blocks = append(blocks, a)
 		default:
@@ -126,18 +137,14 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
+	// The run's root/orchestrator is the top-level module (depth 1) that the
+	// executor flagged as having children. Depth gates the flag so nested
+	// children — which inherit the attr — stay plain, and a flat single-module
+	// run (no children, no flag) keeps an undecorated chip.
+	root := moduleDepth == 1 && orchestrator
+
 	h.st.mu.Lock()
 	defer h.st.mu.Unlock()
-
-	// A depth-1 module is the run's root, but it is only worth marking as such
-	// once the run has actual nesting to contrast against — otherwise a plain
-	// single-module run would decorate every line for no reason. Children log
-	// before a parent's own operations, so by the time the root logs its ops
-	// the nested flag is already set.
-	if moduleDepth > 1 {
-		h.st.sawNested = true
-	}
-	root := moduleDepth == 1 && h.st.sawNested
 
 	var b strings.Builder
 

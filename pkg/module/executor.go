@@ -50,10 +50,22 @@ func (o *RunOptions) NextLocalDir(name string) string {
 
 // Execute runs all operations in a module sequentially.
 func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions) error {
+	// A module with children is the run's orchestrator: mark its logger so its
+	// own lines (the batch headers below, plus any operations of its own) render
+	// with the reserved "≡ … ≡" root chip. Marking it structurally — rather than
+	// inferring nesting from log order — keeps the orchestrator visible even when
+	// it only fans work out and never runs an operation itself. Children derive
+	// their loggers from this one and inherit the attr harmlessly; the handler
+	// only treats a depth-1 module as root. Must precede NewExecutionContext so
+	// the operations' action logs carry the marker too, not just the headers.
+	children := mod.Config.Spec.Modules
+	if len(children) > 0 {
+		mod.Logger = mod.Logger.With(prettylog.KeyRoot, true)
+	}
+
 	execCtx := mod.NewExecutionContext(targetDir, opts)
 
 	// Execute child modules first.
-	children := mod.Config.Spec.Modules
 	for i, childRef := range children {
 		childName, err := tmpl.RenderString(childRef.Name, mod.Params)
 		if err != nil {
@@ -69,9 +81,10 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		// source resolution and Load attributes the child's setup logs (dynamic
 		// params, target clone) to the instance too, not to the parent.
 		childLogger := mod.Logger.With(prettylog.KeyModule, childName)
-		// The module chip already names the instance; the header only needs to
-		// mark the boundary and its position in the batch.
-		childLogger.Info(fmt.Sprintf("(%d/%d)", i+1, len(children)), prettylog.KeySection, true)
+		// The orchestrator announces each dispatch, so the batch header carries
+		// the root chip and names the item it is handing off to; the child's own
+		// lines that follow carry the child chip.
+		mod.Logger.Info(fmt.Sprintf("%s (%d/%d)", childName, i+1, len(children)), prettylog.KeySection, true)
 
 		renderedSource, err := tmpl.RenderString(childRef.Source, mod.Params)
 		if err != nil {

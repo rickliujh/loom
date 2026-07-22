@@ -12,17 +12,44 @@ func newTestLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(NewPrettyHandler(&buf, nil)), &buf
 }
 
-func TestRootChipMarkedOnlyOnceRunHasNesting(t *testing.T) {
+func TestRootChipMarkedWhenModuleIsOrchestrator(t *testing.T) {
 	logger, buf := newTestLogger()
-	// A nested (depth-2) record first, so the run is known to have hierarchy.
-	logger.With("module", "bulk-onboard").With("module", "onboard-0").Info("child line")
-	buf.Reset()
-
-	// The depth-1 root now renders with "≡ … ≡" markers.
-	logger.With("module", "bulk-onboard").Info("writing file", "path", "argocd/app.yaml")
+	// The executor flags an orchestrator's logger with KeyRoot; its depth-1
+	// lines render with "≡ … ≡" markers regardless of log order.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("writing file", "path", "argocd/app.yaml")
 
 	got := buf.String()
 	want := "[≡ bulk-onboard ≡] writing file\n  path  argocd/app.yaml\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRootMarkerOnFirstLineNeedsNoPriorNesting(t *testing.T) {
+	logger, buf := newTestLogger()
+	// The very first line an orchestrator emits (a batch header, before any
+	// child has logged) is already marked — root-ness is structural, not
+	// inferred from having seen a nested record first.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("onboard-0 (1/2)", KeySection, true)
+
+	got := buf.String()
+	want := "\n[≡ bulk-onboard ≡] onboard-0 (1/2)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestOrchestratorFlagIgnoredForNestedChild(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A child inherits the orchestrator's KeyRoot attr but stays plain: root
+	// marking is gated on module depth == 1.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		With("module", "onboard-0").Info("writing file")
+
+	got := buf.String()
+	want := "[onboard-0] writing file\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -107,10 +134,8 @@ func TestColorSectionRenderedInverted(t *testing.T) {
 
 func TestColorRootChipInvertedBoldModuleColor(t *testing.T) {
 	logger, buf := newColorTestLogger()
-	// Prime the run with a nested record so the root marker applies.
-	logger.With("module", "onboard").With("module", "onboard-0").Info("child")
-	buf.Reset()
-	logger.With("module", "onboard").Info("writing file")
+	// An orchestrator's logger carries KeyRoot, so its depth-1 line is marked.
+	logger.With("module", "onboard").With(KeyRoot, true).Info("writing file")
 
 	got := buf.String()
 	// Root chip: invert + the reserved root color + bold, wrapped in "≡ … ≡".

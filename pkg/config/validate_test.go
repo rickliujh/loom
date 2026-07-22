@@ -409,6 +409,70 @@ func TestValidate_ModuleValid(t *testing.T) {
 	}
 }
 
+// --- if condition ---
+
+func TestValidate_IfConditionValid(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "env"}}
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "child", Source: "../child", If: `[ {{ .env }} = prod ]`},
+	}
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", If: `test -f {{ .env }}.yaml`, Shell: &Shell{Command: "echo hi"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_OperationIfUndeclaredParam(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", If: "test {{ .missing }}", Shell: &Shell{Command: "echo hi"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for undeclared param in operation if")
+	}
+	if !strings.Contains(err.Error(), `operation "sh" if: references undeclared param "missing"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ModuleIfUndeclaredParam(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "child", Source: "../child", If: "test {{ .missing }}"},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for undeclared param in module if")
+	}
+	if !strings.Contains(err.Error(), `module "child" if: references undeclared param "missing"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_OperationIfTemplateSyntaxError(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "sh", If: "test {{ .x", Shell: &Shell{Command: "echo hi"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for malformed if template")
+	}
+	if !strings.Contains(err.Error(), `operation "sh" if: invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 // --- template syntax ---
 
 func TestValidate_TemplateSyntaxErrorInShellCommand(t *testing.T) {

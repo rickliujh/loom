@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 )
 
 // PRResult records one pull/merge request created during a run.
@@ -44,34 +45,85 @@ func (s *RunSummary) Print(w io.Writer) {
 	}
 }
 
+// diffEntry is one captured file diff plus the context needed to read it once
+// diffs are printed together at the end: which module produced it and which
+// target (repo) it applies to.
+type diffEntry struct {
+	module string
+	target string
+	text   string // uncolored unified diff
+}
+
 // DiffCollector accumulates file diffs across a whole run, shared by parent
 // and child module executions. Execution is sequential, so no locking is
 // needed. Diffs are held rather than written inline as each file is merged,
 // so the whole set can be printed once at the very end of the run — after the
-// per-operation logs — where they are easy to read.
+// per-operation logs. Each diff carries a module/target header so it stays
+// legible out of the surrounding log context.
 type DiffCollector struct {
-	// Diffs holds each captured file diff as uncolored unified-diff text.
-	Diffs []string
+	entries []diffEntry
 }
 
-// Add records one file diff. Safe to call on a nil collector.
-func (c *DiffCollector) Add(diff string) {
+// Add records one file diff along with the module and target it belongs to.
+// Safe to call on a nil collector.
+func (c *DiffCollector) Add(module, target, diff string) {
 	if c == nil {
 		return
 	}
-	c.Diffs = append(c.Diffs, diff)
+	c.entries = append(c.entries, diffEntry{module: module, target: target, text: diff})
 }
 
 // Print writes all collected diffs to w, colorized when w is a terminal.
-// Nothing is written when the collector is nil or empty.
+// A module/target header is written before each diff (deduplicated across a
+// run of diffs from the same module and target). Nothing is written when the
+// collector is nil or empty.
 func (c *DiffCollector) Print(w io.Writer) {
-	if c == nil || len(c.Diffs) == 0 {
+	if c == nil || len(c.entries) == 0 {
 		return
 	}
 	color := isTerminalWriter(w)
-	for _, diff := range c.Diffs {
-		fmt.Fprint(w, colorizeDiff(diff, color))
+	var lastModule, lastTarget string
+	for i, e := range c.entries {
+		if i == 0 || e.module != lastModule || e.target != lastTarget {
+			fmt.Fprint(w, diffHeader(e.module, e.target, color))
+			lastModule, lastTarget = e.module, e.target
+		}
+		fmt.Fprint(w, colorizeDiff(e.text, color))
 	}
+}
+
+// diffHeader renders the "which module / which repo" banner shown above a diff.
+// Returns just a leading blank line when there is no context to show.
+func diffHeader(module, target string, color bool) string {
+	if module == "" && target == "" {
+		return "\n"
+	}
+	var b strings.Builder
+	b.WriteByte('\n')
+	switch {
+	case !color:
+		if module != "" {
+			b.WriteString("[" + module + "]")
+		}
+		if target != "" {
+			if module != "" {
+				b.WriteByte(' ')
+			}
+			b.WriteString(target)
+		}
+	default:
+		if module != "" {
+			b.WriteString(diffColorInvert + " " + module + " " + diffColorReset)
+		}
+		if target != "" {
+			if module != "" {
+				b.WriteByte(' ')
+			}
+			b.WriteString(diffColorMuted + target + diffColorReset)
+		}
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 // ExecutionContext holds runtime state shared across actions.
@@ -82,6 +134,10 @@ type ExecutionContext struct {
 	ModuleDir string
 	// TargetDir is the path to the target repository working directory.
 	TargetDir string
+	// TargetLabel is a human-readable identity for the target (repo URL and
+	// branch, or the target dir), shown as a header above collected diffs so
+	// they stay legible out of the surrounding log context. May be empty.
+	TargetLabel string
 	// Params are the resolved template parameters.
 	Params map[string]string
 	// Excludes are glob patterns for files/dirs to exclude from template walking.

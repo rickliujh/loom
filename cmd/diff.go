@@ -168,8 +168,9 @@ func runDiffFull(ctx context.Context, source string, paramMap map[string]string,
 // Returns the number of repos that had changes.
 func printTargetDiffs(root string, w io.Writer) (int, error) {
 	repos := gitRepoDirs(root)
+	color := isTerminalWriter(w)
 	colorFlag := "--color=never"
-	if isTerminalWriter(w) {
+	if color {
 		colorFlag = "--color=always"
 	}
 
@@ -187,13 +188,77 @@ func printTargetDiffs(root string, w io.Writer) (int, error) {
 			continue
 		}
 		changed++
-		fmt.Fprintf(w, "\n# %s\n", filepath.Base(dir))
+		fmt.Fprint(w, targetDiffHeader(dir, base, color))
 		fmt.Fprint(w, out)
 		if !strings.HasSuffix(out, "\n") {
 			fmt.Fprintln(w)
 		}
 	}
 	return changed, nil
+}
+
+// targetDiffHeader renders the "which module / which repo" banner above a
+// target's git diff: the module name (from the numbered clone dir), the origin
+// remote URL, and the base branch — all read from the clone itself.
+func targetDiffHeader(dir, base string, color bool) string {
+	module := moduleFromDir(filepath.Base(dir))
+	branch := strings.TrimPrefix(base, "refs/remotes/origin/")
+	repo := ""
+	if url, err := runGit(dir, "remote", "get-url", "origin"); err == nil {
+		repo = strings.TrimSpace(url)
+	}
+	if branch != "" && branch != "HEAD" {
+		if repo != "" {
+			repo += " (" + branch + ")"
+		} else {
+			repo = branch
+		}
+	}
+	return diffHeaderLine(module, repo, color)
+}
+
+// moduleFromDir strips the "NN-" execution-order prefix local mode adds to a
+// clone directory, leaving the module name.
+func moduleFromDir(name string) string {
+	i := 0
+	for i < len(name) && name[i] >= '0' && name[i] <= '9' {
+		i++
+	}
+	if i > 0 && i < len(name) && name[i] == '-' {
+		return name[i+1:]
+	}
+	return name
+}
+
+// diffHeaderLine renders a module/target banner matching the quick-mode diff
+// header: an inverted module chip followed by a muted target label.
+func diffHeaderLine(module, target string, color bool) string {
+	var b strings.Builder
+	b.WriteByte('\n')
+	switch {
+	case !color:
+		if module != "" {
+			b.WriteString("[" + module + "]")
+		}
+		if target != "" {
+			if module != "" {
+				b.WriteByte(' ')
+			}
+			b.WriteString(target)
+		}
+	default:
+		if module != "" {
+			b.WriteString("\033[7m " + module + " \033[0m")
+		}
+		if target != "" {
+			if module != "" {
+				b.WriteByte(' ')
+			}
+			b.WriteString("\033[38;5;244m" + target + "\033[0m")
+		}
+	}
+	b.WriteByte('\n')
+	return b.String()
 }
 
 // gitRepoDirs returns root (if a git repo) followed by its immediate git-repo

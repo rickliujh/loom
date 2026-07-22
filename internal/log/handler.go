@@ -10,20 +10,18 @@ import (
 	"sync"
 )
 
-// color codes
+// Text attributes (SGR) — structural, not hues.
 const (
-	colorReset   = "\033[0m"
-	colorBold    = "\033[1m"
-	colorInvert  = "\033[7m"
-	colorRed     = "\033[31m"
-	colorGreen   = "\033[32m"
-	colorYellow  = "\033[33m"
-	colorBlue    = "\033[34m"
-	colorMagenta = "\033[35m"
-	colorCyan    = "\033[36m"
-	colorGray    = "\033[90m"
+	colorReset  = "\033[0m"
+	colorBold   = "\033[1m"
+	colorInvert = "\033[7m"
 )
 
+// Palette. A restrained, desaturated 256-color scheme: hue carries meaning
+// (which module, what severity) without the loud primary tones a plain 16-color
+// palette produces. Every value is a muted mid-tone, so a busy run reads as one
+// calm, serious surface rather than a string of alerts.
+//
 // colorModule is the single color every worker (leaf) module chip shares.
 // Modules are told apart by the chip's inverted shape and its name, not by hue
 // — one consistent color reads calmer than a per-module palette, and leaves
@@ -33,8 +31,13 @@ const (
 // hue, so the module that fans work out reads distinctly from the workers it
 // drives — reinforcing the bold "≡ … ≡" chip.
 const (
-	colorModule     = colorCyan
-	colorRootModule = colorBlue
+	colorModule     = "\033[38;5;66m"  // slate teal — worker chips
+	colorRootModule = "\033[38;5;61m"  // muted indigo — the orchestrator
+	colorError      = "\033[38;5;131m" // brick red — errors, failure line
+	colorWarn       = "\033[38;5;137m" // amber — warnings, dry-run marker
+	colorSuccess    = "\033[38;5;65m"  // sage — the success line
+	colorMuted      = "\033[38;5;244m" // mid gray — attr keys, debug
+	colorLocalRun   = "\033[38;5;96m"  // mauve — the local-run mode marker
 )
 
 // modePrefixes are message prefixes that mark an execution mode; the pretty
@@ -43,8 +46,8 @@ var modePrefixes = []struct {
 	prefix string
 	color  string
 }{
-	{"dry-run:", colorYellow},
-	{"local-run:", colorMagenta},
+	{"dry-run:", colorWarn},
+	{"local-run:", colorLocalRun},
 }
 
 // KeySection marks a log record as a section header. The pretty handler
@@ -58,13 +61,21 @@ const KeySection = "section"
 // key=value pair, so interleaved output from different modules stays separable.
 const KeyModule = "module"
 
+// KeyRoot marks a logger as the run's root/orchestrator — a module that fans
+// work out to child modules. The executor sets it (Logger.With(KeyRoot, true))
+// on any module that has children, so the top-level module's own lines render
+// with the reserved "≡ … ≡" chip. It is a structural signal, not inferred from
+// log order, so it holds even for the very first line an orchestrator emits and
+// for a pure orchestrator that never runs operations of its own. Children
+// inherit the attr but stay plain: root marking is gated on module depth == 1.
+const KeyRoot = "root"
+
 // sharedState is shared by a handler and every handler derived from it via
-// WithAttrs/WithGroup, so the output mutex and run-wide observations survive
-// the per-logger cloning that slog does.
+// WithAttrs/WithGroup, so the output mutex survives the per-logger cloning that
+// slog does.
 type sharedState struct {
-	mu        sync.Mutex
-	w         io.Writer
-	sawNested bool // a nested (depth > 1) module record has been seen this run
+	mu sync.Mutex
+	w  io.Writer
 }
 
 // PrettyHandler formats log output for human readability.
@@ -100,6 +111,7 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	// Split attrs by rendering role before writing anything.
 	var moduleName string
 	var moduleDepth int // count of module attrs: 1 = root, >1 = nested child
+	var orchestrator bool
 	var section bool
 	var inline []slog.Attr // rendered as aligned bullets below the message
 	var blocks []slog.Attr // multi-line values, rendered as indented blocks
@@ -112,6 +124,8 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		case a.Key == KeyModule && h.group == "":
 			moduleName = a.Value.String()
 			moduleDepth++
+		case a.Key == KeyRoot && h.group == "":
+			orchestrator = a.Value.Bool()
 		case strings.Contains(a.Value.String(), "\n"):
 			blocks = append(blocks, a)
 		default:
@@ -126,18 +140,14 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		return true
 	})
 
+	// The run's root/orchestrator is the top-level module (depth 1) that the
+	// executor flagged as having children. Depth gates the flag so nested
+	// children — which inherit the attr — stay plain, and a flat single-module
+	// run (no children, no flag) keeps an undecorated chip.
+	root := moduleDepth == 1 && orchestrator
+
 	h.st.mu.Lock()
 	defer h.st.mu.Unlock()
-
-	// A depth-1 module is the run's root, but it is only worth marking as such
-	// once the run has actual nesting to contrast against — otherwise a plain
-	// single-module run would decorate every line for no reason. Children log
-	// before a parent's own operations, so by the time the root logs its ops
-	// the nested flag is already set.
-	if moduleDepth > 1 {
-		h.st.sawNested = true
-	}
-	root := moduleDepth == 1 && h.st.sawNested
 
 	var b strings.Builder
 
@@ -212,13 +222,13 @@ func (h *PrettyHandler) WithGroup(name string) slog.Handler {
 func (h *PrettyHandler) levelPrefix(level slog.Level) (string, string) {
 	switch {
 	case level >= slog.LevelError:
-		return "error: ", colorRed
+		return "error: ", colorError
 	case level >= slog.LevelWarn:
-		return "warning: ", colorYellow
+		return "warning: ", colorWarn
 	case level >= slog.LevelInfo:
 		return "", ""
 	default:
-		return "debug: ", colorGray
+		return "debug: ", colorMuted
 	}
 }
 
@@ -258,9 +268,9 @@ func (h *PrettyHandler) writeChip(b *strings.Builder, name string, root bool, le
 	}
 	switch {
 	case level >= slog.LevelError:
-		color = colorRed
+		color = colorError
 	case level >= slog.LevelWarn:
-		color = colorYellow
+		color = colorWarn
 	}
 
 	b.WriteString(colorInvert + color)
@@ -299,7 +309,7 @@ func (h *PrettyHandler) writeAttrs(b *strings.Builder, attrs []slog.Attr) {
 			val = `""`
 		}
 		if h.color {
-			fmt.Fprintf(b, "  %s%s%s%s  %s\n", colorGray, key, colorReset, pad, val)
+			fmt.Fprintf(b, "  %s%s%s%s  %s\n", colorMuted, key, colorReset, pad, val)
 		} else {
 			fmt.Fprintf(b, "  %s%s  %s\n", key, pad, val)
 		}
@@ -315,7 +325,7 @@ func (h *PrettyHandler) writeBlock(b *strings.Builder, a slog.Attr) {
 	}
 
 	if h.color {
-		fmt.Fprintf(b, "  %s%s:%s\n", colorGray, key, colorReset)
+		fmt.Fprintf(b, "  %s%s:%s\n", colorMuted, key, colorReset)
 	} else {
 		fmt.Fprintf(b, "  %s:\n", key)
 	}

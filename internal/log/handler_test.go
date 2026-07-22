@@ -12,17 +12,44 @@ func newTestLogger() (*slog.Logger, *bytes.Buffer) {
 	return slog.New(NewPrettyHandler(&buf, nil)), &buf
 }
 
-func TestRootChipMarkedOnlyOnceRunHasNesting(t *testing.T) {
+func TestRootChipMarkedWhenModuleIsOrchestrator(t *testing.T) {
 	logger, buf := newTestLogger()
-	// A nested (depth-2) record first, so the run is known to have hierarchy.
-	logger.With("module", "bulk-onboard").With("module", "onboard-0").Info("child line")
-	buf.Reset()
-
-	// The depth-1 root now renders with "≡ … ≡" markers.
-	logger.With("module", "bulk-onboard").Info("writing file", "path", "argocd/app.yaml")
+	// The executor flags an orchestrator's logger with KeyRoot; its depth-1
+	// lines render with "≡ … ≡" markers regardless of log order.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("writing file", "path", "argocd/app.yaml")
 
 	got := buf.String()
 	want := "[≡ bulk-onboard ≡] writing file\n  path  argocd/app.yaml\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRootMarkerOnFirstLineNeedsNoPriorNesting(t *testing.T) {
+	logger, buf := newTestLogger()
+	// The very first line an orchestrator emits (a batch header, before any
+	// child has logged) is already marked — root-ness is structural, not
+	// inferred from having seen a nested record first.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("onboard-0 (1/2)", KeySection, true)
+
+	got := buf.String()
+	want := "\n[≡ bulk-onboard ≡] onboard-0 (1/2)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestOrchestratorFlagIgnoredForNestedChild(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A child inherits the orchestrator's KeyRoot attr but stays plain: root
+	// marking is gated on module depth == 1.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		With("module", "onboard-0").Info("writing file")
+
+	got := buf.String()
+	want := "[onboard-0] writing file\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -107,10 +134,8 @@ func TestColorSectionRenderedInverted(t *testing.T) {
 
 func TestColorRootChipInvertedBoldModuleColor(t *testing.T) {
 	logger, buf := newColorTestLogger()
-	// Prime the run with a nested record so the root marker applies.
-	logger.With("module", "onboard").With("module", "onboard-0").Info("child")
-	buf.Reset()
-	logger.With("module", "onboard").Info("writing file")
+	// An orchestrator's logger carries KeyRoot, so its depth-1 line is marked.
+	logger.With("module", "onboard").With(KeyRoot, true).Info("writing file")
 
 	got := buf.String()
 	// Root chip: invert + the reserved root color + bold, wrapped in "≡ … ≡".
@@ -142,7 +167,7 @@ func TestColorChildChipRecoloredBySeverity(t *testing.T) {
 	logger.With("module", "bulk").With("module", "child-0").Warn("push rejected")
 
 	got := buf.String()
-	want := "\033[7m" + colorYellow + " child-0 " + "\033[0m" + " " + "\033[33m" + "warning: " + "\033[0m" + "push rejected\n"
+	want := "\033[7m" + colorWarn + " child-0 " + "\033[0m" + " " + colorWarn + "warning: " + "\033[0m" + "push rejected\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -170,8 +195,8 @@ func TestColorModeMarkerHighlighted(t *testing.T) {
 
 	got := buf.String()
 	for _, want := range []string{
-		"\033[33mdry-run:\033[0m would write file\n",
-		"\033[35mlocal-run:\033[0m skipping PR creation\n",
+		colorWarn + "dry-run:" + "\033[0m would write file\n",
+		colorLocalRun + "local-run:" + "\033[0m skipping PR creation\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output missing %q:\n%q", want, got)
@@ -184,7 +209,7 @@ func TestColorAttrKeyGrayValuePlain(t *testing.T) {
 	logger.Info("writing file", "path", "argocd/app.yaml")
 
 	got := buf.String()
-	want := "writing file\n  \033[90mpath\033[0m  argocd/app.yaml\n"
+	want := "writing file\n  " + colorMuted + "path\033[0m  argocd/app.yaml\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

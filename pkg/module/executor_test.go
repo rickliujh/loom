@@ -899,10 +899,13 @@ spec:
 
 	out := buf.String()
 	for _, want := range []string{
+		// Each child's own operation logs carry its unique instance name.
 		`module=greeter-alice`,
 		`module=greeter-bob`,
-		`msg=(1/2) module=bulk-greeter module=greeter-alice`,
-		`msg=(2/2) module=bulk-greeter module=greeter-bob`,
+		// The batch header is the orchestrator's line: it carries the root
+		// module (marked with root=true) and names the item it dispatches to.
+		`msg="greeter-alice (1/2)" module=bulk-greeter root=true`,
+		`msg="greeter-bob (2/2)" module=bulk-greeter root=true`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("child log output missing %q:\n%s", want, out)

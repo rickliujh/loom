@@ -170,9 +170,10 @@ func DiffHeader(breadcrumb []string, target string, color bool) string {
 }
 
 // diffTurnBanner heads one bulk turn: the root module as an inverted "≡ … ≡" chip
-// (mirroring the log's root section header) followed by the turn's instance name
-// in bold. This is the anchor the eye lands on, so turn boundaries stand out in a
-// long batch. Callers put the separating blank line above the whole header block.
+// followed by the turn's instance name in bold. The chip is white rather than the
+// run log's indigo root color, so the banner reads as "this is the diff" and not
+// more run output. It is the anchor the eye lands on, so turn boundaries stand out
+// in a long batch. Callers put the separating blank line above the header block.
 func diffTurnBanner(root, turn string, color bool) string {
 	if color {
 		return diffColorInvert + diffColorRoot + diffColorBold + " ≡ " + root + " ≡ " + diffColorReset +

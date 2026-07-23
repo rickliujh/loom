@@ -824,7 +824,6 @@ is logged.
 | `--verbose`, `-v` | bool | `false` | Enable verbose output (sets log level to debug) |
 | `--dry-run` | bool | `false` | Simulate operations without making changes |
 | `--local-run` | bool | `false` | Run locally: skip push and PR, clone into `--target-path` |
-| `--diff` | bool | `false` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--log-level` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error` |
 | `--log-format` | string | `"pretty"` | Log format: `pretty`, `text`, `json` |
 
@@ -916,15 +915,67 @@ No files are written, no commits are made, no PRs are opened. Each operation log
 | `commitPush` | Logs the commit that would be made. |
 | `pr` | Logs the PR that would be opened. |
 
-#### DR2: `--diff` implies `--dry-run`
+To preview the actual file diffs a run would produce, use the `loom diff`
+command (below), not `run`.
 
-When `--diff` is set, `--dry-run` is automatically enabled.
+---
 
-#### DR3: Diff shows unified diffs
+## Diff Command (`loom diff`)
 
-In addition to dry-run logging:
-- `newFiles`: unified diff of rendered content vs empty (new file).
-- `patch`: unified diff of patched result vs original target file.
+`loom diff [path]` shows the changes a module run would produce. It has two
+fidelity levels.
+
+### `diff` Command Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--quick` | bool | `false` | Simulate the run (dry-run) and show `newFiles`/`patch` diffs only, without executing anything |
+| `--partial` | bool | `false` | When the run fails, still print the diff of changes made before the error (below a warning) |
+| `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
+| `--params-file` | string | `""` | YAML file with parameters |
+| `--target-path` | string | `""` | Directory for target clones; when set it is kept for inspection instead of a cleaned-up temp dir |
+| `--author` | string | `""` | Default git author name for `commitPush` operations |
+| `--email` | string | `""` | Default git author email for `commitPush` operations |
+
+### Behaviors
+
+#### DF1: Full mode — local run plus `git diff`
+
+By default (no `--quick`), `diff` runs the module in local mode (see Local Mode:
+clone into numbered subdirectories, pure shell runs, `pr` skipped, `commitPush`
+commits locally, no push). It then prints a `git diff` of each cloned target
+against its base branch. Because operations actually execute, this includes
+files rewritten by `shell` commands — the complete change a run would make. A
+git identity is defaulted (`loom-diff`) so `commitPush` can commit even when the
+module and CLI supply none.
+
+#### DF2: Quick mode — simulated diffs
+
+With `--quick`, `diff` simulates the run (dry-run semantics, DR1): it executes
+nothing and writes nothing. It prints unified diffs for the operations that can
+be computed without running — `newFiles` (rendered content vs empty) and `patch`
+(patched result vs original target). It cannot show changes made by `shell`
+commands, which do not run under dry-run.
+
+#### DF3: Workspace lifecycle
+
+Full mode clones into a workspace: a temporary directory that is removed once the
+diff is printed, unless `--target-path` is supplied, in which case the clones are
+kept there for inspection.
+
+#### DF4: Diffs are headed with module and target
+
+Because diffs print together at the end — away from the per-operation logs —
+each diff is preceded by a header naming the module that produced it and the
+target it applies to (repo URL and branch, or the target directory). Consecutive
+diffs sharing the same module and target reuse a single header.
+
+#### DF5: Failure ordering
+
+When the run fails, `diff` exits non-zero. By default no diff is printed — only
+the error — so the failure is not buried. With `--partial`, the diff of the
+changes made before the failure is printed beneath a warning that marks it as
+incomplete, with the error shown above it (next to the failing module's logs).
 
 ---
 

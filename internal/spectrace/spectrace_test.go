@@ -24,7 +24,7 @@ import (
 var uncovered = map[string]bool{
 	"A3": true, "C1": true, "C2": true, "C3": true, "C4": true,
 	"D1": true, "D2": true, "D3": true, "D4": true, "D5": true,
-	"DR1": true, "DR3": true, "E1": true,
+	"DR1": true, "E1": true,
 	"F1": true, "F2": true, "F3": true,
 	"GO1": true, "M1": true, "M3": true, "M4": true,
 	"P2": true, "PM1": true, "PM2": true, "PM3": true, "PM4": true,

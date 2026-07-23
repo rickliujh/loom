@@ -70,6 +70,14 @@ const KeyModule = "module"
 // inherit the attr but stay plain: root marking is gated on module depth == 1.
 const KeyRoot = "root"
 
+// KeyDispatch marks a record as an orchestrator's batch header — the "child
+// (N/M)" line it emits as it hands work to a child. The executor sets it on
+// every dispatch header. The pretty handler uses it to mark a nested hand-off
+// (depth > 1) with a "▸ parent › child" form, so a deep batch header reads as a
+// dispatch by its parent rather than masquerading as an ordinary leaf line; the
+// run's root (depth 1) keeps its "≡ … ≡" chip.
+const KeyDispatch = "dispatch"
+
 // sharedState is shared by a handler and every handler derived from it via
 // WithAttrs/WithGroup, so the output mutex survives the per-logger cloning that
 // slog does.
@@ -113,6 +121,7 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	var moduleDepth int // count of module attrs: 1 = root, >1 = nested child
 	var orchestrator bool
 	var section bool
+	var dispatch bool
 	var inline []slog.Attr // rendered as aligned bullets below the message
 	var blocks []slog.Attr // multi-line values, rendered as indented blocks
 
@@ -126,6 +135,8 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 			moduleDepth++
 		case a.Key == KeyRoot && h.group == "":
 			orchestrator = a.Value.Bool()
+		case a.Key == KeyDispatch && h.group == "":
+			dispatch = a.Value.Kind() != slog.KindBool || a.Value.Bool()
 		case strings.Contains(a.Value.String(), "\n"):
 			blocks = append(blocks, a)
 		default:
@@ -146,6 +157,14 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	// run (no children, no flag) keeps an undecorated chip.
 	root := moduleDepth == 1 && orchestrator
 
+	// Indent by nesting depth so a child's lines sit visibly beneath the parent
+	// that dispatched them. Depth 1 (root or a flat single module) is flush left;
+	// each further level of module nesting adds one step.
+	indent := ""
+	if moduleDepth > 1 {
+		indent = strings.Repeat("  ", moduleDepth-1)
+	}
+
 	h.st.mu.Lock()
 	defer h.st.mu.Unlock()
 
@@ -153,6 +172,23 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 
 	if section {
 		b.WriteByte('\n')
+	}
+
+	// Nested dispatch header: a hand-off marker plus the dispatching module's
+	// name, so a deep "child (N/M)" line names whose batch it is instead of
+	// reading like an ordinary leaf. The root (depth 1) is already set apart by
+	// its "≡ … ≡" chip, so it falls through to the normal section rendering.
+	if dispatch && moduleDepth > 1 {
+		if h.color {
+			b.WriteString(colorModule + "▸ " + colorReset)
+			b.WriteString(colorMuted + moduleName + " › " + colorReset)
+			b.WriteString(colorBold + r.Message + colorReset)
+		} else {
+			b.WriteString("▸ " + moduleName + " › " + r.Message)
+		}
+		b.WriteByte('\n')
+		_, err := io.WriteString(h.st.w, indentLines(b.String(), indent))
+		return err
 	}
 
 	// Module chip: the leftmost gutter, so the executing module is the first
@@ -191,8 +227,28 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		h.writeBlock(&b, a)
 	}
 
-	_, err := io.WriteString(h.st.w, b.String())
+	_, err := io.WriteString(h.st.w, indentLines(b.String(), indent))
 	return err
+}
+
+// indentLines prefixes every content line of s with indent, leaving blank
+// separator lines (a lone "\n", e.g. a section header's leading gap) flush so
+// they stay empty rather than filling with trailing spaces. A no-op when indent
+// is empty. s is expected to end in "\n".
+func indentLines(s, indent string) string {
+	if indent == "" || s == "" {
+		return s
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(s, "\n") {
+		if line == "" || line == "\n" {
+			b.WriteString(line)
+			continue
+		}
+		b.WriteString(indent)
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func (h *PrettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

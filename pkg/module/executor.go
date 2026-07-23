@@ -3,7 +3,6 @@ package module
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -18,8 +17,9 @@ type RunOptions struct {
 	DryRun   bool
 	LocalRun bool
 	ShowDiff bool
-	// DiffWriter is the destination for diff output. Defaults to os.Stdout.
-	DiffWriter io.Writer
+	// Diffs collects file diffs across the run, shared by parent and child
+	// executions, for printing once at the end. May be nil.
+	Diffs *action.DiffCollector
 	// TargetPath is the base directory for --local-run mode.
 	// Each module with a target spec clones into a numbered subdirectory.
 	TargetPath string
@@ -32,6 +32,18 @@ type RunOptions struct {
 	// Summary collects created PRs/MRs across the run, shared by parent
 	// and child executions. May be nil.
 	Summary *action.RunSummary
+	// ModulePath is the instance breadcrumb of the executing module: the chain
+	// of instance names from the run's root down to and including this module.
+	// It identifies which module — and, in a bulk run, which item — a diff or
+	// log line belongs to, where the shared metadata.name cannot. It is extended
+	// as each child is dispatched.
+	ModulePath []string
+	// DirLabels maps a local-run clone directory to the breadcrumb of the module
+	// that clones into it. Full-mode `loom diff` reads changes back from those
+	// clone dirs rather than the in-memory collector, so this lets it head each
+	// diff with the same module/item identity quick mode shows. The map is shared
+	// across parent and child executions; nil outside full-mode diff.
+	DirLabels map[string][]string
 	// localSeq tracks the execution order for numbered subdirectories.
 	localSeq *int
 }
@@ -48,6 +60,23 @@ func (o *RunOptions) NextLocalDir(name string) string {
 	return filepath.Join(o.TargetPath, dir)
 }
 
+// registerDirLabel records the breadcrumb of the module cloning into dir, when a
+// DirLabels registry is present. A copy is stored so later reuse of the caller's
+// slice cannot mutate a recorded entry.
+func (o *RunOptions) registerDirLabel(dir string, breadcrumb []string) {
+	if o.DirLabels == nil || len(breadcrumb) == 0 {
+		return
+	}
+	o.DirLabels[dir] = append([]string(nil), breadcrumb...)
+}
+
+// RegisterDirLabel records a single-name breadcrumb for a root module's clone
+// dir. The diff command clones the root before Execute seeds opts.ModulePath, so
+// it labels that dir with just the module's own name.
+func (o *RunOptions) RegisterDirLabel(dir, name string) {
+	o.registerDirLabel(dir, []string{name})
+}
+
 // Execute runs all operations in a module sequentially.
 func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions) error {
 	// A module with children is the run's orchestrator: mark its logger so its
@@ -61,6 +90,21 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 	children := mod.Config.Spec.Modules
 	if len(children) > 0 {
 		mod.Logger = mod.Logger.With(prettylog.KeyRoot, true)
+	}
+
+	// Initialize the shared numbered-clone counter once, at the run's root, so
+	// its pointer propagates through every child's opts copy and the whole tree
+	// numbers into one monotonic sequence. Doing it here (not lazily in
+	// NextLocalDir) keeps sibling subtrees from each restarting at 00 once child
+	// dispatch clones opts by value.
+	if opts.localSeq == nil {
+		seq := 0
+		opts.localSeq = &seq
+	}
+	// The module's breadcrumb: the ancestry the parent handed down, or — at the
+	// run's root, where no parent named this instance — the module's own name.
+	if len(opts.ModulePath) == 0 {
+		opts.ModulePath = []string{mod.Config.Metadata.Name}
 	}
 
 	execCtx := mod.NewExecutionContext(targetDir, opts)
@@ -81,7 +125,6 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		// source resolution and Load attributes the child's setup logs (dynamic
 		// params, target clone) to the instance too, not to the parent.
 		childLogger := mod.Logger.With(prettylog.KeyModule, childName)
-
 		// The reference's optional description renders with the parent's params
 		// (M4), same context as name/source/params. Documentary — surfaced at
 		// debug level so a `--verbose` run shows why the child is composed in.
@@ -92,10 +135,16 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			}
 			childLogger.Debug("module description", "description", desc)
 		}
-		// The orchestrator announces each dispatch, so the batch header carries
-		// the root chip and names the item it is handing off to; the child's own
+		// The orchestrator announces each dispatch, so the batch header names the
+		// item it is handing off to; the handler marks it (root chip at the top
+		// level, a "▸ parent › child" hand-off when nested) and the child's own
 		// lines that follow carry the child chip.
-		mod.Logger.Info(fmt.Sprintf("%s (%d/%d)", childName, i+1, len(children)), prettylog.KeySection, true)
+		mod.Logger.Info(fmt.Sprintf("%s (%d/%d)", childName, i+1, len(children)), prettylog.KeySection, true, prettylog.KeyDispatch, true)
+
+		// Extend the breadcrumb with this child's instance name. resolveChildTarget
+		// records it against the clone dir (for full-mode diff), and the recursive
+		// Execute carries it into the child's own diffs and setup.
+		childPath := append(append([]string{}, opts.ModulePath...), childName)
 
 		renderedSource, err := tmpl.RenderString(childRef.Source, mod.Params)
 		if err != nil {
@@ -128,7 +177,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		// instance identity for everything downstream.
 		childMod.Logger = childLogger
 
-		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, targetDir, &opts)
+		childTargetDir, cleanup, err := resolveChildTarget(ctx, childMod, targetDir, &opts, childPath)
 		if err != nil {
 			return fmt.Errorf("resolving target for child module %q: %w", childName, err)
 		}
@@ -148,7 +197,9 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			continue
 		}
 
-		if err := Execute(ctx, childMod, childTargetDir, opts); err != nil {
+		childOpts := opts
+		childOpts.ModulePath = childPath
+		if err := Execute(ctx, childMod, childTargetDir, childOpts); err != nil {
 			return fmt.Errorf("executing child module %q: %w", childName, err)
 		}
 	}
@@ -185,7 +236,7 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 // In --local-run mode, it clones into a numbered subdirectory of TargetPath.
 // Otherwise, it clones into a temp directory with a cleanup function.
 // If the child has no target spec, it falls back to the parent's targetDir.
-func resolveChildTarget(ctx context.Context, childMod *Module, parentTargetDir string, opts *RunOptions) (string, func(), error) {
+func resolveChildTarget(ctx context.Context, childMod *Module, parentTargetDir string, opts *RunOptions, breadcrumb []string) (string, func(), error) {
 	target := childMod.Config.Spec.Target
 	if target == nil {
 		return parentTargetDir, nil, nil
@@ -200,6 +251,7 @@ func resolveChildTarget(ctx context.Context, childMod *Module, parentTargetDir s
 		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 			return "", nil, fmt.Errorf("creating local target dir: %w", err)
 		}
+		opts.registerDirLabel(cloneDir, breadcrumb)
 	} else {
 		tmpDir, err := os.MkdirTemp("", "loom-target-*")
 		if err != nil {

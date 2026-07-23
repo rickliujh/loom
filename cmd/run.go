@@ -79,11 +79,6 @@ func runModule(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// --diff implies --dry-run.
-	if showDiff {
-		dryRun = true
-	}
-
 	// In --local-run mode, require --target-path so the user can inspect results.
 	if localRun && targetPath == "" {
 		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
@@ -93,7 +88,6 @@ func runModule(cmd *cobra.Command, args []string) error {
 	opts := module.RunOptions{
 		DryRun:     dryRun,
 		LocalRun:   localRun,
-		ShowDiff:   showDiff,
 		TargetPath: targetPath,
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,
@@ -160,6 +154,9 @@ func cloneTarget(ctx context.Context, mod *module.Module, params map[string]stri
 		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 			return "", nil, fmt.Errorf("creating local target dir: %w", err)
 		}
+		// The root module has no parent to name it, so its breadcrumb is just its
+		// own name; Execute has not run yet to seed opts.ModulePath.
+		opts.RegisterDirLabel(cloneDir, mod.Config.Metadata.Name)
 	} else {
 		tmpDir, err := os.MkdirTemp("", "loom-target-*")
 		if err != nil {

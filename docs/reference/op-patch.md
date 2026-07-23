@@ -144,4 +144,4 @@ Paths follow [RFC 6901 JSON Pointer](https://datatracker.ietf.org/doc/html/rfc69
 
 ## Dry Run
 
-In dry-run mode, patches are computed but not written to disk. If `--diff` is enabled, a colored unified diff showing the before/after is displayed.
+In dry-run mode, patches are computed but not written to disk. Run [`loom diff`](/reference/cli-diff) to see a colored unified diff of the before/after.

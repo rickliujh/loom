@@ -25,3 +25,13 @@ func Failuref(w io.Writer, format string, args ...any) {
 	}
 	fmt.Fprintf(w, "%s %s\n", cross, fmt.Sprintf(format, args...))
 }
+
+// Warningf writes a "⚠"-prefixed warning line to w, colored amber when w is a
+// terminal. Used for standalone notices that are not log records.
+func Warningf(w io.Writer, format string, args ...any) {
+	warn := "⚠"
+	if isTerminal(w) {
+		warn = colorWarn + "⚠" + colorReset
+	}
+	fmt.Fprintf(w, "%s %s\n", warn, fmt.Sprintf(format, args...))
+}

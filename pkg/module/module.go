@@ -163,6 +163,7 @@ func evalParamCommand(name, command, moduleDir string, logger *slog.Logger) (str
 func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.ExecutionContext {
 	return &action.ExecutionContext{
 		ModuleName:  m.Config.Metadata.Name,
+		ModulePath:  append([]string(nil), opts.ModulePath...),
 		ModuleDir:   m.Dir,
 		TargetDir:   targetDir,
 		TargetLabel: m.targetLabel(targetDir),

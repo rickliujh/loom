@@ -130,6 +130,11 @@ func diffHeader(module, target string, color bool) string {
 type ExecutionContext struct {
 	// ModuleName is the metadata.name of the executing module.
 	ModuleName string
+	// ModulePath is the instance breadcrumb from the run's root down to this
+	// module (root instance name … this instance name). In a bulk run every item
+	// shares one ModuleName, so this is what tells their diffs apart. It heads
+	// each collected diff; may be empty for a directly-constructed context.
+	ModulePath []string
 	// ModuleDir is the path to the module directory containing loom.yaml.
 	ModuleDir string
 	// TargetDir is the path to the target repository working directory.

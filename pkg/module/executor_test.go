@@ -68,7 +68,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 		Params: map[string]string{"env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 		Params: map[string]string{"repoPath": bare},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 		Params: map[string]string{"env": "prod"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 		Params: map[string]string{"repoPath": bare, "env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestResolveChildTarget_UsesModuleResolvedParams(t *testing.T) {
 		},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent", &RunOptions{})
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent", &RunOptions{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +981,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 	}
 
 	opts := &RunOptions{LocalRun: true, TargetPath: targetPath}
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", opts)
+	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", opts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1010,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	dir2, _, err := resolveChildTarget(context.Background(), childMod2, "/parent/target", opts)
+	dir2, _, err := resolveChildTarget(context.Background(), childMod2, "/parent/target", opts, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1218,5 +1218,91 @@ func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
 	}
 	if ctx.ModuleName != "my-module" {
 		t.Errorf("expected ModuleName my-module, got %q", ctx.ModuleName)
+	}
+}
+
+func TestNewExecutionContext_PropagatesModulePath(t *testing.T) {
+	mod := &Module{
+		Config: &config.LoomFile{Metadata: config.Metadata{Name: "leaf"}, Spec: config.Spec{}},
+		Params: map[string]string{},
+		Logger: testLogger(),
+	}
+
+	ctx := mod.NewExecutionContext("/target", RunOptions{ModulePath: []string{"root", "leaf"}})
+	if strings.Join(ctx.ModulePath, "/") != "root/leaf" {
+		t.Errorf("expected breadcrumb [root leaf], got %v", ctx.ModulePath)
+	}
+}
+
+// The breadcrumb registry maps each local clone dir to the instance path of the
+// module that cloned into it — root name → child instance name — so full-mode
+// diff can tell one bulk item's changes from another's, which the shared
+// metadata name cannot.
+func TestExecute_LocalRun_DirLabelsRecordBreadcrumb(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both items share one source, so both clone dirs derive from metadata name
+	// "patch-repo"; only the breadcrumb's instance segment tells them apart.
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: patch-repo
+spec:
+  target:
+    url: `+bare+`
+  operations:
+    - name: noop
+      shell:
+        command: "true"
+        pure: true
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: bulk-patch
+spec:
+  modules:
+    - name: patch-repo-a
+      source: ./child
+    - name: patch-repo-b
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// DirLabels is shared by value-copy through child dispatch, so registrations
+	// during Execute land back in this map.
+	opts := RunOptions{LocalRun: true, TargetPath: targetPath, DirLabels: map[string][]string{}}
+	if err := Execute(context.Background(), mod, parentDir, opts); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	want := map[string]string{
+		filepath.Join(targetPath, "00-patch-repo"): "bulk-patch › patch-repo-a",
+		filepath.Join(targetPath, "01-patch-repo"): "bulk-patch › patch-repo-b",
+	}
+	for dir, crumb := range want {
+		got, ok := opts.DirLabels[dir]
+		if !ok {
+			t.Errorf("no breadcrumb recorded for %s; have %v", dir, opts.DirLabels)
+			continue
+		}
+		if strings.Join(got, " › ") != crumb {
+			t.Errorf("dir %s: got breadcrumb %v, want %q", dir, got, crumb)
+		}
 	}
 }

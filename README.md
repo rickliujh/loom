@@ -100,6 +100,7 @@ apiVersion: loom.rickliujh.github.io/v1beta1
 kind: Loom
 metadata:
   name: onboard-service
+  description: "Onboard {{ .serviceName }} to the gitops repo"
 spec:
   params:
     - name: serviceName
@@ -185,7 +186,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
 | `default` | Fallback value if the command fails |
-| `description` | Optional explanation of the param. Documentary only — dynamic params are never prompted. |
+| `description` | Optional explanation of the param. Documentary; templatable with resolved params (unlike `params[].description`). Dynamic params are never prompted. |
 
 ```yaml
 dynamicParams:
@@ -281,6 +282,7 @@ Child modules to execute before this module's operations. This is how you compos
 |-------|-------------|
 | `name` | Identifier for the child module |
 | `source` | Path to the child module — local (`./sub-module`) or a Git URL |
+| `description` | Optional note on why this child is composed in. Documentary; templatable with the parent's params. |
 | `params` | Parameters to pass down, rendered through the parent's context |
 
 Child modules execute first, in order. Then the parent's operations run. This lets you build layered workflows: a base module that creates the namespace, a service module that creates the ArgoCD app, a policy module that adds the Gatekeeper constraint — all composed from a single root module.
@@ -673,6 +675,7 @@ spec:
   modules:
     - name: base-infra
       source: "./modules/base-infra"
+      description: "Shared namespace + RBAC for {{ .serviceName }}"
       params:
         namespace: "{{ .namespace }}"
 

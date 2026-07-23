@@ -134,6 +134,36 @@ func TestPromptMissingRequired_ErrorPropagates(t *testing.T) {
 	}
 }
 
+// T4: metadata.description is templated with the module's resolved params.
+// (The reflection-based TestSpecT4 walks spec.* only, so metadata is covered here.)
+func TestLoad_MetadataDescriptionTemplated(t *testing.T) {
+	write := func(t *testing.T, desc string) string {
+		t.Helper()
+		dir := t.TempDir()
+		content := "apiVersion: " + config.ExpectedAPIVersion + "\n" +
+			"kind: " + config.ExpectedKind + "\n" +
+			"metadata:\n  name: t4meta\n  description: \"" + desc + "\"\n" +
+			"spec:\n  params:\n    - name: env\n      default: staging\n"
+		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	mod, err := Load(write(t, "runs for {{ .env }}"), nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mod.Config.Metadata.Description; got != "runs for staging" {
+		t.Errorf("expected rendered description, got %q", got)
+	}
+
+	// A malformed template surfaces an error (T4).
+	if _, err := Load(write(t, "{{ .env"), nil, testLogger()); err == nil {
+		t.Fatal("expected template error for malformed metadata.description")
+	}
+}
+
 // P3: Undeclared params provided via CLI are rejected.
 func TestResolveParams_UndeclaredParamRejected(t *testing.T) {
 	declared := []config.ParamDef{

@@ -11,6 +11,7 @@ apiVersion: loom.rickliujh.github.io/v1beta1  # required, exact match
 kind: Loom                                      # required, exact match
 metadata:
   name: <string>                                # required, unique identifier
+  description: <string>                           # optional, documentary; templatable
 spec:
   params: [...]
   dynamicParams: [...]
@@ -160,6 +161,11 @@ params:
 # missing → error: required parameter "env" not provided: Target environment (staging|production)
 ```
 
+**Templating of descriptions follows T4** — every field that is not a `spec.params` definition is templatable:
+
+- `params[].description` is **not** templated. Like the other `spec.params` fields it is the source layer, and it is surfaced before params resolve (in the missing-required error and interactive prompt), so it is shown verbatim.
+- `dynamicParams[].description`, `metadata.description`, and `modules[].description` **are** templated with resolved params (the parent's params for `modules[].description`, per M4), rendered in place during load. See T4.
+
 #### P8: Missing required static params can be prompted interactively
 
 By default a missing required static param fails fast (P1/P7). When the **root** module is run with `--interactive` (`-i`), each required static param that is neither provided nor has a default is prompted for on stdin, using its name and `description`; the typed value is used as if it had been supplied via `--param`. Prompting is scoped to:
@@ -254,14 +260,15 @@ app/__serviceName__/deploy.yaml
 
 #### T4: What is templatable
 
-Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required — these are the source of template values and cannot reference themselves). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
+Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required, and descriptions — these are the source of template values and cannot reference themselves; `params[].description` is additionally consumed before resolution, per P7). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
 
 Exhaustive list of templatable fields:
 
+- `metadata.description`
 - `spec.excludes[]`, `spec.includes[]`
-- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
+- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`, `spec.dynamicParams[].description`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].description`, `spec.modules[].params` values
 - `spec.modules[].if`, `operations[].if`
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
@@ -364,6 +371,7 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 |-------|-------------|
 | `modules[].name` | Required. Unique identifier for the child. |
 | `modules[].source` | Required. Local path or git URL to the child module directory. |
+| `modules[].description` | Optional. Human-readable note on why this child is composed in. Documentary; templatable with the parent's params. |
 | `modules[].params` | Optional. `map[string]string` of params to pass to the child. Values are templatable with the parent's params. |
 | `modules[].if` | Optional. Shell predicate gating the child. Templatable. See [Conditional Execution](#conditional-execution-if). |
 

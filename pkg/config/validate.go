@@ -109,6 +109,13 @@ func validate(lf *LoomFile, moduleDir string) error {
 		paramNames[dp.Name] = true
 	}
 
+	// Descriptions are documentary but templatable (except params[].description),
+	// rendered after all params resolve, so they may reference any declared param.
+	checkTmpl("metadata.description", lf.Metadata.Description)
+	for _, dp := range lf.Spec.DynamicParams {
+		checkTmpl(fmt.Sprintf("dynamicParam %q description", dp.Name), dp.Description)
+	}
+
 	for i, e := range lf.Spec.Excludes {
 		checkTmpl(fmt.Sprintf("spec.excludes[%d]", i), e)
 	}
@@ -140,6 +147,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 		}
 		checkTmpl(fmt.Sprintf("module %q name", m.Name), m.Name)
 		checkTmpl(fmt.Sprintf("module %q source", m.Name), m.Source)
+		checkTmpl(fmt.Sprintf("module %q description", m.Name), m.Description)
 		checkTmpl(fmt.Sprintf("module %q if", m.Name), m.If)
 		paramKeys := make([]string, 0, len(m.Params))
 		for k := range m.Params {

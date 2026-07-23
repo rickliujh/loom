@@ -60,6 +60,14 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger, opt
 		return nil, fmt.Errorf("resolving dynamic params for %s: %w", cfg.Metadata.Name, err)
 	}
 
+	// Descriptions are documentary but templatable (T4), except params[].description
+	// which is consumed before resolution. Render them in place with the fully
+	// resolved params. modules[].description is rendered later with the parent's
+	// params, in the executor.
+	if err := renderDescriptions(cfg, params); err != nil {
+		return nil, fmt.Errorf("module %s: %w", cfg.Metadata.Name, err)
+	}
+
 	// T4: exclude/include patterns are templatable with resolved params.
 	if err := renderPatterns("excludes", cfg.Spec.Excludes, params); err != nil {
 		return nil, fmt.Errorf("module %s: %w", cfg.Metadata.Name, err)
@@ -74,6 +82,33 @@ func Load(dir string, providedParams map[string]string, logger *slog.Logger, opt
 		Params: params,
 		Logger: logger.With(prettylog.KeyModule, cfg.Metadata.Name),
 	}, nil
+}
+
+// renderDescriptions templates the module's own description fields in place with
+// the resolved params: metadata.description and each dynamicParams[].description.
+// params[].description is intentionally excluded — it is documentary metadata
+// shown before params resolve (P7). modules[].description renders separately in
+// the executor with the parent's params.
+func renderDescriptions(cfg *config.LoomFile, params map[string]string) error {
+	if cfg.Metadata.Description != "" {
+		rendered, err := tmpl.RenderString(cfg.Metadata.Description, params)
+		if err != nil {
+			return fmt.Errorf("rendering metadata.description: %w", err)
+		}
+		cfg.Metadata.Description = rendered
+	}
+	for i := range cfg.Spec.DynamicParams {
+		dp := &cfg.Spec.DynamicParams[i]
+		if dp.Description == "" {
+			continue
+		}
+		rendered, err := tmpl.RenderString(dp.Description, params)
+		if err != nil {
+			return fmt.Errorf("rendering dynamicParams[%d].description: %w", i, err)
+		}
+		dp.Description = rendered
+	}
+	return nil
 }
 
 // renderPatterns templates each glob pattern in place with the resolved params.

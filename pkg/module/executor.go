@@ -81,6 +81,17 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		// source resolution and Load attributes the child's setup logs (dynamic
 		// params, target clone) to the instance too, not to the parent.
 		childLogger := mod.Logger.With(prettylog.KeyModule, childName)
+
+		// The reference's optional description renders with the parent's params
+		// (M4), same context as name/source/params. Documentary — surfaced at
+		// debug level so a `--verbose` run shows why the child is composed in.
+		if childRef.Description != "" {
+			desc, err := tmpl.RenderString(childRef.Description, mod.Params)
+			if err != nil {
+				return fmt.Errorf("rendering description for child module %q: %w", childName, err)
+			}
+			childLogger.Debug("module description", "description", desc)
+		}
 		// The orchestrator announces each dispatch, so the batch header carries
 		// the root chip and names the item it is handing off to; the child's own
 		// lines that follow carry the child chip.

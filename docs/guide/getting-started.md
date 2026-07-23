@@ -58,6 +58,7 @@ apiVersion: loom.rickliujh.github.io/v1beta1
 kind: Loom
 metadata:
   name: onboard-service
+  description: "Onboard {{ .serviceName }} to the gitops repo"
 spec:
   params:
     - name: serviceName

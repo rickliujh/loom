@@ -32,11 +32,10 @@ import (
 // t4Exempt maps "<case>/<field path>" to the reason the field is allowed to
 // bypass template rendering.
 var t4Exempt = map[string]string{
-	"load/Params.[0].Name":               "T4 exception: static param definitions are the source of template values",
-	"load/Params.[0].Default":            "T4 exception: static param definitions are the source of template values",
-	"load/Params.[0].Description":        "param descriptions are documentary metadata, never rendered",
-	"load/DynamicParams.[0].Name":        "param names are identifiers, not templatable values",
-	"load/DynamicParams.[0].Description": "param descriptions are documentary metadata, never rendered",
+	"load/Params.[0].Name":        "T4 exception: static param definitions are the source of template values",
+	"load/Params.[0].Default":     "T4 exception: static param definitions are the source of template values",
+	"load/Params.[0].Description": "params[].description is documentary and consumed before resolution (P7), so it is not templated",
+	"load/DynamicParams.[0].Name": "param names are identifiers, not templatable values",
 }
 
 // writeLoomSpec marshals a LoomFile around spec and writes it as loom.yaml in dir.

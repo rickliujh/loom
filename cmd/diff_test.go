@@ -233,6 +233,82 @@ spec:
 	}
 }
 
+// A bulk run fans one child source out to several items that share a metadata
+// name, so each item's diff must be headed by its unique instance breadcrumb
+// (root name › item name) plus its own repo — otherwise the diffs are
+// indistinguishable. This guards the whole full-mode path: the executor records
+// each clone dir's breadcrumb, and the header reads it back.
+func TestDiff_BulkItemsHeadedByInstanceBreadcrumb(t *testing.T) {
+	resetFlags()
+
+	repoA := t.TempDir()
+	initGitRepoBranch(t, repoA, "main", map[string]string{"f.txt": "alpha\n"})
+	repoB := t.TempDir()
+	initGitRepoBranch(t, repoB, "main", map[string]string{"f.txt": "beta\n"})
+
+	moduleDir := t.TempDir()
+	childDir := filepath.Join(moduleDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: patch
+spec:
+  params:
+    - name: repo
+      required: true
+  target:
+    url: "{{ .repo }}"
+    branch: main
+  operations:
+    - name: edit
+      shell:
+        command: "printf 'CHANGED\n' > f.txt"
+        pure: true
+`)
+	writeLoomYAML(t, moduleDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: bulk-demo
+spec:
+  modules:
+    - name: patch-alpha
+      source: ./child
+      params:
+        repo: "file://`+repoA+`"
+    - name: patch-beta
+      source: ./child
+      params:
+        repo: "file://`+repoB+`"
+  operations: []
+`)
+
+	out := captureStdout(t, func() {
+		rootCmd.SetArgs([]string{"diff", moduleDir})
+		if err := rootCmd.Execute(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	// Each item's header carries the root marker, its own instance name, and its
+	// own repo — so the two diffs can be told apart.
+	for _, want := range []string{
+		"≡ bulk-demo ≡", "patch-alpha", "patch-beta", repoA, repoB,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in bulk diff, got:\n%s", want, out)
+		}
+	}
+	// The shared metadata name "patch" must not stand in as the header identity.
+	if strings.Contains(out, "[patch]") || strings.Contains(out, "≡ patch ≡") {
+		t.Errorf("bulk diff headed by shared metadata name instead of instance breadcrumb:\n%s", out)
+	}
+}
+
 // DF3: full mode cleans up its temp workspace when --target-path is not given,
 // and keeps a caller-supplied --target-path for inspection.
 func TestDiff_DF3_WorkspaceCleanupAndKeep(t *testing.T) {

@@ -137,6 +137,9 @@ func runDiffFull(ctx context.Context, source string, paramMap map[string]string,
 		TargetPath: workspace,
 		GitAuthor:  author,
 		GitEmail:   email,
+		// Full mode reads changes back from the numbered clone dirs, so it needs
+		// the executor to record which module (and bulk item) each dir belongs to.
+		DirLabels: map[string][]string{},
 	}
 
 	mod, targetDir, cleanup, err := resolveModuleAndTarget(ctx, source, paramMap, &opts, logger)
@@ -147,10 +150,10 @@ func runDiffFull(ctx context.Context, source string, paramMap map[string]string,
 
 	execErr := module.Execute(ctx, mod, targetDir, opts)
 	if execErr != nil {
-		return reportDiffFailure(execErr, func() { printTargetDiffs(workspace, os.Stdout) })
+		return reportDiffFailure(execErr, func() { printTargetDiffs(workspace, os.Stdout, opts.DirLabels) })
 	}
 
-	n, diffErr := printTargetDiffs(workspace, os.Stdout)
+	n, diffErr := printTargetDiffs(workspace, os.Stdout, opts.DirLabels)
 	if diffErr != nil {
 		return diffErr
 	}
@@ -182,8 +185,10 @@ func reportDiffFailure(execErr error, printDiffs func()) error {
 // printTargetDiffs writes a git diff for every git repo found directly under
 // root (and root itself, if it is a repo), against each repo's base branch.
 // It stages all changes first so newly created files appear in the diff.
+// dirLabels maps a clone dir to the breadcrumb of the module that produced it,
+// so each diff is headed by the same module/item identity quick mode shows.
 // Returns the number of repos that had changes.
-func printTargetDiffs(root string, w io.Writer) (int, error) {
+func printTargetDiffs(root string, w io.Writer, dirLabels map[string][]string) (int, error) {
 	repos := gitRepoDirs(root)
 	color := isTerminalWriter(w)
 	colorFlag := "--color=never"
@@ -205,7 +210,7 @@ func printTargetDiffs(root string, w io.Writer) (int, error) {
 			continue
 		}
 		changed++
-		fmt.Fprint(w, targetDiffHeader(dir, base, color))
+		fmt.Fprint(w, targetDiffHeader(dir, base, dirLabels, color))
 		fmt.Fprint(w, out)
 		if !strings.HasSuffix(out, "\n") {
 			fmt.Fprintln(w)
@@ -215,10 +220,16 @@ func printTargetDiffs(root string, w io.Writer) (int, error) {
 }
 
 // targetDiffHeader renders the "which module / which repo" banner above a
-// target's git diff: the module name (from the numbered clone dir), the origin
-// remote URL, and the base branch — all read from the clone itself.
-func targetDiffHeader(dir, base string, color bool) string {
-	module := moduleFromDir(filepath.Base(dir))
+// target's git diff: the module's instance breadcrumb (recorded when the clone
+// was made, so a bulk item keeps its unique instance name), the origin remote
+// URL, and the base branch — read from the clone itself.
+func targetDiffHeader(dir, base string, dirLabels map[string][]string, color bool) string {
+	breadcrumb, ok := dirLabels[dir]
+	if !ok {
+		// No recorded breadcrumb (e.g. a repo that predates this run): fall back
+		// to the module name carried in the numbered clone dir.
+		breadcrumb = []string{moduleFromDir(filepath.Base(dir))}
+	}
 	branch := strings.TrimPrefix(base, "refs/remotes/origin/")
 	repo := ""
 	if url, err := runGit(dir, "remote", "get-url", "origin"); err == nil {
@@ -231,7 +242,7 @@ func targetDiffHeader(dir, base string, color bool) string {
 			repo = branch
 		}
 	}
-	return diffHeaderLine(module, repo, color)
+	return action.DiffHeader(breadcrumb, repo, color)
 }
 
 // moduleFromDir strips the "NN-" execution-order prefix local mode adds to a
@@ -245,37 +256,6 @@ func moduleFromDir(name string) string {
 		return name[i+1:]
 	}
 	return name
-}
-
-// diffHeaderLine renders a module/target banner matching the quick-mode diff
-// header: an inverted module chip followed by a muted target label.
-func diffHeaderLine(module, target string, color bool) string {
-	var b strings.Builder
-	b.WriteByte('\n')
-	switch {
-	case !color:
-		if module != "" {
-			b.WriteString("[" + module + "]")
-		}
-		if target != "" {
-			if module != "" {
-				b.WriteByte(' ')
-			}
-			b.WriteString(target)
-		}
-	default:
-		if module != "" {
-			b.WriteString("\033[7m " + module + " \033[0m")
-		}
-		if target != "" {
-			if module != "" {
-				b.WriteByte(' ')
-			}
-			b.WriteString("\033[38;5;244m" + target + "\033[0m")
-		}
-	}
-	b.WriteByte('\n')
-	return b.String()
 }
 
 // gitRepoDirs returns root (if a git repo) followed by its immediate git-repo

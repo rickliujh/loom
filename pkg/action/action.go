@@ -100,6 +100,12 @@ func (c *DiffCollector) Print(w io.Writer) {
 
 		if len(segs) > 1 {
 			turn := segs[0] + "\x00" + segs[1]
+			// A blank line sets every header block apart from the diff above it, so
+			// a breadcrumb sitting between two diffs stays visible — not just the
+			// turn banner, but a submodule hand-off or a bare target change too.
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, "\n")
+			}
 			if i == 0 || turn != lastTurn {
 				fmt.Fprint(w, diffTurnBanner(segs[0], segs[1], color))
 			}
@@ -132,7 +138,7 @@ func (c *DiffCollector) Print(w io.Writer) {
 func DiffHeader(breadcrumb []string, target string, color bool) string {
 	segs := nonEmptySegs(breadcrumb)
 	if len(segs) > 1 {
-		return diffTurnBanner(segs[0], segs[1], color) +
+		return "\n" + diffTurnBanner(segs[0], segs[1], color) +
 			diffHandoffChain(segs, color) +
 			diffTargetLine(target, color)
 	}
@@ -163,17 +169,16 @@ func DiffHeader(breadcrumb []string, target string, color bool) string {
 	return b.String()
 }
 
-// diffTurnBanner heads one bulk turn: a leading blank line, then the root module
-// as an inverted "≡ … ≡" chip (mirroring the log's root section header) followed
-// by the turn's instance name in bold. This is the anchor the eye lands on, so
-// turn boundaries stand out in a long batch.
+// diffTurnBanner heads one bulk turn: the root module as an inverted "≡ … ≡" chip
+// (mirroring the log's root section header) followed by the turn's instance name
+// in bold. This is the anchor the eye lands on, so turn boundaries stand out in a
+// long batch. Callers put the separating blank line above the whole header block.
 func diffTurnBanner(root, turn string, color bool) string {
 	if color {
-		return "\n" +
-			diffColorInvert + diffColorRoot + diffColorBold + " ≡ " + root + " ≡ " + diffColorReset +
+		return diffColorInvert + diffColorRoot + diffColorBold + " ≡ " + root + " ≡ " + diffColorReset +
 			" " + diffColorBold + turn + diffColorReset + "\n"
 	}
-	return "\n[≡ " + root + " ≡] " + turn + "\n"
+	return "[≡ " + root + " ≡] " + turn + "\n"
 }
 
 // diffHandoffChain renders the submodule hand-off lines beneath a turn banner:

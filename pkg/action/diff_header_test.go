@@ -113,4 +113,9 @@ func TestDiffCollector_BannerOncePerTurnHandoffPerSubmodule(t *testing.T) {
 			t.Errorf("expected hand-off %q, got:\n%s", want, out)
 		}
 	}
+	// Every header block is set off from the diff above it by a blank line, so a
+	// breadcrumb between two diffs stays visible — the within-turn submodule too.
+	if !strings.Contains(out, "\n\n▸ deploy-1 › ingress") {
+		t.Errorf("expected a blank line before the within-turn submodule header, got:\n%s", out)
+	}
 }

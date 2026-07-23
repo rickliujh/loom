@@ -44,8 +44,7 @@ func TestDiffHeader_ColorTurnBannerAndHandoff(t *testing.T) {
 	want := "\n" +
 		diffColorInvert + diffColorRoot + diffColorBold + " ≡ deps-bump ≡ " + diffColorReset +
 		" " + diffColorBold + "service-a" + diffColorReset + "\n" +
-		diffColorWorker + "▸ " + diffColorReset +
-		diffColorMuted + "service-a › " + diffColorReset +
+		diffColorWorker + "▸ service-a › " + diffColorReset +
 		diffColorBold + "autocert" + diffColorReset + "\n" +
 		diffColorMuted + "acme/service-a" + diffColorReset + "\n"
 	if got != want {

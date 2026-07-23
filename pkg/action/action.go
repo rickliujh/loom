@@ -78,37 +78,63 @@ func (c *DiffCollector) Add(breadcrumb []string, target, diff string) {
 }
 
 // Print writes all collected diffs to w, colorized when w is a terminal.
-// A breadcrumb/target header is written before each diff (deduplicated across a
-// run of diffs from the same module and target). Nothing is written when the
+//
+// A fanned-out run (breadcrumb longer than one segment — a bulk item or a nested
+// child) is grouped like the run log announces a dispatch: an inverted root chip
+// banner naming the turn is written once per turn, a "▸ parent › child" hand-off
+// once per submodule path beneath it, and the target line once per repo. So a
+// batch reads as clearly-topped blocks instead of one flat wall, and the root is
+// not repeated inside a turn. A single-module run keeps its plain chip + target
+// header (deduplicated per target), unchanged. Nothing is written when the
 // collector is nil or empty.
 func (c *DiffCollector) Print(w io.Writer) {
 	if c == nil || len(c.entries) == 0 {
 		return
 	}
 	color := isTerminalWriter(w)
-	var lastKey string
+	var lastTurn, lastCrumb, lastKey string
 	for i, e := range c.entries {
-		key := strings.Join(e.breadcrumb, "\x00") + "\x00" + e.target
-		if i == 0 || key != lastKey {
-			fmt.Fprint(w, DiffHeader(e.breadcrumb, e.target, color))
-			lastKey = key
+		segs := nonEmptySegs(e.breadcrumb)
+		crumb := strings.Join(segs, "\x00")
+		key := crumb + "\x00" + e.target
+
+		if len(segs) > 1 {
+			turn := segs[0] + "\x00" + segs[1]
+			if i == 0 || turn != lastTurn {
+				fmt.Fprint(w, diffTurnBanner(segs[0], segs[1], color))
+			}
+			if i == 0 || crumb != lastCrumb {
+				fmt.Fprint(w, diffHandoffChain(segs, color))
+			}
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, diffTargetLine(e.target, color))
+			}
+			lastTurn = turn
+		} else {
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, DiffHeader(segs, e.target, color))
+			}
+			lastTurn = ""
 		}
+
+		lastCrumb, lastKey = crumb, key
 		fmt.Fprint(w, colorizeDiff(e.text, color))
 	}
 }
 
-// DiffHeader renders the "which module / which repo" banner shown above a diff.
-// The breadcrumb's root segment is an inverted chip; when the run fanned out to
-// children it is wrapped in "≡ … ≡" to match the log's root marker, and the
-// remaining instance names trail after it in muted " › " steps. The target (the
-// repo URL and branch) sits on its own line beneath, so a long breadcrumb never
-// crowds it. Returns just a leading blank line when there is no context to show.
+// DiffHeader renders the whole "which module / which repo" banner above a diff.
+// A single-module run (a one-segment breadcrumb) gets a plain inverted chip with
+// the target on its own line beneath — unchanged. A fanned-out run gets the
+// run-log dispatch header: a root-chip turn banner, a "▸ parent › child" hand-off
+// for each submodule step, then the target. Returns just a leading blank line
+// when there is no context to show. DiffCollector.Print composes the same pieces
+// selectively so a shared banner is not repeated across a turn's diffs.
 func DiffHeader(breadcrumb []string, target string, color bool) string {
-	segs := make([]string, 0, len(breadcrumb))
-	for _, s := range breadcrumb {
-		if s != "" {
-			segs = append(segs, s)
-		}
+	segs := nonEmptySegs(breadcrumb)
+	if len(segs) > 1 {
+		return diffTurnBanner(segs[0], segs[1], color) +
+			diffHandoffChain(segs, color) +
+			diffTargetLine(target, color)
 	}
 	if len(segs) == 0 && target == "" {
 		return "\n"
@@ -116,26 +142,15 @@ func DiffHeader(breadcrumb []string, target string, color bool) string {
 
 	var b strings.Builder
 	b.WriteByte('\n')
-	if len(segs) > 0 {
-		root, rest := segs[0], segs[1:]
-		rootLabel := root
-		if len(rest) > 0 {
-			rootLabel = "≡ " + root + " ≡"
-		}
+	if len(segs) == 1 {
 		if color {
-			b.WriteString(diffColorInvert + " " + rootLabel + " " + diffColorReset)
-			for _, s := range rest {
-				b.WriteString(diffColorMuted + " › " + s + diffColorReset)
-			}
+			b.WriteString(diffColorInvert + " " + segs[0] + " " + diffColorReset)
 		} else {
-			b.WriteString("[" + rootLabel + "]")
-			for _, s := range rest {
-				b.WriteString(" › " + s)
-			}
+			b.WriteString("[" + segs[0] + "]")
 		}
 	}
 	if target != "" {
-		if len(segs) > 0 {
+		if len(segs) == 1 {
 			b.WriteByte('\n')
 		}
 		if color {
@@ -146,6 +161,63 @@ func DiffHeader(breadcrumb []string, target string, color bool) string {
 	}
 	b.WriteByte('\n')
 	return b.String()
+}
+
+// diffTurnBanner heads one bulk turn: a leading blank line, then the root module
+// as an inverted "≡ … ≡" chip (mirroring the log's root section header) followed
+// by the turn's instance name in bold. This is the anchor the eye lands on, so
+// turn boundaries stand out in a long batch.
+func diffTurnBanner(root, turn string, color bool) string {
+	if color {
+		return "\n" +
+			diffColorInvert + diffColorRoot + diffColorBold + " ≡ " + root + " ≡ " + diffColorReset +
+			" " + diffColorBold + turn + diffColorReset + "\n"
+	}
+	return "\n[≡ " + root + " ≡] " + turn + "\n"
+}
+
+// diffHandoffChain renders the submodule hand-off lines beneath a turn banner:
+// one "▸ parent › child" per descent step from the turn down to the leaf, the
+// run log's nested-dispatch form — no root chip, so headers inside a turn read
+// lighter. Empty when the breadcrumb stops at the turn (no submodule).
+func diffHandoffChain(segs []string, color bool) string {
+	var b strings.Builder
+	for i := 1; i+1 < len(segs); i++ {
+		parent, child := segs[i], segs[i+1]
+		if color {
+			b.WriteString(diffColorWorker + "▸ " + diffColorReset +
+				diffColorMuted + parent + " › " + diffColorReset +
+				diffColorBold + child + diffColorReset + "\n")
+		} else {
+			b.WriteString("▸ " + parent + " › " + child + "\n")
+		}
+	}
+	return b.String()
+}
+
+// diffTargetLine renders the target (repo URL and branch) on its own muted line
+// beneath the header, so a long breadcrumb never crowds it. Empty when there is
+// no target to name.
+func diffTargetLine(target string, color bool) string {
+	if target == "" {
+		return ""
+	}
+	if color {
+		return diffColorMuted + target + diffColorReset + "\n"
+	}
+	return target + "\n"
+}
+
+// nonEmptySegs drops empty breadcrumb segments so a defensive blank never
+// produces a stray "› " step or an empty chip.
+func nonEmptySegs(breadcrumb []string) []string {
+	segs := make([]string, 0, len(breadcrumb))
+	for _, s := range breadcrumb {
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	return segs
 }
 
 // ExecutionContext holds runtime state shared across actions.

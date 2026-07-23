@@ -11,11 +11,14 @@ import (
 // ANSI color codes for diff output.
 const (
 	diffColorReset  = "\033[0m"
+	diffColorBold   = "\033[1m"
 	diffColorRed    = "\033[31m"
 	diffColorGreen  = "\033[32m"
 	diffColorCyan   = "\033[36m"
 	diffColorInvert = "\033[7m"
 	diffColorMuted  = "\033[38;5;244m" // mid gray — matches the log handler's muted tone
+	diffColorRoot   = "\033[38;5;61m"  // muted indigo — the orchestrator chip (log's root color)
+	diffColorWorker = "\033[38;5;66m"  // slate teal — the hand-off marker (log's worker color)
 )
 
 // printDiff computes a unified diff between old and new content and hands it to

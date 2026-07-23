@@ -16,23 +16,38 @@ func TestDiffHeader_SingleModuleIsPlainChip(t *testing.T) {
 	}
 }
 
-func TestDiffHeader_BulkItemShowsRootMarkerAndCrumb(t *testing.T) {
-	// Two segments = the orchestrator fanned out: the root is wrapped in "≡ … ≡"
-	// and the item's instance name trails after it, so two items with the same
-	// metadata name are told apart.
+func TestDiffHeader_BulkTurnBannerNamesRootAndItem(t *testing.T) {
+	// Two segments = the orchestrator fanned out: the root becomes an inverted
+	// "≡ … ≡" turn banner and the item's instance name follows it, so two items
+	// with the same metadata name are told apart. No submodule, so no hand-off.
 	got := DiffHeader([]string{"deps-bump", "patch-go-mod-service-a"}, "github.com/acme/service-a (main)", false)
-	want := "\n[≡ deps-bump ≡] › patch-go-mod-service-a\ngithub.com/acme/service-a (main)\n"
+	want := "\n[≡ deps-bump ≡] patch-go-mod-service-a\ngithub.com/acme/service-a (main)\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
-func TestDiffHeader_ColorRootChipThenMutedCrumb(t *testing.T) {
-	got := DiffHeader([]string{"deps-bump", "service-a"}, "acme/service-a", true)
+func TestDiffHeader_SubmoduleGetsRootFreeHandoff(t *testing.T) {
+	// Three segments = a submodule under a bulk turn: the turn banner names the
+	// root and item, then a "▸ item › submodule" hand-off with no root chip.
+	got := DiffHeader([]string{"bulk-deploy-k8s", "deploy-k8s-2", "autocert"}, "acme/cluster-2 (main)", false)
+	want := "\n[≡ bulk-deploy-k8s ≡] deploy-k8s-2\n" +
+		"▸ deploy-k8s-2 › autocert\n" +
+		"acme/cluster-2 (main)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestDiffHeader_ColorTurnBannerAndHandoff(t *testing.T) {
+	got := DiffHeader([]string{"deps-bump", "service-a", "autocert"}, "acme/service-a", true)
 	want := "\n" +
-		diffColorInvert + " ≡ deps-bump ≡ " + diffColorReset +
-		diffColorMuted + " › service-a" + diffColorReset +
-		"\n" + diffColorMuted + "acme/service-a" + diffColorReset + "\n"
+		diffColorInvert + diffColorRoot + diffColorBold + " ≡ deps-bump ≡ " + diffColorReset +
+		" " + diffColorBold + "service-a" + diffColorReset + "\n" +
+		diffColorWorker + "▸ " + diffColorReset +
+		diffColorMuted + "service-a › " + diffColorReset +
+		diffColorBold + "autocert" + diffColorReset + "\n" +
+		diffColorMuted + "acme/service-a" + diffColorReset + "\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -45,9 +60,10 @@ func TestDiffHeader_EmptyIsBlankLine(t *testing.T) {
 }
 
 func TestDiffHeader_SkipsEmptySegments(t *testing.T) {
-	// Defensive: empty breadcrumb segments must not produce empty "› " steps.
+	// Defensive: empty breadcrumb segments must not produce an empty chip or a
+	// stray "▸ › " step. ["root", "", "leaf"] collapses to a two-segment turn.
 	got := DiffHeader([]string{"root", "", "leaf"}, "", false)
-	want := "\n[≡ root ≡] › leaf\n"
+	want := "\n[≡ root ≡] leaf\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -68,5 +84,33 @@ func TestDiffCollector_HeaderDedupedPerBreadcrumbAndTarget(t *testing.T) {
 	}
 	if !strings.Contains(out, "item-b") || !strings.Contains(out, "repo-b") {
 		t.Errorf("expected item-b header, got:\n%s", out)
+	}
+}
+
+func TestDiffCollector_BannerOncePerTurnHandoffPerSubmodule(t *testing.T) {
+	// One turn with two submodules, then a second turn: the root chip banner
+	// prints once per turn, the "▸" hand-off once per submodule, and the root is
+	// never repeated inside a turn.
+	c := &DiffCollector{}
+	c.Add([]string{"bulk-deploy", "deploy-1", "autocert"}, "cluster-1", "--- a\n+++ b\n")
+	c.Add([]string{"bulk-deploy", "deploy-1", "ingress"}, "cluster-1", "--- c\n+++ d\n")
+	c.Add([]string{"bulk-deploy", "deploy-2", "autocert"}, "cluster-2", "--- e\n+++ f\n")
+
+	var b bytes.Buffer
+	c.Print(&b)
+	out := b.String()
+
+	if n := strings.Count(out, "≡ bulk-deploy ≡"); n != 2 {
+		t.Errorf("expected root banner once per turn (2), got %d:\n%s", n, out)
+	}
+	if n := strings.Count(out, "deploy-1"); n != 3 { // banner + two hand-offs name the turn
+		t.Errorf("expected deploy-1 named 3 times, got %d:\n%s", n, out)
+	}
+	for _, want := range []string{
+		"▸ deploy-1 › autocert", "▸ deploy-1 › ingress", "▸ deploy-2 › autocert",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected hand-off %q, got:\n%s", want, out)
+		}
 	}
 }

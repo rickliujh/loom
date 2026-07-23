@@ -49,7 +49,8 @@ func TestOrchestratorFlagIgnoredForNestedChild(t *testing.T) {
 		With("module", "onboard-0").Info("writing file")
 
 	got := buf.String()
-	want := "[onboard-0] writing file\n"
+	// Depth 2 (two module attrs) indents one level beneath its parent.
+	want := "  [onboard-0] writing file\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -70,11 +71,72 @@ func TestFlatModuleChipHasNoRootMarker(t *testing.T) {
 
 func TestNestedModuleChipHasNoRootMarker(t *testing.T) {
 	logger, buf := newTestLogger()
-	// Two module attrs = a nested child: plain chip, no "≡" markers.
+	// Two module attrs = a nested child: plain chip, no "≡" markers, indented
+	// one level beneath its parent.
 	logger.With("module", "bulk-onboard").With("module", "onboard-0").Info("writing file")
 
 	got := buf.String()
-	want := "[onboard-0] writing file\n"
+	want := "  [onboard-0] writing file\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNestingIndentsByDepth(t *testing.T) {
+	logger, buf := newTestLogger()
+	// Three module attrs = two levels of nesting below the root: two indent
+	// steps. Attribute bullets carry the same indent as the message.
+	logger.With("module", "root").With("module", "mid").With("module", "leaf").
+		Info("writing file", "path", "app.yaml")
+
+	got := buf.String()
+	want := "    [leaf] writing file\n      path  app.yaml\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestRootDispatchKeepsRootChip(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A top-level dispatch (depth 1) is already set apart by the root chip, so
+	// the hand-off marker is not used.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("onboard-0 (1/2)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n[≡ bulk-onboard ≡] onboard-0 (1/2)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNestedDispatchMarkedWithParentCrumb(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A nested orchestrator's dispatch (depth 2) reads as a hand-off by its
+	// parent — marker, parent name, then the child batch header — indented, not
+	// masquerading as a leaf chip.
+	logger.With("module", "deps-bump").With(KeyRoot, true).
+		With("module", "tier-1-group").With(KeyRoot, true).
+		Info("patch-a (1/3)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n  ▸ tier-1-group › patch-a (1/3)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestColorNestedDispatchMarker(t *testing.T) {
+	logger, buf := newColorTestLogger()
+	logger.With("module", "deps-bump").With(KeyRoot, true).
+		With("module", "tier-1-group").With(KeyRoot, true).
+		Info("patch-a (1/3)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n  " +
+		colorModule + "▸ " + colorReset +
+		colorMuted + "tier-1-group › " + colorReset +
+		colorBold + "patch-a (1/3)" + colorReset + "\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -167,7 +229,8 @@ func TestColorChildChipRecoloredBySeverity(t *testing.T) {
 	logger.With("module", "bulk").With("module", "child-0").Warn("push rejected")
 
 	got := buf.String()
-	want := "\033[7m" + colorWarn + " child-0 " + "\033[0m" + " " + colorWarn + "warning: " + "\033[0m" + "push rejected\n"
+	// Depth 2: indented one level, then the severity-colored chip and message.
+	want := "  " + "\033[7m" + colorWarn + " child-0 " + "\033[0m" + " " + colorWarn + "warning: " + "\033[0m" + "push rejected\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -182,7 +245,8 @@ func TestColorSectionWithChipIsBoldNotInverted(t *testing.T) {
 
 	got := buf.String()
 	chip := "\033[7m" + colorModule + " child-0 " + "\033[0m" + " "
-	want := "\n" + chip + "\033[1m" + "operation deploy (1/2)" + "\033[0m" + "\n"
+	// Depth 2: the section's leading blank stays flush; the chip line indents.
+	want := "\n" + "  " + chip + "\033[1m" + "operation deploy (1/2)" + "\033[0m" + "\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

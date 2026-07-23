@@ -147,6 +147,9 @@ func cloneTarget(ctx context.Context, mod *module.Module, params map[string]stri
 		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
 			return "", nil, fmt.Errorf("creating local target dir: %w", err)
 		}
+		// The root module has no parent to name it, so its breadcrumb is just its
+		// own name; Execute has not run yet to seed opts.ModulePath.
+		opts.RegisterDirLabel(cloneDir, mod.Config.Metadata.Name)
 	} else {
 		tmpDir, err := os.MkdirTemp("", "loom-target-*")
 		if err != nil {

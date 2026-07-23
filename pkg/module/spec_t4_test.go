@@ -123,7 +123,7 @@ func TestSpecT4(t *testing.T) {
 					Params: map[string]string{},
 					Logger: testLogger(),
 				}
-				_, cleanup, err := resolveChildTarget(context.Background(), childMod, "/unused", &RunOptions{})
+				_, cleanup, err := resolveChildTarget(context.Background(), childMod, "/unused", &RunOptions{}, nil)
 				if cleanup != nil {
 					cleanup()
 				}

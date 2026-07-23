@@ -56,7 +56,7 @@ func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
 		return
 	}
 
-	execCtx.Diffs.Add(execCtx.ModuleName, execCtx.TargetLabel, text)
+	execCtx.Diffs.Add(execCtx.diffBreadcrumb(), execCtx.TargetLabel, text)
 }
 
 // colorizeDiff applies ANSI colors to unified diff lines.

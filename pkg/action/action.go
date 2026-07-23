@@ -46,12 +46,12 @@ func (s *RunSummary) Print(w io.Writer) {
 }
 
 // diffEntry is one captured file diff plus the context needed to read it once
-// diffs are printed together at the end: which module produced it and which
-// target (repo) it applies to.
+// diffs are printed together at the end: the instance breadcrumb of the module
+// that produced it and the target (repo) it applies to.
 type diffEntry struct {
-	module string
-	target string
-	text   string // uncolored unified diff
+	breadcrumb []string // root instance name … producing instance name
+	target     string
+	text       string // uncolored unified diff
 }
 
 // DiffCollector accumulates file diffs across a whole run, shared by parent
@@ -64,17 +64,21 @@ type DiffCollector struct {
 	entries []diffEntry
 }
 
-// Add records one file diff along with the module and target it belongs to.
-// Safe to call on a nil collector.
-func (c *DiffCollector) Add(module, target, diff string) {
+// Add records one file diff along with the instance breadcrumb and target it
+// belongs to. Safe to call on a nil collector.
+func (c *DiffCollector) Add(breadcrumb []string, target, diff string) {
 	if c == nil {
 		return
 	}
-	c.entries = append(c.entries, diffEntry{module: module, target: target, text: diff})
+	c.entries = append(c.entries, diffEntry{
+		breadcrumb: append([]string(nil), breadcrumb...),
+		target:     target,
+		text:       diff,
+	})
 }
 
 // Print writes all collected diffs to w, colorized when w is a terminal.
-// A module/target header is written before each diff (deduplicated across a
+// A breadcrumb/target header is written before each diff (deduplicated across a
 // run of diffs from the same module and target). Nothing is written when the
 // collector is nil or empty.
 func (c *DiffCollector) Print(w io.Writer) {
@@ -82,44 +86,62 @@ func (c *DiffCollector) Print(w io.Writer) {
 		return
 	}
 	color := isTerminalWriter(w)
-	var lastModule, lastTarget string
+	var lastKey string
 	for i, e := range c.entries {
-		if i == 0 || e.module != lastModule || e.target != lastTarget {
-			fmt.Fprint(w, diffHeader(e.module, e.target, color))
-			lastModule, lastTarget = e.module, e.target
+		key := strings.Join(e.breadcrumb, "\x00") + "\x00" + e.target
+		if i == 0 || key != lastKey {
+			fmt.Fprint(w, DiffHeader(e.breadcrumb, e.target, color))
+			lastKey = key
 		}
 		fmt.Fprint(w, colorizeDiff(e.text, color))
 	}
 }
 
-// diffHeader renders the "which module / which repo" banner shown above a diff.
-// Returns just a leading blank line when there is no context to show.
-func diffHeader(module, target string, color bool) string {
-	if module == "" && target == "" {
+// DiffHeader renders the "which module / which repo" banner shown above a diff.
+// The breadcrumb's root segment is an inverted chip; when the run fanned out to
+// children it is wrapped in "≡ … ≡" to match the log's root marker, and the
+// remaining instance names trail after it in muted " › " steps. The target (the
+// repo URL and branch) sits on its own line beneath, so a long breadcrumb never
+// crowds it. Returns just a leading blank line when there is no context to show.
+func DiffHeader(breadcrumb []string, target string, color bool) string {
+	segs := make([]string, 0, len(breadcrumb))
+	for _, s := range breadcrumb {
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	if len(segs) == 0 && target == "" {
 		return "\n"
 	}
+
 	var b strings.Builder
 	b.WriteByte('\n')
-	switch {
-	case !color:
-		if module != "" {
-			b.WriteString("[" + module + "]")
+	if len(segs) > 0 {
+		root, rest := segs[0], segs[1:]
+		rootLabel := root
+		if len(rest) > 0 {
+			rootLabel = "≡ " + root + " ≡"
 		}
-		if target != "" {
-			if module != "" {
-				b.WriteByte(' ')
+		if color {
+			b.WriteString(diffColorInvert + " " + rootLabel + " " + diffColorReset)
+			for _, s := range rest {
+				b.WriteString(diffColorMuted + " › " + s + diffColorReset)
 			}
-			b.WriteString(target)
-		}
-	default:
-		if module != "" {
-			b.WriteString(diffColorInvert + " " + module + " " + diffColorReset)
-		}
-		if target != "" {
-			if module != "" {
-				b.WriteByte(' ')
+		} else {
+			b.WriteString("[" + rootLabel + "]")
+			for _, s := range rest {
+				b.WriteString(" › " + s)
 			}
+		}
+	}
+	if target != "" {
+		if len(segs) > 0 {
+			b.WriteByte('\n')
+		}
+		if color {
 			b.WriteString(diffColorMuted + target + diffColorReset)
+		} else {
+			b.WriteString(target)
 		}
 	}
 	b.WriteByte('\n')
@@ -130,6 +152,11 @@ func diffHeader(module, target string, color bool) string {
 type ExecutionContext struct {
 	// ModuleName is the metadata.name of the executing module.
 	ModuleName string
+	// ModulePath is the instance breadcrumb from the run's root down to this
+	// module (root instance name … this instance name). In a bulk run every item
+	// shares one ModuleName, so this is what tells their diffs apart. It heads
+	// each collected diff; may be empty for a directly-constructed context.
+	ModulePath []string
 	// ModuleDir is the path to the module directory containing loom.yaml.
 	ModuleDir string
 	// TargetDir is the path to the target repository working directory.
@@ -161,6 +188,19 @@ type ExecutionContext struct {
 	Summary *RunSummary
 	// Logger is the structured logger.
 	Logger *slog.Logger
+}
+
+// diffBreadcrumb is the instance breadcrumb heading this context's diffs. It
+// falls back to the bare module name for contexts built directly (e.g. in
+// tests) without a threaded ModulePath.
+func (e *ExecutionContext) diffBreadcrumb() []string {
+	if len(e.ModulePath) > 0 {
+		return e.ModulePath
+	}
+	if e.ModuleName != "" {
+		return []string{e.ModuleName}
+	}
+	return nil
 }
 
 // Action is the interface that all operation types implement.

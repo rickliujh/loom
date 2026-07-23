@@ -17,8 +17,8 @@ const (
 	diffColorCyan   = "\033[36m"
 	diffColorInvert = "\033[7m"
 	diffColorMuted  = "\033[38;5;244m" // mid gray — matches the log handler's muted tone
-	diffColorRoot   = "\033[38;5;61m"  // muted indigo — the orchestrator chip (log's root color)
-	diffColorWorker = "\033[38;5;66m"  // slate teal — the hand-off marker (log's worker color)
+	diffColorRoot   = "\033[38;5;231m" // white — the diff's turn chip, set apart from the run log's indigo root chip
+	diffColorWorker = "\033[38;5;80m"  // bright teal — the hand-off, lifted so the breadcrumb doesn't fade into the diff
 )
 
 // printDiff computes a unified diff between old and new content and hands it to

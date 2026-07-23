@@ -125,10 +125,11 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 		// source resolution and Load attributes the child's setup logs (dynamic
 		// params, target clone) to the instance too, not to the parent.
 		childLogger := mod.Logger.With(prettylog.KeyModule, childName)
-		// The orchestrator announces each dispatch, so the batch header carries
-		// the root chip and names the item it is handing off to; the child's own
+		// The orchestrator announces each dispatch, so the batch header names the
+		// item it is handing off to; the handler marks it (root chip at the top
+		// level, a "▸ parent › child" hand-off when nested) and the child's own
 		// lines that follow carry the child chip.
-		mod.Logger.Info(fmt.Sprintf("%s (%d/%d)", childName, i+1, len(children)), prettylog.KeySection, true)
+		mod.Logger.Info(fmt.Sprintf("%s (%d/%d)", childName, i+1, len(children)), prettylog.KeySection, true, prettylog.KeyDispatch, true)
 
 		// Extend the breadcrumb with this child's instance name. resolveChildTarget
 		// records it against the clone dir (for full-mode diff), and the recursive

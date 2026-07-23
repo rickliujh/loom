@@ -96,6 +96,52 @@ func TestNestingIndentsByDepth(t *testing.T) {
 	}
 }
 
+func TestRootDispatchKeepsRootChip(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A top-level dispatch (depth 1) is already set apart by the root chip, so
+	// the hand-off marker is not used.
+	logger.With("module", "bulk-onboard").With(KeyRoot, true).
+		Info("onboard-0 (1/2)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n[≡ bulk-onboard ≡] onboard-0 (1/2)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestNestedDispatchMarkedWithParentCrumb(t *testing.T) {
+	logger, buf := newTestLogger()
+	// A nested orchestrator's dispatch (depth 2) reads as a hand-off by its
+	// parent — marker, parent name, then the child batch header — indented, not
+	// masquerading as a leaf chip.
+	logger.With("module", "deps-bump").With(KeyRoot, true).
+		With("module", "tier-1-group").With(KeyRoot, true).
+		Info("patch-a (1/3)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n  ▸ tier-1-group › patch-a (1/3)\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestColorNestedDispatchMarker(t *testing.T) {
+	logger, buf := newColorTestLogger()
+	logger.With("module", "deps-bump").With(KeyRoot, true).
+		With("module", "tier-1-group").With(KeyRoot, true).
+		Info("patch-a (1/3)", KeySection, true, KeyDispatch, true)
+
+	got := buf.String()
+	want := "\n  " +
+		colorModule + "▸ " + colorReset +
+		colorMuted + "tier-1-group › " + colorReset +
+		colorBold + "patch-a (1/3)" + colorReset + "\n"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestSectionAttrAddsBlankLineAndIsDropped(t *testing.T) {
 	logger, buf := newTestLogger()
 	logger.Info("operation create-files (1/6)", KeySection, true)

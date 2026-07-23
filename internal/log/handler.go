@@ -70,6 +70,14 @@ const KeyModule = "module"
 // inherit the attr but stay plain: root marking is gated on module depth == 1.
 const KeyRoot = "root"
 
+// KeyDispatch marks a record as an orchestrator's batch header — the "child
+// (N/M)" line it emits as it hands work to a child. The executor sets it on
+// every dispatch header. The pretty handler uses it to mark a nested hand-off
+// (depth > 1) with a "▸ parent › child" form, so a deep batch header reads as a
+// dispatch by its parent rather than masquerading as an ordinary leaf line; the
+// run's root (depth 1) keeps its "≡ … ≡" chip.
+const KeyDispatch = "dispatch"
+
 // sharedState is shared by a handler and every handler derived from it via
 // WithAttrs/WithGroup, so the output mutex survives the per-logger cloning that
 // slog does.
@@ -113,6 +121,7 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	var moduleDepth int // count of module attrs: 1 = root, >1 = nested child
 	var orchestrator bool
 	var section bool
+	var dispatch bool
 	var inline []slog.Attr // rendered as aligned bullets below the message
 	var blocks []slog.Attr // multi-line values, rendered as indented blocks
 
@@ -126,6 +135,8 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 			moduleDepth++
 		case a.Key == KeyRoot && h.group == "":
 			orchestrator = a.Value.Bool()
+		case a.Key == KeyDispatch && h.group == "":
+			dispatch = a.Value.Kind() != slog.KindBool || a.Value.Bool()
 		case strings.Contains(a.Value.String(), "\n"):
 			blocks = append(blocks, a)
 		default:
@@ -161,6 +172,23 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 
 	if section {
 		b.WriteByte('\n')
+	}
+
+	// Nested dispatch header: a hand-off marker plus the dispatching module's
+	// name, so a deep "child (N/M)" line names whose batch it is instead of
+	// reading like an ordinary leaf. The root (depth 1) is already set apart by
+	// its "≡ … ≡" chip, so it falls through to the normal section rendering.
+	if dispatch && moduleDepth > 1 {
+		if h.color {
+			b.WriteString(colorModule + "▸ " + colorReset)
+			b.WriteString(colorMuted + moduleName + " › " + colorReset)
+			b.WriteString(colorBold + r.Message + colorReset)
+		} else {
+			b.WriteString("▸ " + moduleName + " › " + r.Message)
+		}
+		b.WriteByte('\n')
+		_, err := io.WriteString(h.st.w, indentLines(b.String(), indent))
+		return err
 	}
 
 	// Module chip: the leftmost gutter, so the executing module is the first

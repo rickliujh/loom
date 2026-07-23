@@ -185,18 +185,20 @@ func diffTurnBanner(root, turn string, color bool) string {
 // diffHandoffChain renders the submodule hand-off lines beneath a turn banner:
 // one "▸ parent › child" per descent step from the turn down to the leaf, the
 // run log's nested-dispatch form — no root chip, so headers inside a turn read
-// lighter. The marker and parent share the worker teal so the hand-off reads as
-// one legible breadcrumb unit rather than fading into the diff; the child, the
-// step that matters, stays bold. Empty when the breadcrumb stops at the turn.
+// lighter. The child — the module that produced the diff — is an inverted light-
+// gray chip: a filled anchor so the breadcrumb stands out against the diff, one
+// step below the white turn chip, and in neither the log's indigo nor teal so it
+// never reads as more run output. The marker and parent stay muted context.
+// Empty when the breadcrumb stops at the turn.
 func diffHandoffChain(segs []string, color bool) string {
 	var b strings.Builder
 	for i := 1; i+1 < len(segs); i++ {
 		parent, child := segs[i], segs[i+1]
 		if color {
-			b.WriteString(diffColorWorker + "▸ " + parent + " › " + diffColorReset +
-				diffColorBold + child + diffColorReset + "\n")
+			b.WriteString(diffColorMuted + "▸ " + parent + " › " + diffColorReset +
+				diffColorInvert + diffColorSub + " " + child + " " + diffColorReset + "\n")
 		} else {
-			b.WriteString("▸ " + parent + " › " + child + "\n")
+			b.WriteString("▸ " + parent + " › [" + child + "]\n")
 		}
 	}
 	return b.String()

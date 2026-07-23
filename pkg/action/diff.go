@@ -16,9 +16,9 @@ const (
 	diffColorGreen  = "\033[32m"
 	diffColorCyan   = "\033[36m"
 	diffColorInvert = "\033[7m"
-	diffColorMuted  = "\033[38;5;244m" // mid gray — matches the log handler's muted tone
-	diffColorRoot   = "\033[38;5;231m" // white — the diff's turn chip, set apart from the run log's indigo root chip
-	diffColorWorker = "\033[38;5;80m"  // bright teal — the hand-off, lifted so the breadcrumb doesn't fade into the diff
+	diffColorMuted  = "\033[38;5;244m" // mid gray — the hand-off marker, parent context, and target line
+	diffColorRoot   = "\033[38;5;231m" // white — the turn chip, top of the diff header
+	diffColorSub    = "\033[38;5;250m" // light gray — the submodule chip, one step below the turn
 )
 
 // printDiff computes a unified diff between old and new content and hands it to

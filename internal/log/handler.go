@@ -146,6 +146,14 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 	// run (no children, no flag) keeps an undecorated chip.
 	root := moduleDepth == 1 && orchestrator
 
+	// Indent by nesting depth so a child's lines sit visibly beneath the parent
+	// that dispatched them. Depth 1 (root or a flat single module) is flush left;
+	// each further level of module nesting adds one step.
+	indent := ""
+	if moduleDepth > 1 {
+		indent = strings.Repeat("  ", moduleDepth-1)
+	}
+
 	h.st.mu.Lock()
 	defer h.st.mu.Unlock()
 
@@ -191,8 +199,28 @@ func (h *PrettyHandler) Handle(_ context.Context, r slog.Record) error {
 		h.writeBlock(&b, a)
 	}
 
-	_, err := io.WriteString(h.st.w, b.String())
+	_, err := io.WriteString(h.st.w, indentLines(b.String(), indent))
 	return err
+}
+
+// indentLines prefixes every content line of s with indent, leaving blank
+// separator lines (a lone "\n", e.g. a section header's leading gap) flush so
+// they stay empty rather than filling with trailing spaces. A no-op when indent
+// is empty. s is expected to end in "\n".
+func indentLines(s, indent string) string {
+	if indent == "" || s == "" {
+		return s
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(s, "\n") {
+		if line == "" || line == "\n" {
+			b.WriteString(line)
+			continue
+		}
+		b.WriteString(indent)
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func (h *PrettyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

@@ -63,7 +63,14 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		source = args[0]
 	}
 
-	paramMap, err := parseParams(diffParams, diffParamsFile)
+	// Expand a ":name" alias reference before resolving (AL4).
+	source, aliasParams, err := resolveSourceArg(source)
+	if err != nil {
+		return err
+	}
+
+	// Alias params sit beneath --params-file and -p (AL9).
+	paramMap, err := parseParamsWithDefaults(aliasParams, diffParams, diffParamsFile)
 	if err != nil {
 		return err
 	}

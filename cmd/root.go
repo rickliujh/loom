@@ -5,6 +5,7 @@ import (
 	"os"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
+	"github.com/rickliujh/loom/pkg/alias"
 	"github.com/spf13/cobra"
 )
 
@@ -28,10 +29,25 @@ var rootCmd = &cobra.Command{
 
 // Execute runs the root command.
 func Execute() {
+	rootCmd.SetArgs(dispatchArgs(os.Args[1:]))
 	if err := rootCmd.Execute(); err != nil {
 		prettylog.Failuref(os.Stderr, "%v", err)
 		os.Exit(1)
 	}
+}
+
+// dispatchArgs rewrites `loom :bar ...` to `loom run :bar ...` so a bare alias
+// reference defaults to run (AL6). Only a leading ":" triggers the rewrite, so
+// every other argument keeps normal cobra dispatch — an unknown subcommand
+// still reports "unknown command" with its usual suggestions.
+//
+// The rewrite is what lets the alias form accept the full run flag set: the
+// flags live on runCmd, and a root-level handler would have to redeclare them.
+func dispatchArgs(args []string) []string {
+	if len(args) > 0 && alias.IsRef(args[0]) {
+		return append([]string{runCmd.Name()}, args...)
+	}
+	return args
 }
 
 func init() {

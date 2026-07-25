@@ -10,6 +10,9 @@ type LoomFile struct {
 
 type Metadata struct {
 	Name string `yaml:"name"`
+	// Description is a human-readable explanation of what the module does.
+	// Documentary only; templatable with the module's resolved params.
+	Description string `yaml:"description,omitempty"`
 }
 
 type Spec struct {
@@ -26,6 +29,9 @@ type ParamDef struct {
 	Name     string `yaml:"name"`
 	Required bool   `yaml:"required,omitempty"`
 	Default  string `yaml:"default,omitempty"`
+	// Description is a human-readable explanation of the param's purpose.
+	// Surfaced in missing-required errors and interactive prompts.
+	Description string `yaml:"description,omitempty"`
 }
 
 // DynamicParamDef defines a parameter whose value comes from a shell command.
@@ -35,6 +41,8 @@ type DynamicParamDef struct {
 	Name    string `yaml:"name"`
 	Command string `yaml:"command"`
 	Default string `yaml:"default,omitempty"` // Fallback if not needed; command takes priority.
+	// Description is a human-readable explanation of the param's purpose.
+	Description string `yaml:"description,omitempty"`
 }
 
 type TargetSpec struct {
@@ -47,6 +55,9 @@ type ModuleRef struct {
 	Name   string            `yaml:"name"`
 	Source string            `yaml:"source"`
 	Params map[string]string `yaml:"params,omitempty"`
+	// Description is a human-readable explanation of why this child is composed
+	// in. Documentary only; templatable with the parent's resolved params.
+	Description string `yaml:"description,omitempty"`
 	// If is an optional shell predicate gating child execution. Empty means
 	// always run. Templated with the parent's params, then run via sh -c in
 	// the child's resolved target dir: exit 0 runs the child, non-zero skips it.

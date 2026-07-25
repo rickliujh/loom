@@ -2,6 +2,7 @@ package module
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -60,6 +61,106 @@ func TestResolveParams_RequiredParamErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `required parameter "foo"`) {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// P7: Missing required param error includes the declared description.
+func TestResolveParams_RequiredParamErrorIncludesDescription(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "env", Required: true, Description: "Target environment (staging|production)"},
+	}
+
+	_, err := resolveParams(declared, nil, nil, testLogger())
+	if err == nil {
+		t.Fatal("expected error for missing required param")
+	}
+	want := `required parameter "env" not provided: Target environment (staging|production)`
+	if err.Error() != want {
+		t.Errorf("expected %q, got %q", want, err.Error())
+	}
+}
+
+// fakePrompter records which params it was asked for and returns canned answers.
+type fakePrompter struct {
+	answers map[string]string
+	err     error
+	asked   []string
+}
+
+func (f *fakePrompter) Prompt(p config.ParamDef) (string, error) {
+	f.asked = append(f.asked, p.Name)
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.answers[p.Name], nil
+}
+
+// P8: only required params that are missing and have no default are prompted;
+// provided/default/optional params are left alone and the caller's map is not
+// mutated.
+func TestPromptMissingRequired_FillsOnlyMissing(t *testing.T) {
+	declared := []config.ParamDef{
+		{Name: "provided", Required: true},
+		{Name: "withDefault", Required: true, Default: "d"},
+		{Name: "optional"},
+		{Name: "missing", Required: true, Description: "needs a value"},
+	}
+	provided := map[string]string{"provided": "x"}
+	fp := &fakePrompter{answers: map[string]string{"missing": "answered"}}
+
+	out, err := promptMissingRequired(declared, provided, fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["missing"] != "answered" {
+		t.Errorf("expected prompted value, got %q", out["missing"])
+	}
+	if len(fp.asked) != 1 || fp.asked[0] != "missing" {
+		t.Errorf("expected only \"missing\" to be prompted, got %v", fp.asked)
+	}
+	if _, ok := provided["missing"]; ok {
+		t.Error("caller's provided map must not be mutated")
+	}
+}
+
+// P8: a prompter error aborts the load.
+func TestPromptMissingRequired_ErrorPropagates(t *testing.T) {
+	declared := []config.ParamDef{{Name: "x", Required: true}}
+	fp := &fakePrompter{err: fmt.Errorf("no input")}
+
+	_, err := promptMissingRequired(declared, nil, fp)
+	if err == nil {
+		t.Fatal("expected error from prompter to propagate")
+	}
+}
+
+// T4: metadata.description is templated with the module's resolved params.
+// (The reflection-based TestSpecT4 walks spec.* only, so metadata is covered here.)
+func TestLoad_MetadataDescriptionTemplated(t *testing.T) {
+	write := func(t *testing.T, desc string) string {
+		t.Helper()
+		dir := t.TempDir()
+		content := "apiVersion: " + config.ExpectedAPIVersion + "\n" +
+			"kind: " + config.ExpectedKind + "\n" +
+			"metadata:\n  name: t4meta\n  description: \"" + desc + "\"\n" +
+			"spec:\n  params:\n    - name: env\n      default: staging\n"
+		if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+
+	mod, err := Load(write(t, "runs for {{ .env }}"), nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mod.Config.Metadata.Description; got != "runs for staging" {
+		t.Errorf("expected rendered description, got %q", got)
+	}
+
+	// A malformed template surfaces an error (T4).
+	if _, err := Load(write(t, "{{ .env"), nil, testLogger()); err == nil {
+		t.Fatal("expected template error for malformed metadata.description")
 	}
 }
 

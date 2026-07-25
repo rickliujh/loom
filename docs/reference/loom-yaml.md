@@ -9,10 +9,12 @@ apiVersion: loom.rickliujh.github.io/v1beta1
 kind: Loom
 metadata:
   name: onboard-service
+  description: "Onboard {{ .serviceName }} to the gitops repo"
 spec:
   params:
     - name: serviceName
       required: true
+      description: "Name of the service to onboard"
     - name: namespace
       default: "default"
 
@@ -33,6 +35,7 @@ spec:
   modules:
     - name: base-setup
       source: "./base-module"
+      description: "Namespace scaffolding for {{ .serviceName }}"
       params:
         namespace: "{{ .namespace }}"
 
@@ -69,16 +72,24 @@ spec:
         tokenEnv: GITHUB_TOKEN
 ```
 
+## `metadata`
+
+| Field | Description |
+|-------|-------------|
+| `name` | Required. Unique identifier for the module. |
+| `description` | Optional. Human-readable explanation of what the module does. Documentary; templatable with the module's resolved params. |
+
 ## `spec.params`
 
 Parameters are the inputs to your module. They're injected into every template — file contents, file paths, shell commands, commit messages, PR titles, and module sources.
 
-**What is templatable:** every string field in `loom.yaml` except `spec.params` definitions (names, defaults, required — these are the source of template values). Boolean fields (e.g. `shell.pure`) are not strings and are not templatable. Specifically:
+**What is templatable:** every string field in `loom.yaml` except `spec.params` definitions (names, defaults, required, and descriptions — these are the source of template values; `params[].description` is also shown before params resolve, so it stays verbatim). Boolean fields (e.g. `shell.pure`) are not strings and are not templatable. Specifically:
 
+- `metadata.description`
 - `spec.excludes[]`, `spec.includes[]`
-- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
+- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`, `spec.dynamicParams[].description`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].description`, `spec.modules[].params` values
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
 - `shell.command`, `shell.timeout`
@@ -92,10 +103,19 @@ Parameters are the inputs to your module. They're injected into every template �
 | `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `required` | If `true`, the run fails when this param is not provided |
 | `default` | Fallback value when the param is not provided |
+| `description` | Optional human-readable explanation of the param. Shown in the missing-required error and in interactive prompts. Documentary only — never rendered. |
 
 Resolution priority: **provided (`-p`) > default > required error**.
 
 Undeclared parameters (not listed in `params` or `dynamicParams`) are rejected.
+
+When a required param has neither a provided value nor a default, the run fails with an error that includes the `description` if one is set:
+
+```
+required parameter "serviceName" not provided: Name of the service to onboard
+```
+
+Run with `--interactive` (`-i`) to be prompted for each missing required param instead of failing — see [`loom run`](./cli-run.md). Prompting applies to the root module only.
 
 ## `spec.dynamicParams`
 
@@ -106,6 +126,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 | `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
 | `default` | Fallback value used only if the command exits non-zero. Supports Go template syntax (rendered with already-resolved params). A successful command with empty output yields an empty value, not the default. |
+| `description` | Optional human-readable explanation of the param. Documentary and templatable with resolved params (unlike `params[].description`); never prompted (dynamic values come from `command`). |
 
 ```yaml
 dynamicParams:
@@ -203,6 +224,7 @@ Child modules to execute before this module's operations. See [Module Compositio
 |-------|-------------|
 | `name` | Identifier for the child module. Templatable. |
 | `source` | Path to the child module. Accepts local paths, git URLs, or git URLs with `//subdir` separator. Templatable — rendered before source resolution. |
+| `description` | Optional note on why this child is composed in. Documentary; templatable with the parent's params. |
 | `params` | Parameters to pass down, rendered through the parent's context |
 | `if` | Optional shell predicate gating the child. Templatable (parent's params). Runs via `sh -c` in the child's resolved target dir — exit `0` runs the child, non-zero skips it. See [`if`](#conditional-execution-if). |
 

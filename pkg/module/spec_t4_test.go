@@ -34,6 +34,7 @@ import (
 var t4Exempt = map[string]string{
 	"load/Params.[0].Name":        "T4 exception: static param definitions are the source of template values",
 	"load/Params.[0].Default":     "T4 exception: static param definitions are the source of template values",
+	"load/Params.[0].Description": "params[].description is documentary and consumed before resolution (P7), so it is not templated",
 	"load/DynamicParams.[0].Name": "param names are identifiers, not templatable values",
 }
 

@@ -11,6 +11,7 @@ apiVersion: loom.rickliujh.github.io/v1beta1  # required, exact match
 kind: Loom                                      # required, exact match
 metadata:
   name: <string>                                # required, unique identifier
+  description: <string>                           # optional, documentary; templatable
 spec:
   params: [...]
   dynamicParams: [...]
@@ -148,11 +149,47 @@ dynamicParams:
 
 If a dynamic param's name is provided via CLI, the command is never executed. A warning is logged to inform the user that the dynamic command was skipped due to the CLI override.
 
+#### P7: Params carry an optional description
+
+Both static and dynamic params accept an optional `description` — a human-readable explanation of the param's purpose. It is documentary only and never affects resolution. When a required static param is missing, its description is appended to the error so the failure is self-explanatory: `required parameter "<name>" not provided: <description>`.
+
+```yaml
+params:
+  - name: env
+    required: true
+    description: "Target environment (staging|production)"
+# missing → error: required parameter "env" not provided: Target environment (staging|production)
+```
+
+**Templating of descriptions follows T4** — every field that is not a `spec.params` definition is templatable:
+
+- `params[].description` is **not** templated. Like the other `spec.params` fields it is the source layer, and it is surfaced before params resolve (in the missing-required error and interactive prompt), so it is shown verbatim.
+- `dynamicParams[].description`, `metadata.description`, and `modules[].description` **are** templated with resolved params (the parent's params for `modules[].description`, per M4), rendered in place during load. See T4.
+
+#### P8: Missing required static params can be prompted interactively
+
+By default a missing required static param fails fast (P1/P7). When the **root** module is run with `--interactive` (`-i`), each required static param that is neither provided nor has a default is prompted for on stdin, using its name and `description`; the typed value is used as if it had been supplied via `--param`. Prompting is scoped to:
+
+- **The root module only.** Child modules never prompt — their params are the parent's responsibility (M-rules), so a child's missing required param is still a hard error.
+- **Static params only.** Dynamic params derive from commands and are never prompted.
+- **Genuinely missing params.** Params already provided (CLI/file) or carrying a `default` are never prompted.
+
+Prompt text is written to stderr. If stdin reaches EOF with no value (e.g. `--interactive` with piped/closed input), the run fails rather than blocking. Without `--interactive`, behavior is unchanged. `bulk` never prompts.
+
+```yaml
+params:
+  - name: env
+    required: true
+    description: "Target environment (staging|production)"
+# loom run --interactive        → prompts: Enter value for env — Target environment (staging|production):
+# loom run                      → error (P1/P7), no prompt
+```
+
 ### Error Conditions
 
 | Condition | Error |
 |-----------|-------|
-| Required param not provided and no default | `required parameter "<name>" not provided` |
+| Required param not provided and no default | `required parameter "<name>" not provided` (with `: <description>` suffix when a description is declared, per P7) |
 | Empty param name | `param name cannot be empty` |
 | Duplicate name across `params` and `dynamicParams` | `duplicate param name "<name>"` |
 | Dynamic param missing `command` | `dynamicParam "<name>": command is required` |
@@ -223,14 +260,15 @@ app/__serviceName__/deploy.yaml
 
 #### T4: What is templatable
 
-Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required — these are the source of template values and cannot reference themselves). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
+Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required, and descriptions — these are the source of template values and cannot reference themselves; `params[].description` is additionally consumed before resolution, per P7). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
 
 Exhaustive list of templatable fields:
 
+- `metadata.description`
 - `spec.excludes[]`, `spec.includes[]`
-- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
+- `spec.dynamicParams[].command`, `spec.dynamicParams[].default`, `spec.dynamicParams[].description`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].description`, `spec.modules[].params` values
 - `spec.modules[].if`, `operations[].if`
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
@@ -333,6 +371,7 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 |-------|-------------|
 | `modules[].name` | Required. Unique identifier for the child. |
 | `modules[].source` | Required. Local path or git URL to the child module directory. |
+| `modules[].description` | Optional. Human-readable note on why this child is composed in. Documentary; templatable with the parent's params. |
 | `modules[].params` | Optional. `map[string]string` of params to pass to the child. Values are templatable with the parent's params. |
 | `modules[].if` | Optional. Shell predicate gating the child. Templatable. See [Conditional Execution](#conditional-execution-if). |
 
@@ -798,6 +837,7 @@ is logged.
 | `--author` | string | `""` | Default git author name for `commitPush` operations |
 | `--email` | string | `""` | Default git author email for `commitPush` operations |
 | `--summary` | bool | `false` | Print a list of PRs/MRs created during the run at the end (see PR4) |
+| `--interactive`, `-i` | bool | `false` | Prompt for missing required params on the root module instead of failing (see P8) |
 
 ---
 

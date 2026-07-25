@@ -335,7 +335,7 @@ func resolveModuleAndTarget(ctx context.Context, source string, paramMap map[str
 		}
 	}
 
-	moduleDir, srcCleanup, err := module.ResolveSource(source, ".", logger)
+	moduleDir, srcCleanup, err := module.ResolveSource(source, "", ".", logger)
 	if err != nil {
 		return nil, "", nil, err
 	}

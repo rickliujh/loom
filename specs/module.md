@@ -230,7 +230,7 @@ Exhaustive list of templatable fields:
 - `spec.excludes[]`, `spec.includes[]`
 - `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].version`, `spec.modules[].params` values
 - `spec.modules[].if`, `operations[].if`
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
@@ -333,6 +333,7 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 |-------|-------------|
 | `modules[].name` | Required. Unique identifier for the child. |
 | `modules[].source` | Required. Local path or git URL to the child module directory. |
+| `modules[].version` | Optional. Pins a git source to a branch, tag, or commit. Templatable. Ignored for local sources (an error to combine). See [M5](#m5-version-pinning). |
 | `modules[].params` | Optional. `map[string]string` of params to pass to the child. Values are templatable with the parent's params. |
 | `modules[].if` | Optional. Shell predicate gating the child. Templatable. See [Conditional Execution](#conditional-execution-if). |
 
@@ -346,8 +347,9 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 | Starts with `/` | Absolute path |
 | Git URL without `//` | Cloned to temp directory, `loom.yaml` expected at repo root |
 | Git URL with `//path` | Cloned to temp directory, `loom.yaml` expected at `path` within the clone |
+| Git URL with `?ref=<version>` | Cloned, then pinned to the branch, tag, or commit `<version>` (see [M5](#m5-version-pinning); child modules prefer the `version` field) |
 
-The `source` field is templatable (see T4). Templates are rendered **before** source resolution, so `//` parsing operates on the rendered string.
+The `source` field is templatable (see T4). Templates are rendered **before** source resolution, so `//` and `?ref=` parsing operate on the rendered string.
 
 The `//` separator (Terraform convention) splits a git URL into the repository URL and a subdirectory path within the cloned repo. This allows a single git repository to host multiple loom modules in different directories.
 
@@ -423,6 +425,61 @@ modules:
       env: "{{ .environment }}"    # rendered to "staging" before passing to child
       region: us-east-1             # literal value
 ```
+
+#### M5: Version pinning
+
+A git module can be pinned to a specific **branch, tag, or commit SHA** so a run
+uses an exact module version instead of tracking the source's default branch.
+There are two spellings, one for each place a module is named:
+
+- **Child modules** declare `spec.modules[].version` — a dedicated, visible
+  field alongside `name`, `source`, and `params`. This is the preferred form.
+- **The CLI / root source** — passed as the whole `loom run <source>` argument —
+  carries a trailing `?ref=<version>` suffix, since it has no surrounding
+  `modules[]` entry to hold a field.
+
+```yaml
+modules:
+  - name: networking
+    source: https://github.com/org/modules.git//networking
+    version: v1.4.0        # branch, tag, or commit
+```
+
+```bash
+loom run 'https://github.com/org/modules.git//networking?ref=v1.4.0' -p serviceName=payments
+```
+
+Both `version` and the `?ref=` suffix are templatable (T4) and render with the
+same params as the rest of the child reference (M4), so a version can be
+parameterized:
+
+```yaml
+params:
+  - name: modVersion
+    default: "v1.4.0"
+modules:
+  - name: networking
+    source: "https://github.com/org/modules.git//networking"
+    version: "{{ .modVersion }}"
+```
+
+**Resolution.** A `?ref=` suffix, when present, is split off the source before
+`//subdir` parsing (Terraform convention: the ref is the last component). The
+`version` field takes precedence over a `?ref=` suffix when both are given. The
+repository is cloned in full — so any branch, tag, or commit is on disk — then
+checked out at the selected version. A tag or commit yields a detached HEAD,
+which is correct for a pinned, read-only module.
+
+Version pinning applies to git sources only. Combining it with a **local**
+source (one starting with `.` or `/`) is an error — a local path is already at a
+fixed version on disk.
+
+### Error Conditions
+
+| Condition | Error |
+|-----------|-------|
+| `version` or `?ref=` on a local source | `module source "<path>": version pinning is only supported for git sources, not local paths` |
+| Selected version does not exist in the repo | `pinning module "<url>" to version "<ref>": ...` |
 
 ---
 
@@ -999,7 +1056,9 @@ paths are skipped.
 loom run <moduleSource> [flags]
 
  1. Parse CLI flags and parameters.
- 1a. If moduleSource contains "//", split into git URL and subdirectory.
+ 1a. Split off a trailing "?ref=<version>" selector (M5); if the source
+     contains "//", split the remainder into git URL and subdirectory. Clone
+     the repo and, when a ref was given, check it out.
  2. Load loom.yaml from moduleDir (or cloneDir/subdir if git source with //).
  3. Validate config structure.
  4. Resolve static params (CLI > params-file > default > required error).
@@ -1011,7 +1070,8 @@ loom run <moduleSource> [flags]
     c. No target spec, --target-path given  → use target-path directly.
     d. No target spec, no --target-path     → use moduleDir.
  7. For each child module (in declaration order):
-    a. Resolve child source (local path, git clone, or git clone with // subdir).
+    a. Resolve child source (local path, git clone, or git clone with // subdir);
+       when `modules[].version` is set, check the clone out at that ref (M5).
     b. Render child params through parent template context.
     c. Load child module (validate, resolve params).
     d. Resolve child target (same logic as step 6).

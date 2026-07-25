@@ -78,7 +78,7 @@ Parameters are the inputs to your module. They're injected into every template �
 - `spec.excludes[]`, `spec.includes[]`
 - `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].version`, `spec.modules[].params` values
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
 - `shell.command`, `shell.timeout`
@@ -202,7 +202,8 @@ Child modules to execute before this module's operations. See [Module Compositio
 | Field | Description |
 |-------|-------------|
 | `name` | Identifier for the child module. Templatable. |
-| `source` | Path to the child module. Accepts local paths, git URLs, or git URLs with `//subdir` separator. Templatable — rendered before source resolution. |
+| `source` | Path to the child module. Accepts local paths, git URLs, and git URLs with a `//subdir` separator. Templatable — rendered before source resolution. |
+| `version` | Optional. Pins a git `source` to a branch, tag, or commit. Templatable. Ignored for local sources (an error to combine). Equivalent to a `?ref=` suffix on the source, which it overrides. |
 | `params` | Parameters to pass down, rendered through the parent's context |
 | `if` | Optional shell predicate gating the child. Templatable (parent's params). Runs via `sh -c` in the child's resolved target dir — exit `0` runs the child, non-zero skips it. See [`if`](#conditional-execution-if). |
 
@@ -213,6 +214,7 @@ Source formats:
 | `./relative` or `/absolute` | Local path, resolved relative to parent module directory |
 | `https://github.com/org/repo.git` | Git URL — `loom.yaml` expected at repo root |
 | `https://github.com/org/repo.git//path` | Git URL — `loom.yaml` expected at `path/` within the clone |
+| `https://github.com/org/repo.git//path?ref=v1.4.0` | Git URL pinned to a branch, tag, or commit — `?ref=` comes last, after any `//path`. For child modules, prefer the `version` field above. |
 
 ## `spec.operations`
 

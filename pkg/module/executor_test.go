@@ -52,6 +52,77 @@ func initBareRepo(t *testing.T) string {
 	return bare
 }
 
+// initTaggedBareRepo builds a bare repo whose default branch's greeting.txt
+// reads "main" atop a base commit tagged "v1" whose greeting.txt reads "v1".
+// This lets a test tell which version ResolveSource checked out. Returns the
+// bare repo path.
+func initTaggedBareRepo(t *testing.T) string {
+	t.Helper()
+
+	work := t.TempDir()
+	if out, err := exec.Command("git", "init", work).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	run := func(args ...string) {
+		full := append([]string{"-C", work}, args...)
+		if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("config", "user.email", "test@test.com")
+	run("config", "user.name", "Test")
+
+	os.WriteFile(filepath.Join(work, "greeting.txt"), []byte("v1\n"), 0o644)
+	run("add", "-A")
+	run("commit", "-m", "v1")
+	run("tag", "v1")
+
+	os.WriteFile(filepath.Join(work, "greeting.txt"), []byte("main\n"), 0o644)
+	run("add", "-A")
+	run("commit", "-m", "main")
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone: %v\n%s", err, out)
+	}
+	return bare
+}
+
+func TestResolveSource_M5_VersionField(t *testing.T) {
+	bare := initTaggedBareRepo(t)
+
+	dir, cleanup, err := ResolveSource("file://"+bare, "v1", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "greeting.txt"))
+	if strings.TrimSpace(string(got)) != "v1" {
+		t.Errorf("expected greeting.txt from v1 tag, got %q", got)
+	}
+}
+
+func TestResolveSource_M5_FieldOverridesRefSuffix(t *testing.T) {
+	bare := initTaggedBareRepo(t)
+
+	// The version field says v1; the ?ref= suffix names a ref that does not
+	// exist. If the suffix were used the checkout would fail — success with v1
+	// content proves the explicit field wins and the suffix is ignored.
+	dir, cleanup, err := ResolveSource("file://"+bare+"?ref=nonexistent", "v1", "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	got, _ := os.ReadFile(filepath.Join(dir, "greeting.txt"))
+	if strings.TrimSpace(string(got)) != "v1" {
+		t.Errorf("expected version field to override ?ref= suffix, got %q", got)
+	}
+}
+
 // writeLoomYAML writes a loom.yaml into dir with the given content.
 func writeLoomYAML(t *testing.T, dir, content string) {
 	t.Helper()
@@ -339,7 +410,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 func TestResolveSource_LocalPath_NilCleanup(t *testing.T) {
 	dir := t.TempDir()
 
-	resolved, cleanup, err := ResolveSource(".", dir, testLogger())
+	resolved, cleanup, err := ResolveSource(".", "", dir, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +425,7 @@ func TestResolveSource_LocalPath_NilCleanup(t *testing.T) {
 func TestResolveSource_GitURL_ReturnsCleanup(t *testing.T) {
 	bare := initBareRepo(t)
 
-	dir, cleanup, err := ResolveSource("file://"+bare, "", testLogger())
+	dir, cleanup, err := ResolveSource("file://"+bare, "", "", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1143,7 +1214,7 @@ spec:
 	}
 
 	// Resolve source with //networking subdir.
-	moduleDir, cleanup, err := ResolveSource("file://"+bare+"//networking", "", testLogger())
+	moduleDir, cleanup, err := ResolveSource("file://"+bare+"//networking", "", "", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

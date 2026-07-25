@@ -31,6 +31,7 @@ loom run [path] [flags]
 | `./relative` or `/absolute` | Local directory |
 | `https://github.com/org/repo.git` | Git URL — clones to temp dir, `loom.yaml` at repo root |
 | `https://github.com/org/repo.git//subdir` | Git URL with `//` separator — `loom.yaml` at `subdir/` within the clone |
+| `https://github.com/org/repo.git?ref=<version>` | Git URL pinned to a branch, tag, or commit — the `?ref=` selector comes last, after any `//subdir` |
 
 ## Examples
 
@@ -44,6 +45,16 @@ loom run ./onboard-service -p serviceName=payments
 
 ```bash
 loom run https://github.com/myorg/loom-modules.git//onboard-service \
+  -p serviceName=payments
+```
+
+### Full run — pinned module version
+
+Append `?ref=<version>` to pin the module to a branch, tag, or commit so the
+run is reproducible instead of tracking the default branch:
+
+```bash
+loom run 'https://github.com/myorg/loom-modules.git//onboard-service?ref=v1.4.0' \
   -p serviceName=payments
 ```
 

@@ -275,7 +275,8 @@ Child modules to execute before this module's operations. This is how you compos
 | Field | Description |
 |-------|-------------|
 | `name` | Identifier for the child module |
-| `source` | Path to the child module — local (`./sub-module`) or a Git URL |
+| `source` | Path to the child module — local (`./sub-module`) or a Git URL, optionally with a `//subdir` |
+| `version` | Optional. Pins a git `source` to a branch, tag, or commit (equivalent to a `?ref=` suffix, which it overrides). Templatable |
 | `params` | Parameters to pass down, rendered through the parent's context |
 
 Child modules execute first, in order. Then the parent's operations run. This lets you build layered workflows: a base module that creates the namespace, a service module that creates the ArgoCD app, a policy module that adds the Gatekeeper constraint — all composed from a single root module.
@@ -703,8 +704,25 @@ Execution order:
 Sources can be:
 - **Local paths** (`./relative/path` or `/absolute/path`) — resolved relative to the parent module
 - **Git URLs** — cloned to a temporary directory automatically
+- **Git URLs with `//subdir`** — one repo hosting many modules (Terraform convention)
 
 This means you can publish reusable modules as Git repositories. A platform team maintains the standard modules; product teams compose them.
+
+**Pinning a version.** By default a git module tracks its default branch. Pin a child module to a released version with the `version` field so runs are reproducible:
+
+```yaml
+modules:
+  - name: onboard-service
+    source: https://github.com/myorg/loom-modules.git//onboard-service
+    version: v1.4.0        # branch, tag, or commit
+```
+
+The root module is named on the command line, so version it with a `?ref=` suffix on the source instead (the same suffix also works in a child `source`; the `version` field wins if you set both):
+
+```bash
+loom run 'https://github.com/myorg/loom-modules.git//onboard-service?ref=v1.4.0' \
+  -p serviceName=payments
+```
 
 ## CLI
 

@@ -140,6 +140,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 		}
 		checkTmpl(fmt.Sprintf("module %q name", m.Name), m.Name)
 		checkTmpl(fmt.Sprintf("module %q source", m.Name), m.Source)
+		checkTmpl(fmt.Sprintf("module %q version", m.Name), m.Version)
 		checkTmpl(fmt.Sprintf("module %q if", m.Name), m.If)
 		paramKeys := make([]string, 0, len(m.Params))
 		for k := range m.Params {

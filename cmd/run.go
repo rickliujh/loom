@@ -51,8 +51,8 @@ func runModule(cmd *cobra.Command, args []string) error {
 		source = args[0]
 	}
 
-	// Resolve source — handles git URLs, //subdir, and local paths.
-	moduleDir, cleanup, err := module.ResolveSource(source, ".", logger)
+	// Resolve source — handles git URLs, //subdir, ?ref= version, and local paths.
+	moduleDir, cleanup, err := module.ResolveSource(source, "", ".", logger)
 	if err != nil {
 		return err
 	}

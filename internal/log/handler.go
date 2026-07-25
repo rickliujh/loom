@@ -103,7 +103,7 @@ func NewPrettyHandler(w io.Writer, opts *slog.HandlerOptions) *PrettyHandler {
 	return &PrettyHandler{
 		st:    &sharedState{w: w},
 		opts:  *opts,
-		color: isTerminal(w),
+		color: IsTerminal(w),
 	}
 }
 
@@ -393,7 +393,9 @@ func (h *PrettyHandler) writeBlock(b *strings.Builder, a slog.Attr) {
 	}
 }
 
-func isTerminal(w io.Writer) bool {
+// IsTerminal reports whether w is a character device, i.e. whether writing
+// escape codes to it means anything.
+func IsTerminal(w io.Writer) bool {
 	if f, ok := w.(*os.File); ok {
 		fi, err := f.Stat()
 		if err != nil {

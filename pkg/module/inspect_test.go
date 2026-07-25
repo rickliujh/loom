@@ -193,11 +193,15 @@ func TestInspect_IN4_CycleStopsTheWalk(t *testing.T) {
 	}
 }
 
-// IN5: A depth limit truncates the walk instead of failing it.
-func TestInspect_IN5_DepthLimitTruncates(t *testing.T) {
+// IN5: A module past the depth limit is listed from what its parent declares,
+// not dropped and not read.
+func TestInspect_IN5_ModulesPastTheLimitAreListed(t *testing.T) {
 	root := t.TempDir()
 	writeModule(t, root, "grandchild", "spec: {}\n")
 	writeModule(t, root, "child", `spec:
+  params:
+    - name: needed
+      required: true
   modules:
     - name: gc
       source: ../grandchild
@@ -206,28 +210,159 @@ func TestInspect_IN5_DepthLimitTruncates(t *testing.T) {
   modules:
     - name: c
       source: ../child
+      if: "test -d somewhere"
 `)
 
 	tree := inspectDir(t, dir, InspectOptions{MaxDepth: 1})
-	if !tree.Truncated {
-		t.Error("root should be truncated at depth 1")
+	if len(tree.Children) != 1 {
+		t.Fatalf("depth 1 should still list the submodule, got %d children", len(tree.Children))
 	}
-	if len(tree.Children) != 0 {
-		t.Errorf("depth 1 walks the root alone, got %d children", len(tree.Children))
+	listed := tree.Children[0]
+	if !listed.Listed {
+		t.Error("a module past the limit should be marked listed")
+	}
+	// What the parent declares is known; what the module itself says is not.
+	if listed.Instance != "c" || listed.Source != "../child" || listed.If != "test -d somewhere" {
+		t.Errorf("listed module = %+v, want the parent's declaration carried through", listed)
+	}
+	if listed.Name != "" || len(listed.Params) != 0 || len(listed.Children) != 0 {
+		t.Error("a listed module must not be read")
+	}
+	// Its requirements are therefore unknown, not absent.
+	if len(tree.MissingParams()) != 0 {
+		t.Error("an unread module's params must not be reported as satisfied or missing")
+	}
+	if crumbs := tree.Unexpanded(); len(crumbs) != 1 || strings.Join(crumbs[0], "/") != "top/c" {
+		t.Errorf("Unexpanded() = %v, want the listed module", crumbs)
 	}
 
 	tree = inspectDir(t, dir, InspectOptions{MaxDepth: 2})
-	if tree.Truncated {
-		t.Error("root should not be truncated at depth 2")
-	}
 	child := tree.Children[0]
-	if !child.Truncated || len(child.Children) != 0 {
-		t.Errorf("child should be truncated at depth 2, got truncated=%v children=%d", child.Truncated, len(child.Children))
+	if child.Listed || child.Name != "child" {
+		t.Error("depth 2 should describe the child")
+	}
+	if len(child.Children) != 1 || !child.Children[0].Listed {
+		t.Errorf("depth 2 should list the grandchild, got %+v", child.Children)
+	}
+	if len(tree.MissingParams()) != 1 {
+		t.Error("the described child's missing param should now be reported")
 	}
 
 	tree = inspectDir(t, dir, InspectOptions{})
-	if len(tree.Children[0].Children) != 1 {
-		t.Error("depth 0 should walk the whole tree")
+	if gc := tree.Children[0].Children[0]; gc.Listed || gc.Name != "grandchild" {
+		t.Error("depth 0 should describe the whole tree")
+	}
+	if len(tree.Unexpanded()) != 0 {
+		t.Error("nothing is unexpanded once the whole tree is described")
+	}
+}
+
+// IN16: One module is described by default — the subject, with what it composes
+// listed rather than read.
+func TestInspect_IN16_DefaultDescribesOneModule(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "child", `spec:
+  operations:
+    - name: op
+      shell:
+        command: "echo hi"
+`)
+	dir := writeModule(t, root, "top", `spec:
+  params:
+    - name: env
+      default: dev
+  operations:
+    - name: announce
+      shell:
+        command: "echo go"
+  modules:
+    - name: c
+      source: ../child
+`)
+
+	// MaxDepth 1 is what the CLI defaults to.
+	tree := inspectDir(t, dir, InspectOptions{MaxDepth: 1})
+
+	if len(tree.Params) != 1 || len(tree.Operations) != 1 {
+		t.Error("the subject itself should be described in full")
+	}
+	if len(tree.Children) != 1 || !tree.Children[0].Listed {
+		t.Errorf("what it composes should be listed, got %+v", tree.Children)
+	}
+}
+
+// IN17: Any module in the tree can be made the subject, by name or by path.
+func TestInspect_IN17_FindModuleSelectsTheSubject(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "docs", `spec:
+  params:
+    - name: title
+      required: true
+`)
+	writeModule(t, root, "svc", `spec:
+  params:
+    - name: service
+      required: true
+  modules:
+    - name: docs
+      source: ../docs
+      params:
+        title: "{{ .service }} docs"
+`)
+	dir := writeModule(t, root, "top", `spec:
+  modules:
+    - name: a
+      source: ../svc
+      params:
+        service: alpha
+    - name: b
+      source: ../svc
+      params:
+        service: beta
+`)
+
+	tree := inspectDir(t, dir, InspectOptions{})
+
+	// A bare name selects a uniquely-named module wherever it sits.
+	node, path, err := tree.FindModule("a")
+	if err != nil {
+		t.Fatalf("FindModule(a): %v", err)
+	}
+	if node.Name != "svc" || strings.Join(path, "/") != "top/a" {
+		t.Errorf("got %s at %v, want the svc module at top/a", node.Name, path)
+	}
+
+	// A shared name needs qualifying, and the error says so.
+	if _, _, err := tree.FindModule("docs"); err == nil {
+		t.Error("an ambiguous name should be an error")
+	} else if !strings.Contains(err.Error(), "top/a/docs") || !strings.Contains(err.Error(), "top/b/docs") {
+		t.Errorf("ambiguity error should name the candidates, got: %v", err)
+	}
+
+	node, path, err = tree.FindModule("b/docs")
+	if err != nil {
+		t.Fatalf("FindModule(b/docs): %v", err)
+	}
+	if strings.Join(path, "/") != "top/b/docs" {
+		t.Errorf("path = %v, want top/b/docs", path)
+	}
+	// Values resolved on the way down are what this module actually receives.
+	if title := findParam(t, node, "title"); title.Value != "beta docs" {
+		t.Errorf("title = %q, want the value its parent hands it", title.Value)
+	}
+
+	if _, _, err := tree.FindModule("nope"); err == nil {
+		t.Error("an unknown name should be an error")
+	}
+
+	// Pruning a found subtree yields the same listed stubs a shallow walk does.
+	node, _, _ = tree.FindModule("a")
+	node.Prune(1)
+	if len(node.Children) != 1 || !node.Children[0].Listed {
+		t.Errorf("Prune(1) should list what the subject composes, got %+v", node.Children)
+	}
+	if node.Children[0].Name != "" || len(node.Children[0].Params) != 0 {
+		t.Error("a pruned module should be indistinguishable from one never read")
 	}
 }
 

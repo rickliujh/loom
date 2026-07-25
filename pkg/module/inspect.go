@@ -124,9 +124,10 @@ type Inspection struct {
 	// Error is set when this module could not be read at all — an unresolvable
 	// source or an invalid config. Its own contents are then unknown.
 	Error string `json:"error,omitempty"`
-	// Truncated reports that children exist but were not walked because the
-	// depth limit was reached.
-	Truncated bool `json:"truncated,omitempty"`
+	// Listed reports a module named but not read: it sits past the depth limit,
+	// so only what its parent declares about it — instance, source, condition —
+	// is known. Its parameters and operations are not.
+	Listed bool `json:"listed,omitempty"`
 	// Cycle reports that this module's source already appears among its own
 	// ancestors, so the walk stopped rather than recursing forever.
 	Cycle bool `json:"cycle,omitempty"`
@@ -139,8 +140,10 @@ type Inspection struct {
 type InspectOptions struct {
 	// Params are the values supplied for the root module, as `loom run -p` would.
 	Params map[string]string
-	// MaxDepth limits how deep the walk goes: 1 is the root alone, 2 adds its
-	// direct children, and zero or less means unlimited.
+	// MaxDepth limits how many levels of module are read: 1 is the root alone,
+	// 2 adds its direct children, and zero or less means unlimited. Modules past
+	// the limit are still listed by name — see Inspection.Listed — since knowing
+	// what a module composes is most of the value of a shallow look.
 	MaxDepth int
 	// NoFetch keeps the walk offline: modules sourced from a git URL are listed
 	// but not cloned, and so not described.
@@ -228,16 +231,17 @@ func (w *inspector) describe(node *Inspection, dir string, provided map[string]s
 	if len(cfg.Spec.Modules) == 0 {
 		return
 	}
-	if w.opts.MaxDepth > 0 && len(ancestry) >= w.opts.MaxDepth {
-		node.Truncated = true
-		return
-	}
-	w.walkChildren(node, cfg.Spec.Modules, dir, known, ancestry)
+	// Past the depth limit the children are listed rather than dropped: what a
+	// module composes, and under which names, is most of what a shallow look is
+	// for — and it is the reader's cue that there is more to expand.
+	expand := w.opts.MaxDepth <= 0 || len(ancestry) < w.opts.MaxDepth
+	w.walkChildren(node, cfg.Spec.Modules, dir, known, ancestry, expand)
 }
 
 // walkChildren describes each module the parent composes, in declaration order
-// — the order a run dispatches them in.
-func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, parentDir string, known map[string]string, ancestry []string) {
+// — the order a run dispatches them in. When expand is false the children are
+// recorded from what the parent declares and left unread.
+func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, parentDir string, known map[string]string, ancestry []string, expand bool) {
 	for _, ref := range refs {
 		child := &Inspection{}
 		parent.Children = append(parent.Children, child)
@@ -249,11 +253,20 @@ func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, pa
 		child.If = ref.If
 
 		source, sourceOK := render(ref.Source, known)
-		child.Source = source
-		if source != ref.Source {
+		if !sourceOK {
+			// Show the expression rather than the "<no value>" it rendered to:
+			// the reader can act on the former.
+			source = ref.Source
+		} else if source != ref.Source {
 			child.SourceTemplate = ref.Source
 		}
+		child.Source = source
 		child.Remote = !isLocalSource(source)
+
+		if !expand {
+			child.Listed = true
+			continue
+		}
 		if !sourceOK {
 			child.Error = fmt.Sprintf("source %q depends on a value known only at run time", ref.Source)
 			continue
@@ -412,7 +425,8 @@ type MissingParam struct {
 
 // MissingParams lists every required parameter left unsatisfied anywhere in the
 // tree, in walk order. This is the answer to "what do I have to pass to run
-// this?" — an empty result means the tree is fully parameterized as inspected.
+// this?" — though only for the modules actually read: a tree holding listed or
+// unfetched modules may need more, which is what Unexpanded reports.
 func (i *Inspection) MissingParams() []MissingParam {
 	var out []MissingParam
 	i.walk(nil, func(path []string, node *Inspection) {
@@ -442,6 +456,106 @@ func (i *Inspection) Problems() []string {
 		}
 	})
 	return out
+}
+
+// Unexpanded lists the breadcrumb of every module that was named but not read —
+// past the depth limit, or a remote left unfetched. While this is non-empty, no
+// statement about the tree's parameters is complete.
+func (i *Inspection) Unexpanded() [][]string {
+	var out [][]string
+	i.walk(nil, func(path []string, node *Inspection) {
+		if node.Listed || node.Unfetched {
+			out = append(out, append([]string(nil), path...))
+		}
+	})
+	return out
+}
+
+// FindModule locates one module by instance name, or by a "/"-separated path of
+// instance names. The query matches against the tail of a module's breadcrumb,
+// so "docs" finds a module wherever it sits and "svc-a/docs" picks between two
+// that share a name. The breadcrumb of the match is returned with it.
+//
+// Not finding exactly one is an error naming the candidates, since a query that
+// silently picked one of several would describe the wrong module.
+func (i *Inspection) FindModule(query string) (*Inspection, []string, error) {
+	want := strings.Split(query, "/")
+	var matches []*Inspection
+	var paths [][]string
+	var all []string
+
+	i.walk(nil, func(path []string, node *Inspection) {
+		all = append(all, strings.Join(path, "/"))
+		if hasSuffix(path, want) {
+			matches = append(matches, node)
+			paths = append(paths, append([]string(nil), path...))
+		}
+	})
+
+	switch len(matches) {
+	case 1:
+		return matches[0], paths[0], nil
+	case 0:
+		return nil, nil, fmt.Errorf("no module %q in this tree; it holds: %s", query, strings.Join(all, ", "))
+	default:
+		var found []string
+		for _, p := range paths {
+			found = append(found, strings.Join(p, "/"))
+		}
+		return nil, nil, fmt.Errorf("%q matches %d modules (%s); name one of them in full", query, len(matches), strings.Join(found, ", "))
+	}
+}
+
+// Prune reduces an already-walked tree to depth levels of described module,
+// turning everything below into the same listed stubs a depth-limited walk
+// produces. It exists for the walks that cannot know their limit up front —
+// finding a module by name means reading the tree that holds it — so the result
+// still reads like one asked for at that depth. A depth of zero or less is a
+// no-op.
+func (i *Inspection) Prune(depth int) {
+	if i == nil || depth <= 0 {
+		return
+	}
+	if depth == 1 {
+		for _, child := range i.Children {
+			child.reduceToStub()
+		}
+		return
+	}
+	for _, child := range i.Children {
+		child.Prune(depth - 1)
+	}
+}
+
+// reduceToStub strips a node back to what its parent declares about it, so a
+// pruned module is indistinguishable from one the walk never opened.
+func (i *Inspection) reduceToStub() {
+	stub := Inspection{
+		Instance:       i.Instance,
+		Source:         i.Source,
+		SourceTemplate: i.SourceTemplate,
+		Remote:         i.Remote,
+		If:             i.If,
+		Listed:         true,
+	}
+	*i = stub
+}
+
+// hasSuffix reports whether path ends with the segments in want.
+func hasSuffix(path, want []string) bool {
+	if len(want) > len(path) {
+		return false
+	}
+	return equalSegments(path[len(path)-len(want):], want)
+}
+
+func equalSegments(a, b []string) bool {
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // walk visits every node depth-first in declaration order, passing the instance

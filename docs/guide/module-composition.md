@@ -103,7 +103,7 @@ modules:
 
 Each child module resolves its own `spec.params` independently -- only the values passed in `params` are available. There is no implicit inheritance of parent parameters.
 
-Because of that, a deeply composed tree can require a value you never see at the top level. [`loom inspect`](/reference/cli-inspect) walks the whole tree and reports every parameter each module declares, where its value comes from, and which required ones nothing supplies -- without running anything.
+Because of that, a deeply composed tree can require a value you never see at the top level. [`loom inspect`](/reference/cli-inspect) reports every parameter a module declares, where its value comes from, and which required ones nothing supplies -- without running anything. Add `--full` to walk the whole tree, or `--module <name>` to look at one submodule with the values its parents actually hand it.
 
 ## Conditional Modules
 

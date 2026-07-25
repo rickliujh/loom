@@ -2,7 +2,7 @@
 
 This document describes the expected behavior of the **`inspect`** command, which describes a loom module and every module it composes without executing any of it.
 
-Inspect answers three questions about a module you are about to run: what it is made of (the module hierarchy), what it will do (the operations of each module, in execution order), and what you must supply for it to run (the parameter requirements of every module in the tree).
+Inspect answers three questions about a module you are about to run: what it is made of (the modules it composes), what it will do (its operations, in execution order), and what you must supply for it to run (its parameter requirements).
 
 Modules inspected conform to the module specification defined in [`specs/module.md`](module.md).
 
@@ -12,9 +12,12 @@ Modules inspected conform to the module specification defined in [`specs/module.
 |-------|-------------|
 | `source` | Optional. Module path or git URL, resolved exactly as `run` resolves it (including the `//subdir` form). Defaults to `.` (current directory). |
 | `params` | Optional. `map[string]string` supplied for the root module, as `run` accepts them. |
-| `maxDepth` | Optional. Maximum module depth to walk. `1` is the root alone; `0` or less means unlimited. Defaults to unlimited. |
+| `maxDepth` | Optional. Levels of module to describe. `1` is the subject alone; `0` or less means all of them. Defaults to `1`. |
+| `module` | Optional. Instance name, or `/`-separated path of instance names, selecting which module is described. Defaults to the root. |
 | `noFetch` | Optional. When set, modules whose source is a git URL are listed but not cloned. Defaults to false. |
 | `output` | Optional. `tree` (default) or `json`. |
+
+The module being described is the **subject**. It is the root unless `module` selects another.
 
 ---
 
@@ -51,9 +54,29 @@ A module whose resolved source already appears among its own ancestors is report
 
 A module appearing more than once in the tree without being its own ancestor is not a cycle — it is composed twice — and is described in full at each position.
 
-#### IN5: Depth limits truncate rather than fail
+#### IN5: Modules past the depth limit are listed, not dropped
 
-When `maxDepth` stops the walk at a module that has submodules, that module is marked as truncated and the walk continues elsewhere. Truncation is not an error.
+A module beyond `maxDepth` is still reported, carrying what its parent declares about it — instance name, source, and `if` condition — and marked as **listed**: named, but not read. Its parameters, operations, and submodules are unknown, because its config was never opened.
+
+A listed module is never resolved, so a listed remote module is never cloned. This is what makes a shallow inspection cheap.
+
+Reaching the depth limit is not an error.
+
+#### IN16: One module is described by default
+
+`maxDepth` defaults to `1`: the subject is described, and the modules it composes are listed. This answers the common question — what is this module, and what does it need — without reading a tree that may span several repositories.
+
+Describing more is explicit: raising `maxDepth`, or setting it to `0` for the whole tree.
+
+#### IN17: Any module in the tree can be made the subject
+
+`module` selects which module is described. It matches against the tail of a module's instance breadcrumb, so a bare name selects that module wherever it sits, and a `parent/child` path distinguishes modules that share a name.
+
+Matching anything other than exactly one module is an error naming the candidates — a query that silently picked one of several would describe the wrong module. The subject is reported with its breadcrumb from the root, so its position in the tree is never in doubt.
+
+Selecting a module requires finding it, so the tree holding it is read regardless of `maxDepth`; the limit then applies to the subject and what it composes.
+
+Parameters are resolved along the way down, exactly as for an unfocused inspection: a subject deep in the tree shows the values its parents actually hand it, not defaults it would never see.
 
 ---
 
@@ -86,9 +109,11 @@ Inspect renders templates against only the parameters whose values it actually k
 - A `modules[].source` that fails to resolve is an error on that child, and the walk does not descend into it — the module it names is not knowable.
 - A `target` field that fails to resolve keeps its template text.
 
-#### IN9: Missing required parameters are reported for the whole tree
+#### IN9: Missing required parameters are collected across everything described
 
-Every parameter in state `missing`, anywhere in the tree, is collected into one list, each located by the instance breadcrumb of the module that declares it. This is the set of values a run would fail without, and in a composed tree the module that needs a value is frequently not the one being invoked.
+Every parameter in state `missing`, in the subject or any module described beneath it, is collected into one list, each located by the instance breadcrumb of the module that declares it. This is the set of values a run would fail without, and in a composed tree the module that needs a value is frequently not the one being invoked.
+
+The claim is scoped to what was actually read. Listed and unfetched modules may require parameters of their own, so while any exist they are reported alongside, and the result is never presented as a complete account of the tree's requirements.
 
 Missing parameters do not make inspect fail: reporting them is what the command is for.
 

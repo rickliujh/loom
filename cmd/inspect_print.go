@@ -28,13 +28,22 @@ type branch struct {
 	body  func(prefix string)
 }
 
-func (p *inspectPrinter) root(n *module.Inspection) {
+// root heads the report with the described module and prints its branches. The
+// path is its breadcrumb from the run's root: when it has one, the module is
+// somebody's submodule, and where it sits is part of identifying it.
+func (p *inspectPrinter) root(n *module.Inspection, path []string) {
 	fmt.Fprintln(p.w)
 	line := p.style.RootChip(n.Instance)
-	if n.Dir != "" {
+	switch {
+	case n.Dir != "":
 		line += " " + p.style.Muted(n.Dir)
+	case n.Source != "":
+		line += " " + p.style.Muted(n.Source)
 	}
 	fmt.Fprintln(p.w, line)
+	if len(path) > 1 {
+		fmt.Fprintln(p.w, p.style.Muted("in "+strings.Join(path, " › ")))
+	}
 	p.branches(n, "")
 }
 
@@ -106,9 +115,6 @@ func (p *inspectPrinter) buildBranches(n *module.Inspection) []branch {
 			body:  func(prefix string) { p.branches(child, prefix) },
 		})
 	}
-	if n.Truncated {
-		bs = append(bs, branch{label: p.style.Muted("… submodules not expanded (--depth limit)")})
-	}
 	return bs
 }
 
@@ -130,6 +136,12 @@ func (p *inspectPrinter) childLabel(n *module.Inspection) string {
 	}
 	if n.If != "" {
 		b.WriteString("  " + p.style.Warn("if: "+n.If))
+	}
+	// A listed module has no branches of its own, so without a marker it would
+	// read as a module that simply does nothing. The ellipsis says "there is more
+	// here"; the summary says how to get it.
+	if n.Listed {
+		b.WriteString("  " + p.style.Muted("…"))
 	}
 	return b.String()
 }
@@ -230,22 +242,61 @@ func (p *inspectPrinter) printOperations(ops []module.OpSummary, prefix string) 
 // Parameters are listed with the breadcrumb of the module that declares them,
 // because in a composed tree the module that needs a value is often not the one
 // you invoke.
-func (p *inspectPrinter) summary(tree *module.Inspection) {
+//
+// Everything it says is scoped to the modules actually read. A shallow look
+// leaves submodules unopened, and claiming a tree is fully parameterized on the
+// strength of the parts you did not look at would be worse than saying nothing.
+func (p *inspectPrinter) summary(subject *module.Inspection, path []string) {
 	fmt.Fprintln(p.w)
-	missing := tree.MissingParams()
-	if len(missing) == 0 {
+	missing := prefixPaths(subject.MissingParams(), path)
+	// Kept in both forms: breadcrumbs are shown from the run's root so they read
+	// unambiguously, while the --module hint has to be phrased relative to the
+	// subject, which is what the flag matches against.
+	relative := subject.Unexpanded()
+	unexpanded := prefixCrumbs(relative, path)
+
+	switch {
+	case len(missing) > 0:
+		prettylog.Warningf(p.w, "%d required parameter(s) not supplied — a run would fail:", len(missing))
+		nameW := 0
+		for _, m := range missing {
+			nameW = max(nameW, len(m.Name))
+		}
+		for _, m := range missing {
+			fmt.Fprintf(p.w, "  %s  %s\n", pad(m.Name, nameW), p.style.Muted(strings.Join(m.Path, " › ")))
+		}
+		fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("supply them with -p name=value"))
+	case len(unexpanded) > 0:
+		prettylog.Successf(p.w, "every required parameter of the module(s) shown is satisfied")
+	default:
 		prettylog.Successf(p.w, "every required parameter is satisfied")
+	}
+
+	if len(unexpanded) == 0 {
 		return
 	}
-	prettylog.Warningf(p.w, "%d required parameter(s) not supplied — a run would fail:", len(missing))
-	nameW := 0
-	for _, m := range missing {
-		nameW = max(nameW, len(m.Name))
+	fmt.Fprintf(p.w, "\n%s\n", p.style.Muted(fmt.Sprintf("%d submodule(s) not expanded — they may need parameters of their own:", len(unexpanded))))
+	for _, crumb := range unexpanded {
+		fmt.Fprintf(p.w, "  %s\n", p.style.Muted(strings.Join(crumb, " › ")))
 	}
-	for _, m := range missing {
-		fmt.Fprintf(p.w, "  %s  %s\n", pad(m.Name, nameW), p.style.Muted(strings.Join(m.Path, " › ")))
+	fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("--full describes all of them; --module "+moduleQuery(subject, relative[0])+" describes one"))
+}
+
+// moduleQuery phrases a breadcrumb as a --module argument that will actually
+// resolve. A bare name is the nicer thing to type, but two submodules can share
+// one — as they do whenever a tree composes the same module twice — so the
+// suggestion falls back to the qualified path rather than handing the reader a
+// command that errors as ambiguous.
+func moduleQuery(subject *module.Inspection, crumb []string) string {
+	if len(crumb) < 2 {
+		return "NAME"
 	}
-	fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("supply them with -p name=value"))
+	rel := crumb[1:] // drop the subject itself; --module names what is under it
+	name := rel[len(rel)-1]
+	if _, _, err := subject.FindModule(name); err == nil {
+		return name
+	}
+	return strings.Join(rel, "/")
 }
 
 // pad right-aligns a column to width, on the uncolored text.

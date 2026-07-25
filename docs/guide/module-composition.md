@@ -117,15 +117,17 @@ modules:
 ```
 
 The **root module** is passed on the command line, so it has no `version` field
-to set. Version it with a `?ref=<version>` suffix on the source instead (the
-Terraform convention — the `?ref=` comes last, after any `//subdir`):
+to set. Version it with the `--ref` flag, or with a `?ref=<version>` suffix on
+the source (the Terraform convention — `?ref=` comes last, after any
+`//subdir`). `--ref` takes precedence over a `?ref=` suffix:
 
 ```bash
+loom run https://github.com/myorg/loom-modules.git//onboard --ref v2.0.0 -p serviceName=payments
 loom run 'https://github.com/myorg/loom-modules.git//onboard?ref=v2.0.0' -p serviceName=payments
 ```
 
-The same `?ref=` suffix also works in a child `source`; the `version` field
-takes precedence if you set both. Version pinning applies to git sources only —
+The `?ref=` suffix also works in a child `source`; the `version` field takes
+precedence if you set both. Version pinning applies to git sources only —
 combining it with a local path is an error, since a local path is already fixed
 on disk.
 

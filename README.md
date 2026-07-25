@@ -717,11 +717,11 @@ modules:
     version: v1.4.0        # branch, tag, or commit
 ```
 
-The root module is named on the command line, so version it with a `?ref=` suffix on the source instead (the same suffix also works in a child `source`; the `version` field wins if you set both):
+The root module is named on the command line, so version it with the `--ref` flag or a `?ref=` suffix on the source (`--ref` wins if both are given). The `?ref=` suffix also works in a child `source`, though child modules should prefer the `version` field:
 
 ```bash
-loom run 'https://github.com/myorg/loom-modules.git//onboard-service?ref=v1.4.0' \
-  -p serviceName=payments
+loom run https://github.com/myorg/loom-modules.git//onboard-service \
+  --ref v1.4.0 -p serviceName=payments
 ```
 
 ## CLI
@@ -739,6 +739,7 @@ loom run [path] [flags]
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Use a local directory as the target (skip git clone) |
+| `--ref version` | Pin the module source to a git branch, tag, or commit (overrides a `?ref=` in the source; git sources only) |
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--dry-run` | Show what would happen without writing anything |

@@ -435,8 +435,9 @@ There are two spellings, one for each place a module is named:
 - **Child modules** declare `spec.modules[].version` — a dedicated, visible
   field alongside `name`, `source`, and `params`. This is the preferred form.
 - **The CLI / root source** — passed as the whole `loom run <source>` argument —
-  carries a trailing `?ref=<version>` suffix, since it has no surrounding
-  `modules[]` entry to hold a field.
+  has no surrounding `modules[]` entry to hold a field, so it is pinned either
+  with a trailing `?ref=<version>` suffix on the source or with the `--ref` flag.
+  `--ref` takes precedence over a `?ref=` suffix.
 
 ```yaml
 modules:
@@ -447,6 +448,7 @@ modules:
 
 ```bash
 loom run 'https://github.com/org/modules.git//networking?ref=v1.4.0' -p serviceName=payments
+loom run https://github.com/org/modules.git//networking --ref v1.4.0 -p serviceName=payments
 ```
 
 Both `version` and the `?ref=` suffix are templatable (T4) and render with the
@@ -852,6 +854,7 @@ is logged.
 | `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
 | `--params-file` | string | `""` | YAML file with parameters |
 | `--target-path` | string | `""` | Base directory for local mode output |
+| `--ref` | string | `""` | Pin the root module source to a git branch, tag, or commit. Overrides a `?ref=` in the source; git sources only (M5) |
 | `--author` | string | `""` | Default git author name for `commitPush` operations |
 | `--email` | string | `""` | Default git author email for `commitPush` operations |
 | `--summary` | bool | `false` | Print a list of PRs/MRs created during the run at the end (see PR4) |
@@ -951,6 +954,7 @@ fidelity levels.
 | `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
 | `--params-file` | string | `""` | YAML file with parameters |
 | `--target-path` | string | `""` | Directory for target clones; when set it is kept for inspection instead of a cleaned-up temp dir |
+| `--ref` | string | `""` | Pin the root module source to a git branch, tag, or commit. Overrides a `?ref=` in the source; git sources only (M5) |
 | `--author` | string | `""` | Default git author name for `commitPush` operations |
 | `--email` | string | `""` | Default git author email for `commitPush` operations |
 

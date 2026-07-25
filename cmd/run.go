@@ -20,6 +20,7 @@ var (
 	params      []string
 	paramsFile  string
 	targetPath  string
+	moduleRef   string
 	gitAuthor   string
 	gitEmail    string
 	showSummary bool
@@ -37,6 +38,7 @@ func init() {
 	runCmd.Flags().StringArrayVarP(&params, "param", "p", nil, "Parameter in key=value format (can be repeated)")
 	runCmd.Flags().StringVar(&paramsFile, "params-file", "", "YAML file with parameters")
 	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Directory for target files: with --local-run, target repos are cloned into numbered subdirectories here; modules without a target spec use it directly")
+	runCmd.Flags().StringVar(&moduleRef, "ref", "", "Pin the module source to a git branch, tag, or commit (overrides a ?ref= in the source; git sources only)")
 	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
 	runCmd.Flags().StringVar(&gitEmail, "email", "", "Default git author email for commitPush operations")
 	runCmd.Flags().BoolVar(&showSummary, "summary", false, "Print a list of PRs/MRs created during the run at the end")
@@ -52,7 +54,8 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve source — handles git URLs, //subdir, ?ref= version, and local paths.
-	moduleDir, cleanup, err := module.ResolveSource(source, "", ".", logger)
+	// The --ref flag pins the root module and takes precedence over any ?ref=.
+	moduleDir, cleanup, err := module.ResolveSource(source, moduleRef, ".", logger)
 	if err != nil {
 		return err
 	}

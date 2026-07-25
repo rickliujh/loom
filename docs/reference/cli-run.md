@@ -13,6 +13,7 @@ loom run [path] [flags]
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Directory for target files. With `--local-run`, each target repo is cloned into a numbered subdirectory (`00-<name>/`, `01-<name>/`, …). Modules without a `target` spec use it directly as the target directory. Ignored otherwise. |
+| `--ref version` | Pin the module source to a git branch, tag, or commit. Overrides a `?ref=` in the source; git sources only |
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--summary` | Print a list of PRs/MRs created during the run at the end |
@@ -50,10 +51,15 @@ loom run https://github.com/myorg/loom-modules.git//onboard-service \
 
 ### Full run — pinned module version
 
-Append `?ref=<version>` to pin the module to a branch, tag, or commit so the
-run is reproducible instead of tracking the default branch:
+Pin the module to a branch, tag, or commit so the run is reproducible instead of
+tracking the default branch. Use `--ref`, or append `?ref=<version>` to the
+source (`--ref` wins if both are given):
 
 ```bash
+loom run https://github.com/myorg/loom-modules.git//onboard-service \
+  --ref v1.4.0 -p serviceName=payments
+
+# equivalently, in the source:
 loom run 'https://github.com/myorg/loom-modules.git//onboard-service?ref=v1.4.0' \
   -p serviceName=payments
 ```

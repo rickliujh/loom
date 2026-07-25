@@ -21,6 +21,7 @@ var (
 	diffParams     []string
 	diffParamsFile string
 	diffTargetPath string
+	diffRef        string
 	diffAuthor     string
 	diffEmail      string
 	diffQuick      bool
@@ -48,6 +49,7 @@ func init() {
 	diffCmd.Flags().StringArrayVarP(&diffParams, "param", "p", nil, "Parameter in key=value format (can be repeated)")
 	diffCmd.Flags().StringVar(&diffParamsFile, "params-file", "", "YAML file with parameters")
 	diffCmd.Flags().StringVar(&diffTargetPath, "target-path", "", "Directory for target clones. When set, it is kept for inspection instead of a cleaned-up temp dir")
+	diffCmd.Flags().StringVar(&diffRef, "ref", "", "Pin the module source to a git branch, tag, or commit (overrides a ?ref= in the source; git sources only)")
 	diffCmd.Flags().StringVar(&diffAuthor, "author", "", "Default git author name for commitPush operations")
 	diffCmd.Flags().StringVar(&diffEmail, "email", "", "Default git author email for commitPush operations")
 	diffCmd.Flags().BoolVar(&diffQuick, "quick", false, "Simulate the run (dry-run) and show newFiles/patch diffs only, without executing anything")
@@ -335,7 +337,7 @@ func resolveModuleAndTarget(ctx context.Context, source string, paramMap map[str
 		}
 	}
 
-	moduleDir, srcCleanup, err := module.ResolveSource(source, "", ".", logger)
+	moduleDir, srcCleanup, err := module.ResolveSource(source, diffRef, ".", logger)
 	if err != nil {
 		return nil, "", nil, err
 	}

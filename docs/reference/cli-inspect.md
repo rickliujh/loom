@@ -25,7 +25,7 @@ see what it will do, and to find out what you have to pass it.
 | `--params-file <file>` | YAML file with parameters. |
 | `--full` | Describe every module in the tree. Same as `--depth 0`. |
 | `--depth <n>` | Levels of module to describe. `1` (default) is the subject alone; `0` means all of them. |
-| `-m, --module <name>` | Describe this submodule instead, by instance name or `parent/child` path. |
+| `-m, --module <name>` | Describe this submodule instead of the root, by instance name or `parent/child` path. Repeatable. |
 | `--no-fetch` | Do not clone modules sourced from a git URL. They are listed, but not described. |
 | `-o, --output <format>` | `tree` (default) or `json`. |
 
@@ -47,6 +47,19 @@ loom inspect ./platform-rollout -m svc-a-prod   # make that submodule the subjec
 module wherever it sits, and `svc-b/docs` distinguishes two that share a name.
 Matching several is an error listing the candidates, rather than a silent pick of
 the wrong one. The summary's hint always suggests a query that resolves.
+
+Repeat it to describe several modules at once — comparing two siblings, for
+instance:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod -m svc-b
+```
+
+Each is reported with its own breadcrumb, in the order you asked for them, under
+**one** summary: what you have to supply is a single list however many modules
+you looked at. Naming the same module twice describes it once, and two subjects
+may overlap — a module and one it composes — without either affecting how the
+other is reported.
 
 A focused module is reported with its breadcrumb from the root, and its
 parameters carry the values its parents actually hand it — not the defaults it
@@ -202,9 +215,9 @@ loom inspect ./platform-rollout --full -p env=prod -o json | jq '.missingParams'
 
 | Field | Description |
 |-------|-------------|
-| `path` | Breadcrumb of the described module from the root. Just the root's name unless `--module` was used. |
-| `module` | The described module. Each node carries `instance`, `name`, `source`, `params`, `operations`, and nested `modules`; a node with `"listed": true` was named but not read. |
-| `missingParams` | Unsatisfied required parameters, with the breadcrumb of the module declaring each. |
+| `modules` | The described modules, each `{ path, module }`. Always a list — of one, unless `--module` was repeated — so it is indexed the same way either way. `path` is the breadcrumb from the root. |
+| `modules[].module` | Each node carries `instance`, `name`, `source`, `params`, `operations`, and nested `modules`; a node with `"listed": true` was named but not read. |
+| `missingParams` | Unsatisfied required parameters, with the breadcrumb of the module declaring each. Spans every described module, deduplicated. |
 | `problems` | Modules that could not be described. |
 | `unexpanded` | Breadcrumbs of the modules listed but not read. While this is non-empty, `missingParams` covers part of the tree, not all of it. |
 

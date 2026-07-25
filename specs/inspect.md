@@ -68,13 +68,17 @@ Reaching the depth limit is not an error.
 
 Describing more is explicit: raising `maxDepth`, or setting it to `0` for the whole tree.
 
-#### IN17: Any module in the tree can be made the subject
+#### IN17: Any module in the tree can be made the subject, and more than one
 
 `module` selects which module is described. It matches against the tail of a module's instance breadcrumb, so a bare name selects that module wherever it sits, and a `parent/child` path distinguishes modules that share a name.
 
-Matching anything other than exactly one module is an error naming the candidates — a query that silently picked one of several would describe the wrong module. The subject is reported with its breadcrumb from the root, so its position in the tree is never in doubt.
+Matching anything other than exactly one module is an error naming the candidates — a query that silently picked one of several would describe the wrong module. Each subject is reported with its breadcrumb from the root, so its position in the tree is never in doubt.
 
-Selecting a module requires finding it, so the tree holding it is read regardless of `maxDepth`; the limit then applies to the subject and what it composes.
+`module` may be given more than once, describing several modules in one report — two siblings compared side by side, say. The subjects are reported in the order they were requested, and naming one twice describes it once. Subjects are independent of each other: two can overlap, one sitting inside another, and applying the depth limit to one never reduces what is reported for the other.
+
+The roll-ups of IN9 span every subject as one set, deduplicated, because what the caller must supply is a single list regardless of how many modules they asked to see.
+
+Selecting a module requires finding it, so the tree holding it is read regardless of `maxDepth`; the limit then applies to each subject and what it composes.
 
 Parameters are resolved along the way down, exactly as for an unfocused inspection: a subject deep in the tree shows the values its parents actually hand it, not defaults it would never see.
 

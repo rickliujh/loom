@@ -506,6 +506,33 @@ func (i *Inspection) FindModule(query string) (*Inspection, []string, error) {
 	}
 }
 
+// Clone returns a deep copy of this module and everything beneath it.
+//
+// Nodes in a walked tree are shared: a module is reachable both on its own and
+// through its parent. Describing several modules from one walk therefore has to
+// copy them first, or pruning one subject would reduce another that happens to
+// sit inside it.
+func (i *Inspection) Clone() *Inspection {
+	if i == nil {
+		return nil
+	}
+	c := *i
+	c.Params = append([]Param(nil), i.Params...)
+	c.Operations = append([]OpSummary(nil), i.Operations...)
+	c.Excludes = append([]string(nil), i.Excludes...)
+	c.Includes = append([]string(nil), i.Includes...)
+	c.Warnings = append([]string(nil), i.Warnings...)
+	if i.Target != nil {
+		target := *i.Target
+		c.Target = &target
+	}
+	c.Children = nil
+	for _, child := range i.Children {
+		c.Children = append(c.Children, child.Clone())
+	}
+	return &c
+}
+
 // Prune reduces an already-walked tree to depth levels of described module,
 // turning everything below into the same listed stubs a depth-limited walk
 // produces. It exists for the walks that cannot know their limit up front —

@@ -767,7 +767,7 @@ loom inspect [path] [flags]
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--full` | Describe every module in the tree (same as `--depth 0`) |
 | `--depth n` | Levels of module to describe (`1`, the default, is the subject alone) |
-| `-m, --module name` | Describe this submodule instead, by name or `parent/child` path |
+| `-m, --module name` | Describe this submodule instead of the root, by name or `parent/child` path (repeatable) |
 | `--no-fetch` | Don't clone modules sourced from a Git URL; list them instead |
 | `-o, --output format` | `tree` (default) or `json` |
 
@@ -824,9 +824,15 @@ in platform-rollout › svc-a-prod
   region  platform-rollout › svc-a-prod
 ```
 
+Repeat `-m` to describe several modules at once — two siblings side by side, say — each with its own breadcrumb, under one shared summary:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod -m svc-b
+```
+
 Each parameter carries where its value comes from, and a value handed down by a parent is shown with the expression that produced it (`← {{ .env }}-apps`). The summary collects every required parameter still unsupplied, located by the module that declares it — in a composed tree, that is often not the module you invoke. It never claims a tree is fully parameterized on the strength of modules it did not read.
 
-Use `-o json` for scripting; the document carries the described module plus `missingParams`, `problems`, and `unexpanded` roll-ups.
+Use `-o json` for scripting; the document carries the described modules plus `missingParams`, `problems`, and `unexpanded` roll-ups.
 
 ### `loom diff`
 

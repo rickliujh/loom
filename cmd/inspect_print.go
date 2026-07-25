@@ -19,6 +19,10 @@ import (
 type inspectPrinter struct {
 	w     io.Writer
 	style prettylog.Style
+	// tree is the whole walked tree, which the described modules are nodes of.
+	// The summary needs it to phrase a --module hint the reader can actually run,
+	// since that flag resolves against the tree rather than against a subject.
+	tree *module.Inspection
 }
 
 // branch is one child line of a module: a label, and optionally the body lines
@@ -246,14 +250,10 @@ func (p *inspectPrinter) printOperations(ops []module.OpSummary, prefix string) 
 // Everything it says is scoped to the modules actually read. A shallow look
 // leaves submodules unopened, and claiming a tree is fully parameterized on the
 // strength of the parts you did not look at would be worse than saying nothing.
-func (p *inspectPrinter) summary(subject *module.Inspection, path []string) {
+func (p *inspectPrinter) summary(subjects []subject) {
 	fmt.Fprintln(p.w)
-	missing := prefixPaths(subject.MissingParams(), path)
-	// Kept in both forms: breadcrumbs are shown from the run's root so they read
-	// unambiguously, while the --module hint has to be phrased relative to the
-	// subject, which is what the flag matches against.
-	relative := subject.Unexpanded()
-	unexpanded := prefixCrumbs(relative, path)
+	missing := collectMissing(subjects)
+	unexpanded := collectUnexpanded(subjects)
 
 	switch {
 	case len(missing) > 0:
@@ -279,24 +279,24 @@ func (p *inspectPrinter) summary(subject *module.Inspection, path []string) {
 	for _, crumb := range unexpanded {
 		fmt.Fprintf(p.w, "  %s\n", p.style.Muted(strings.Join(crumb, " › ")))
 	}
-	fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("--full describes all of them; --module "+moduleQuery(subject, relative[0])+" describes one"))
+	fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("--full describes all of them; --module "+moduleQuery(p.tree, unexpanded[0])+" describes one"))
 }
 
 // moduleQuery phrases a breadcrumb as a --module argument that will actually
-// resolve. A bare name is the nicer thing to type, but two submodules can share
-// one — as they do whenever a tree composes the same module twice — so the
-// suggestion falls back to the qualified path rather than handing the reader a
-// command that errors as ambiguous.
-func moduleQuery(subject *module.Inspection, crumb []string) string {
-	if len(crumb) < 2 {
-		return "NAME"
+// resolve, and as briefly as it can: the flag matches on the tail of a path, so
+// the shortest suffix that picks out exactly one module is the nicest thing to
+// type. Two submodules can share a name — as they do whenever a tree composes
+// the same module twice — so a bare name is offered only once it has been
+// checked, rather than handing the reader a command that errors as ambiguous.
+// The full path always resolves, so the loop terminates on something usable.
+func moduleQuery(tree *module.Inspection, crumb []string) string {
+	for i := len(crumb) - 1; i > 0; i-- {
+		q := strings.Join(crumb[i:], "/")
+		if _, _, err := tree.FindModule(q); err == nil {
+			return q
+		}
 	}
-	rel := crumb[1:] // drop the subject itself; --module names what is under it
-	name := rel[len(rel)-1]
-	if _, _, err := subject.FindModule(name); err == nil {
-		return name
-	}
-	return strings.Join(rel, "/")
+	return strings.Join(crumb, "/")
 }
 
 // pad right-aligns a column to width, on the uncolored text.

@@ -366,6 +366,50 @@ func TestInspect_IN17_FindModuleSelectsTheSubject(t *testing.T) {
 	}
 }
 
+// IN17: Describing several modules from one walk means copying them first —
+// nodes are shared, so trimming one subject must not reach into another.
+func TestInspect_IN17_CloneIsolatesSubjects(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "leaf", `spec:
+  params:
+    - name: title
+      default: hello
+`)
+	writeModule(t, root, "mid", `spec:
+  modules:
+    - name: leaf
+      source: ../leaf
+`)
+	dir := writeModule(t, root, "top", `spec:
+  modules:
+    - name: mid
+      source: ../mid
+`)
+
+	tree := inspectDir(t, dir, InspectOptions{})
+	shared, _, err := tree.FindModule("mid/leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Trim a copy of the parent hard enough to stub out its child.
+	mid, _, err := tree.FindModule("mid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mid.Clone().Prune(1)
+
+	if shared.Listed || len(shared.Params) != 1 {
+		t.Errorf("pruning a copy must not reach the original, got %+v", shared)
+	}
+	// And the copy really is independent in the other direction too.
+	clone := mid.Clone()
+	clone.Children[0].Params[0].Value = "mutated"
+	if findParam(t, shared, "title").Value == "mutated" {
+		t.Error("Clone shares parameter storage with the original")
+	}
+}
+
 // IN6: Each declared parameter is reported with the origin of its value, and a
 // supplied value wins over both a default (P1) and a dynamic command (P6).
 func TestInspect_IN6_ParamStates(t *testing.T) {

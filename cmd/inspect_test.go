@@ -66,8 +66,14 @@ func inspectTreeOutput(t *testing.T, dir string, params map[string]string) strin
 	t.Helper()
 	tree := inspectAll(t, dir, params)
 	var buf bytes.Buffer
-	printInspectTree(&buf, tree, []string{tree.Instance})
+	printInspectTree(&buf, tree, rootSubject(tree))
 	return buf.String()
+}
+
+// rootSubject is the single-subject form: the whole tree, described from its
+// root, which is what an inspection without --module produces.
+func rootSubject(tree *module.Inspection) []subject {
+	return []subject{{Path: []string{tree.Instance}, Module: tree}}
 }
 
 func inspectAll(t *testing.T, dir string, params map[string]string) *module.Inspection {
@@ -138,7 +144,7 @@ func TestInspectTree_IN16_DefaultListsSubmodules(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	printInspectTree(&buf, tree, []string{tree.Instance})
+	printInspectTree(&buf, tree, rootSubject(tree))
 	out := buf.String()
 
 	if !strings.Contains(out, "▸ api-prod") || !strings.Contains(out, "…") {
@@ -165,12 +171,12 @@ func TestInspectTree_IN16_DefaultListsSubmodules(t *testing.T) {
 func TestInspectTree_IN17_FocusedModuleShowsBreadcrumb(t *testing.T) {
 	tree := inspectAll(t, inspectFixture(t), map[string]string{"env": "prod"})
 
-	subject, path, err := tree.FindModule("api-prod")
+	focused, path, err := tree.FindModule("api-prod")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	printInspectTree(&buf, subject, path)
+	printInspectTree(&buf, tree, []subject{{Path: path, Module: focused}})
 	out := buf.String()
 
 	if !strings.Contains(out, "in rollout › api-prod") {
@@ -230,7 +236,7 @@ spec:
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	printInspectTree(&buf, tree, []string{tree.Instance})
+	printInspectTree(&buf, tree, rootSubject(tree))
 	out := buf.String()
 
 	if !strings.Contains(out, "--module a/docs") {
@@ -256,7 +262,7 @@ func TestInspectTree_PlainWhenNotATerminal(t *testing.T) {
 func TestInspectJSON_ReportShape(t *testing.T) {
 	tree := inspectAll(t, inspectFixture(t), map[string]string{"env": "prod"})
 	var buf bytes.Buffer
-	if err := printInspectJSON(&buf, tree, []string{tree.Instance}); err != nil {
+	if err := printInspectJSON(&buf, rootSubject(tree)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -264,11 +270,17 @@ func TestInspectJSON_ReportShape(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
-	if report.Module.Instance != "rollout" {
-		t.Errorf("module.instance = %q, want %q", report.Module.Instance, "rollout")
+	// One described module still marshals as a list, so a consumer indexes the
+	// document the same way whether one module was asked for or several.
+	if len(report.Modules) != 1 {
+		t.Fatalf("modules = %+v, want exactly one", report.Modules)
 	}
-	if len(report.Module.Children) != 1 || report.Module.Children[0].Instance != "api-prod" {
-		t.Errorf("expected one child named api-prod, got %+v", report.Module.Children)
+	described := report.Modules[0]
+	if described.Module.Instance != "rollout" || strings.Join(described.Path, "/") != "rollout" {
+		t.Errorf("described module = %q at %v, want the root", described.Module.Instance, described.Path)
+	}
+	if len(described.Module.Children) != 1 || described.Module.Children[0].Instance != "api-prod" {
+		t.Errorf("expected one child named api-prod, got %+v", described.Module.Children)
 	}
 	if len(report.MissingParams) != 1 || report.MissingParams[0].Name != "region" {
 		t.Errorf("missingParams = %+v, want the child's region", report.MissingParams)
@@ -277,6 +289,93 @@ func TestInspectJSON_ReportShape(t *testing.T) {
 	if !bytes.Contains(buf.Bytes(), []byte(`"problems": []`)) {
 		t.Errorf("problems should marshal as an empty array:\n%s", buf.String())
 	}
+}
+
+// Several modules can be described at once, each with its own breadcrumb, under
+// one shared summary — and asking for the same one twice describes it once.
+func TestInspect_MultipleModuleSubjects(t *testing.T) {
+	root := t.TempDir()
+	writeModuleDir(t, root, "leaf", `spec:
+  params:
+    - name: needed
+      required: true
+`)
+	dir := writeModuleDir(t, root, "top", `spec:
+  modules:
+    - name: a
+      source: ../leaf
+    - name: b
+      source: ../leaf
+`)
+
+	tree := inspectAll(t, dir, nil)
+	subjects, err := selectSubjects(tree, []string{"a", "b", "a"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subjects) != 2 {
+		t.Fatalf("got %d subjects, want the repeat collapsed to 2", len(subjects))
+	}
+	if strings.Join(subjects[0].Path, "/") != "top/a" || strings.Join(subjects[1].Path, "/") != "top/b" {
+		t.Errorf("subjects = %v, %v; want them in the order asked for", subjects[0].Path, subjects[1].Path)
+	}
+
+	var buf bytes.Buffer
+	printInspectTree(&buf, tree, subjects)
+	out := buf.String()
+
+	if !strings.Contains(out, "in top › a") || !strings.Contains(out, "in top › b") {
+		t.Errorf("each subject should be located in the tree:\n%s", out)
+	}
+	// One summary, covering both, rather than one per module.
+	if got := strings.Count(out, "required parameter(s) not supplied"); got != 1 {
+		t.Errorf("got %d summaries, want a single shared one:\n%s", got, out)
+	}
+	if !strings.Contains(out, "top › a") || !strings.Contains(out, "top › b") {
+		t.Errorf("the summary should cover both subjects:\n%s", out)
+	}
+}
+
+// Overlapping subjects are independent: trimming one to the requested depth
+// must not hollow out another that happens to sit inside it.
+func TestInspect_OverlappingSubjectsAreIndependent(t *testing.T) {
+	root := t.TempDir()
+	writeModuleDir(t, root, "leaf", "spec: {}\n")
+	writeModuleDir(t, root, "mid", `spec:
+  modules:
+    - name: leaf
+      source: ../leaf
+`)
+	dir := writeModuleDir(t, root, "top", `spec:
+  modules:
+    - name: mid
+      source: ../mid
+`)
+
+	tree := inspectAll(t, dir, nil)
+	// Depth 1 prunes "mid" so its "leaf" becomes a stub — while "leaf" is itself
+	// a subject and must still be described.
+	subjects, err := selectSubjects(tree, []string{"mid", "mid/leaf"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inner := subjects[0].Module.Children[0]; !inner.Listed {
+		t.Error("the pruned subject should carry a stub")
+	}
+	if leaf := subjects[1].Module; leaf.Listed || leaf.Name != "leaf" {
+		t.Errorf("the overlapping subject should still be described, got %+v", leaf)
+	}
+}
+
+// writeModuleDir writes a module named after its directory and returns the path.
+func writeModuleDir(t *testing.T, root, name, spec string) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLoomYAML(t, dir, "apiVersion: loom.rickliujh.github.io/v1beta1\nkind: Loom\nmetadata:\n  name: "+name+"\n"+spec)
+	return dir
 }
 
 // IN15: A module that could not be described exits non-zero; missing parameters
@@ -355,7 +454,7 @@ func runInspectFor(t *testing.T, dir string, args ...string) error {
 	// Flags are package-level and persist across cobra invocations; reset the
 	// ones this command owns so tests do not leak settings into each other.
 	inspectParams, inspectParamsFile, inspectOutput = nil, "", "tree"
-	inspectDepth, inspectFull, inspectModule, inspectNoFetch = 1, false, "", false
+	inspectDepth, inspectFull, inspectModules, inspectNoFetch = 1, false, nil, false
 	rootCmd.SetArgs(argv)
 	rootCmd.SetOut(devnull)
 	rootCmd.SetErr(devnull)

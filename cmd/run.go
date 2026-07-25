@@ -51,6 +51,12 @@ func runModule(cmd *cobra.Command, args []string) error {
 		source = args[0]
 	}
 
+	// Expand a ":name" alias reference before resolving (AL4).
+	source, aliasParams, err := resolveSourceArg(source)
+	if err != nil {
+		return err
+	}
+
 	// Resolve source — handles git URLs, //subdir, and local paths.
 	moduleDir, cleanup, err := module.ResolveSource(source, ".", logger)
 	if err != nil {
@@ -60,8 +66,8 @@ func runModule(cmd *cobra.Command, args []string) error {
 		defer cleanup()
 	}
 
-	// Parse parameters.
-	paramMap, err := parseParams(params, paramsFile)
+	// Parse parameters — alias params sit beneath --params-file and -p (AL9).
+	paramMap, err := parseParamsWithDefaults(aliasParams, params, paramsFile)
 	if err != nil {
 		return err
 	}

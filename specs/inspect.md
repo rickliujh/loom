@@ -125,3 +125,7 @@ A root that cannot be described is a hard failure: there is no tree to report.
 #### IN14: Structural validity fails a module; missing files only warn
 
 A module whose config fails structural validation is reported as an error, and its contents are not described — its parameters and operations cannot be trusted. A module that passes structural validation but fails the filesystem checks (a `newFiles.source` directory or `patch.path` file that is not present) is described in full, with those findings as warnings: they are real, but they do not make the description untrustworthy.
+
+#### IN15: Exit status reflects describability, not runnability
+
+Inspect exits non-zero when any module in the tree could not be described. It exits zero otherwise — including when required parameters are missing, which is a fact about a prospective run rather than a failure of the inspection.

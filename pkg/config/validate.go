@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/template"
@@ -110,10 +111,14 @@ func validate(lf *LoomFile, moduleDir string) error {
 	}
 
 	for i, e := range lf.Spec.Excludes {
-		checkTmpl(fmt.Sprintf("spec.excludes[%d]", i), e)
+		field := fmt.Sprintf("spec.excludes[%d]", i)
+		checkTmpl(field, e)
+		checkGlob(fail, field, e)
 	}
 	for i, e := range lf.Spec.Includes {
-		checkTmpl(fmt.Sprintf("spec.includes[%d]", i), e)
+		field := fmt.Sprintf("spec.includes[%d]", i)
+		checkTmpl(field, e)
+		checkGlob(fail, field, e)
 	}
 
 	if lf.Spec.Target != nil {
@@ -150,6 +155,11 @@ func validate(lf *LoomFile, moduleDir string) error {
 			checkTmpl(fmt.Sprintf("module %q param %q", m.Name, k), m.Params[k])
 		}
 	}
+
+	// Non-templated newFiles sources and patch paths, paired with their
+	// operation names, for the cross-operation check after the loop.
+	type opPath struct{ op, path string }
+	var newFilesSources, patchPaths []opPath
 
 	opNames := make(map[string]bool)
 	for _, op := range lf.Spec.Operations {
@@ -196,10 +206,13 @@ func validate(lf *LoomFile, moduleDir string) error {
 					fail("operation %q: newFiles source %q not found in module directory", op.Name, op.NewFiles.Source)
 				} else if !info.IsDir() {
 					fail("operation %q: newFiles source %q is not a directory", op.Name, op.NewFiles.Source)
+				} else {
+					newFilesSources = append(newFilesSources, opPath{op.Name, op.NewFiles.Source})
 				}
 			}
 			checkTmpl(fmt.Sprintf("operation %q newFiles.source", op.Name), op.NewFiles.Source)
 			checkTmpl(fmt.Sprintf("operation %q newFiles.dest", op.Name), op.NewFiles.Dest)
+			checkTargetPath(fail, op.Name, "newFiles dest", op.NewFiles.Dest)
 		}
 
 		if op.Patch != nil {
@@ -211,6 +224,8 @@ func validate(lf *LoomFile, moduleDir string) error {
 					fail("operation %q: patch file %q not found in module directory", op.Name, op.Patch.Path)
 				} else if info.IsDir() {
 					fail("operation %q: patch path %q is a directory, expected a file", op.Name, op.Patch.Path)
+				} else {
+					patchPaths = append(patchPaths, opPath{op.Name, op.Patch.Path})
 				}
 			}
 			if op.Patch.Target == "" {
@@ -237,6 +252,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 			checkTmpl(fmt.Sprintf("operation %q patch.path", op.Name), op.Patch.Path)
 			checkTmpl(fmt.Sprintf("operation %q patch.target", op.Name), op.Patch.Target)
 			checkTmpl(fmt.Sprintf("operation %q patch.preserveComments", op.Name), op.Patch.PreserveComments)
+			checkTargetPath(fail, op.Name, "patch target", op.Patch.Target)
 		}
 
 		if op.Shell != nil {
@@ -311,6 +327,11 @@ func validate(lf *LoomFile, moduleDir string) error {
 			if op.LLM.Retries < 0 {
 				fail("operation %q: llm retries must be >= 0", op.Name)
 			}
+			// A negative limit is silently dropped at call time (only > 0 is
+			// forwarded to the provider), so the run would quietly ignore it.
+			if op.LLM.MaxTokens < 0 {
+				fail("operation %q: llm maxTokens must be >= 0", op.Name)
+			}
 			if op.LLM.RetryDelay != "" && !isTemplated(op.LLM.RetryDelay) {
 				if _, err := time.ParseDuration(op.LLM.RetryDelay); err != nil {
 					fail("operation %q: invalid llm retryDelay %q: %v", op.Name, op.LLM.RetryDelay, err)
@@ -326,6 +347,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 			checkTmpl(fmt.Sprintf("operation %q llm.prompt", op.Name), op.LLM.Prompt)
 			checkTmpl(fmt.Sprintf("operation %q llm.systemPrompt", op.Name), op.LLM.SystemPrompt)
 			checkTmpl(fmt.Sprintf("operation %q llm.target", op.Name), op.LLM.Target)
+			checkTargetPath(fail, op.Name, "llm target", op.LLM.Target)
 			checkTmpl(fmt.Sprintf("operation %q llm.mode", op.Name), op.LLM.Mode)
 			checkTmpl(fmt.Sprintf("operation %q llm.retryDelay", op.Name), op.LLM.RetryDelay)
 			if pc := op.LLM.ProviderConfig; pc != nil {
@@ -336,7 +358,79 @@ func validate(lf *LoomFile, moduleDir string) error {
 		}
 	}
 
+	// A patch file that also survives a newFiles walk is rendered into the
+	// target as module output — the classic symptom of forgetting to list the
+	// utility directory in spec.excludes. Skipped when any filter pattern is
+	// templated, since the run-time filter would then differ from this one.
+	if moduleDir != "" && len(newFilesSources) > 0 && len(patchPaths) > 0 && !anyTemplated(lf.Spec.Excludes, lf.Spec.Includes) {
+		filter := &util.FilterOptions{Excludes: lf.Spec.Excludes, Includes: lf.Spec.Includes}
+		for _, src := range newFilesSources {
+			srcDir := util.ExpandPath(moduleDir, src.path)
+			rendered, err := util.WalkTemplateFiles(srcDir, filter)
+			if err != nil {
+				continue
+			}
+			renderedSet := make(map[string]bool, len(rendered))
+			for _, f := range rendered {
+				renderedSet[f] = true
+			}
+			for _, p := range patchPaths {
+				rel, err := filepath.Rel(srcDir, util.ExpandPath(moduleDir, p.path))
+				if err != nil || !renderedSet[rel] {
+					continue
+				}
+				fail("operation %q: patch file %q is also rendered into the target by newFiles operation %q — exclude it via spec.excludes", p.op, p.path, src.op)
+			}
+		}
+	}
+
 	return errors.Join(errs...)
+}
+
+// checkGlob records a violation for exclude/include patterns that can never
+// match at run time. Filtering matches base names with filepath.Match and
+// swallows its error, so a malformed pattern or one carrying a path separator
+// silently matches nothing instead of failing the run. Templated patterns are
+// resolved at run time and skipped.
+func checkGlob(fail func(string, ...any), field, pattern string) {
+	if isTemplated(pattern) {
+		return
+	}
+	if pattern == "" {
+		fail("%s: pattern cannot be empty", field)
+		return
+	}
+	if strings.Contains(pattern, "/") {
+		fail("%s: pattern %q contains a path separator, but patterns match base names only", field, pattern)
+		return
+	}
+	if _, err := filepath.Match(pattern, "x"); err != nil {
+		fail("%s: invalid glob pattern %q: %v", field, pattern, err)
+	}
+}
+
+// checkTargetPath records a violation for a destination that would resolve
+// outside the target directory once joined to it at run time. Templated values
+// are resolved at run time and skipped.
+func checkTargetPath(fail func(string, ...any), opName, field, value string) {
+	if value == "" || isTemplated(value) {
+		return
+	}
+	if clean := filepath.Clean(value); clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		fail("operation %q: %s %q escapes the target directory", opName, field, value)
+	}
+}
+
+// anyTemplated reports whether any string in the given lists is templated.
+func anyTemplated(lists ...[]string) bool {
+	for _, l := range lists {
+		for _, s := range l {
+			if isTemplated(s) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isTemplated returns true if the string contains Go template expressions.

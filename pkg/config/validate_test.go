@@ -1228,3 +1228,227 @@ func TestValidate_LLMVertexWithProviderConfig(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+// --- exclude/include glob patterns ---
+
+func TestValidate_ExcludeMalformedGlob(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Excludes = []string{"__functions["}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for malformed exclude glob")
+	}
+	if !strings.Contains(err.Error(), `spec.excludes[0]: invalid glob pattern "__functions["`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_IncludeMalformedGlob(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Includes = []string{"[a-"}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for malformed include glob")
+	}
+	if !strings.Contains(err.Error(), `spec.includes[0]: invalid glob pattern "[a-"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ExcludeWithPathSeparator(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Excludes = []string{"__functions/patches/*.yaml"}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for exclude pattern with a path separator")
+	}
+	if !strings.Contains(err.Error(), "contains a path separator") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ExcludeEmptyPattern(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Excludes = []string{""}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for empty exclude pattern")
+	}
+	if !strings.Contains(err.Error(), "spec.excludes[0]: pattern cannot be empty") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ExcludeValidGlobs(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Excludes = []string{"__functions", "*.md", "[abc]*.yaml"}
+	lf.Spec.Includes = []string{"README.md"}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_ExcludeTemplatedGlobSkipped(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	// Would look like a separator violation once rendered — resolved at run time.
+	lf.Spec.Excludes = []string{"{{ .svc }}"}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- destination paths escaping the target dir ---
+
+func TestValidate_PatchTargetEscapesTargetDir(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "../../etc/passwd"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for patch target escaping the target dir")
+	}
+	if !strings.Contains(err.Error(), `patch target "../../etc/passwd" escapes the target directory`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_NewFilesDestEscapesTargetDir(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "nf", NewFiles: &NewFiles{Source: "templates", Dest: "sub/../../out"}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for newFiles dest escaping the target dir")
+	}
+	if !strings.Contains(err.Error(), `newFiles dest "sub/../../out" escapes the target directory`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_LLMTargetEscapesTargetDir(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "gen", LLM: &LLM{
+			Provider: "openai",
+			Model:    "gpt-4o",
+			Prompt:   "hi",
+			Target:   "../out.yaml",
+		}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for llm target escaping the target dir")
+	}
+	if !strings.Contains(err.Error(), `llm target "../out.yaml" escapes the target directory`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_TargetPathsInsideTargetDirOK(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "app/../k8s/deploy.yaml"}},
+		{Name: "nf", NewFiles: &NewFiles{Source: "templates", Dest: "charts"}},
+		// Templated: resolved at run time, so not checked here.
+		{Name: "nf2", NewFiles: &NewFiles{Source: "templates", Dest: "{{ .svc }}/../out"}},
+	}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- llm maxTokens ---
+
+func TestValidate_LLMNegativeMaxTokens(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "gen", LLM: &LLM{
+			Provider:  "openai",
+			Model:     "gpt-4o",
+			Prompt:    "hi",
+			Target:    "out.yaml",
+			MaxTokens: -1,
+		}},
+	}
+
+	err := Validate(lf)
+	if err == nil {
+		t.Fatal("expected error for negative llm maxTokens")
+	}
+	if !strings.Contains(err.Error(), "llm maxTokens must be >= 0") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- patch file leaking into newFiles output (ValidateInDir) ---
+
+// patchLeakModule builds a module dir with a newFiles source directory that
+// also holds the patch file, plus the matching config.
+func patchLeakModule(t *testing.T, excludes []string) (string, *LoomFile) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "__functions", "patches"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "__functions", "patches", "deploy.yaml"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := validLoomFile()
+	lf.Spec.Excludes = excludes
+	lf.Spec.Operations = []Operation{
+		{Name: "nf", NewFiles: &NewFiles{Source: "."}},
+		{Name: "p", Patch: &Patch{Path: "__functions/patches/deploy.yaml", Target: "deploy.yaml"}},
+	}
+	return dir, lf
+}
+
+func TestValidateInDir_PatchFileRenderedByNewFiles(t *testing.T) {
+	dir, lf := patchLeakModule(t, nil)
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for patch file rendered into the target by newFiles")
+	}
+	if !strings.Contains(err.Error(), `patch file "__functions/patches/deploy.yaml" is also rendered into the target by newFiles operation "nf"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchFileExcludedFromNewFiles(t *testing.T) {
+	dir, lf := patchLeakModule(t, []string{"__functions"})
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchLeakSkippedWhenFilterTemplated(t *testing.T) {
+	dir, lf := patchLeakModule(t, []string{"{{ .svc }}"})
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidate_PatchLeakNotCheckedWithoutModuleDir(t *testing.T) {
+	_, lf := patchLeakModule(t, nil)
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

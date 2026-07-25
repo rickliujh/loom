@@ -961,6 +961,15 @@ When the module directory is known (`loom validate`, `loom run`, `loom bulk`
 file, resolved against the module directory exactly as at run time. Templated
 paths are skipped.
 
+Two classes of mistake are rejected because the run itself cannot report them.
+File filtering (F1/F2) matches base names with `filepath.Match` and discards its
+error, so an exclude/include pattern that is malformed or carries a path
+separator silently matches nothing; both are violations. For the same reason, a
+patch file that survives a `newFiles` walk is a violation: it would be rendered
+into the target as module output instead of being applied as a patch (the
+`__functions` footgun in F3). That last check is skipped when any
+exclude/include pattern is templated, since the run-time filter would differ.
+
 | Rule | Error |
 |------|-------|
 | Config contains only known fields (strict decoding; applies to `loom.yaml` and evaluated `loom.jsonnet` output) | `parsing loom.yaml: ... field <name> not found in type ...` |
@@ -971,6 +980,9 @@ paths are skipped.
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
 | `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
+| Exclude/include patterns non-empty (skipped when templated) | `spec.excludes[<i>]: pattern cannot be empty` |
+| Exclude/include patterns carry no path separator, since only base names are matched (skipped when templated) | `spec.excludes[<i>]: pattern "<p>" contains a path separator, but patterns match base names only` |
+| Exclude/include patterns compile as globs (skipped when templated) | `spec.includes[<i>]: invalid glob pattern "<p>": <err>` |
 | Module names non-empty | `module name cannot be empty` |
 | Module names unique | `duplicate module name "<name>"` |
 | Module `source` required | `module "<name>": source is required` |
@@ -983,6 +995,9 @@ paths are skipped.
 | `patch.path` exists and is a file (module dir known, non-templated) | `operation "<name>": patch file "<path>" not found in module directory` |
 | `patch.target` required | `operation "<name>": patch target is required` |
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
+| `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (skipped when templated) | `operation "<name>": patch target "<path>" escapes the target directory` |
+| A patch file is not also rendered into the target by a `newFiles` operation (module dir known, non-templated paths and filters) | `operation "<name>": patch file "<path>" is also rendered into the target by newFiles operation "<name>" — exclude it via spec.excludes` |
+| `llm.maxTokens` is >= 0 | `operation "<name>": llm maxTokens must be >= 0` |
 | `shell.command` required | `operation "<name>": shell command is required` |
 | `shell.timeout` is a valid duration (skipped when templated) | `operation "<name>": invalid shell timeout "<value>"` |
 | `commitPush.message` required | `operation "<name>": commitPush message is required` |

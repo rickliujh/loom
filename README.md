@@ -753,6 +753,55 @@ loom run ./onboard-service \
 loom run ./onboard-service --params-file params.yaml
 ```
 
+### `loom inspect`
+
+Show what a module is made of — its submodules, their operations, and the parameters they need — without running any of it.
+
+```
+loom inspect [path] [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param key=value` | Set a parameter for the root module (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--depth n` | Maximum module depth to walk (`1` is the root alone, `0` unlimited) |
+| `--no-fetch` | Don't clone modules sourced from a Git URL; list them instead |
+| `-o, --output format` | `tree` (default) or `json` |
+
+Nothing executes: operations don't run, `dynamicParams` commands are shown but never evaluated, `if` conditions are shown but never tested, and no target repo is cloned.
+
+```bash
+loom inspect ./platform-rollout -p env=prod
+```
+
+```
+[≡ platform-rollout ≡] ./platform-rollout
+├─ params
+│    env         provided  = "prod"
+│    commitHash  dynamic   $ git rev-parse --short HEAD
+├─ operations (1, in order)
+│    announce  shell  echo rolling out to {{ .env }}
+└─ ▸ svc-a-prod (service-onboard)  ../child  if: test -d ./svc-a
+   ├─ params
+   │    service    provided    = "svc-a"
+   │    namespace  provided    = "prod-apps" ← {{ .env }}-apps
+   │    region     required    must be supplied
+   │    stamp      unresolved  resolved at run time ← {{ .commitHash }}
+   ├─ target  https://github.com/acme/svc-a-gitops.git (main) → loom/onboard-svc-a
+   └─ operations (3, in order)
+        render   newFiles  templates → manifests
+        gate     shell     kubeconform manifests  if: test -f manifests/app.yaml
+        open-pr  pr        github: Onboard {{ .service }}
+
+⚠ 1 required parameter(s) not supplied — a run would fail:
+  region  platform-rollout › svc-a-prod
+```
+
+Each parameter carries where its value comes from, and a value handed down by a parent is shown with the expression that produced it (`← {{ .env }}-apps`). The summary collects every required parameter still unsupplied, located by the module that declares it — in a composed tree, that is often not the module you invoke.
+
+Use `-o json` for scripting; the document carries the tree plus `missingParams` and `problems` roll-ups.
+
 ### `loom diff`
 
 Show the changes a module run would produce, without opening a PR.

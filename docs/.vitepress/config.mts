@@ -91,6 +91,7 @@ export default defineConfig({
           text: 'CLI',
           items: [
             { text: 'loom run', link: '/reference/cli-run' },
+            { text: 'loom inspect', link: '/reference/cli-inspect' },
             { text: 'loom diff', link: '/reference/cli-diff' },
             { text: 'loom generate', link: '/reference/cli-generate' },
             { text: 'loom bulk', link: '/reference/cli-bulk' },

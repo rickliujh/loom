@@ -103,6 +103,8 @@ modules:
 
 Each child module resolves its own `spec.params` independently -- only the values passed in `params` are available. There is no implicit inheritance of parent parameters.
 
+Because of that, a deeply composed tree can require a value you never see at the top level. [`loom inspect`](/reference/cli-inspect) walks the whole tree and reports every parameter each module declares, where its value comes from, and which required ones nothing supplies -- without running anything.
+
 ## Conditional Modules
 
 A child reference accepts an optional `if` predicate that decides whether the module runs. The string is rendered with the **parent's** params (like `name`, `source`, and `params`), then executed via `sh -c`: exit `0` runs the child, any non-zero exit skips it — along with all of its operations and sub-modules.

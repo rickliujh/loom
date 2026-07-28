@@ -1570,28 +1570,41 @@ func TestValidateInDir_PatchFileUndeclaredParam(t *testing.T) {
 
 // --- declared but never referenced ---
 
-func TestValidateInDir_UnusedParam(t *testing.T) {
+// warnOnly asserts the config is valid and returns the warnings it produced.
+func warnOnly(t *testing.T, lf *LoomFile, dir string) []string {
+	t.Helper()
+	warnings, err := ValidateInDirWithWarnings(lf, dir)
+	if err != nil {
+		t.Fatalf("unused params must not make a config invalid: %v", err)
+	}
+	return warnings
+}
+
+func TestValidateInDir_UnusedParamWarns(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": "a: b\n"}, "svc")
 
-	err := ValidateInDir(lf, dir)
-	if err == nil {
-		t.Fatal("expected error for declared but unreferenced param")
-	}
-	if !strings.Contains(err.Error(), `param "svc" is declared but never referenced by any template`) {
-		t.Errorf("unexpected error: %v", err)
+	warnings := warnOnly(t, lf, dir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `param "svc" is declared but never referenced by any template`) {
+		t.Errorf("unexpected warnings: %v", warnings)
 	}
 }
 
-func TestValidateInDir_UnusedDynamicParam(t *testing.T) {
+func TestValidateInDir_UnusedDynamicParamWarns(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": "a: b\n"})
 	lf.Spec.DynamicParams = []DynamicParamDef{{Name: "hash", Command: "git rev-parse HEAD"}}
 
-	err := ValidateInDir(lf, dir)
-	if err == nil {
-		t.Fatal("expected error for declared but unreferenced dynamic param")
+	warnings := warnOnly(t, lf, dir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `dynamicParam "hash" is declared but never referenced by any template`) {
+		t.Errorf("unexpected warnings: %v", warnings)
 	}
-	if !strings.Contains(err.Error(), `dynamicParam "hash" is declared but never referenced by any template`) {
-		t.Errorf("unexpected error: %v", err)
+}
+
+// An undeclared reference stays a violation — that one the run gets wrong.
+func TestValidateInDir_UndeclaredRefIsStillAnError(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"})
+
+	if _, err := ValidateInDirWithWarnings(lf, dir); err == nil {
+		t.Fatal("expected undeclared param reference to remain a violation")
 	}
 }
 
@@ -1600,16 +1613,16 @@ func TestValidateInDir_UnusedDynamicParam(t *testing.T) {
 func TestValidateInDir_ParamUsedOnlyInTemplateFile(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"}, "svc")
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("param used in a template file must count as used: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("param used in a template file must count as used, got %v", w)
 	}
 }
 
 func TestValidateInDir_T3_ParamUsedOnlyInTemplateFilePath(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"__svc__/app.yaml": "a: b\n"}, "svc")
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("param used in a template file path must count as used: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("param used in a template file path must count as used, got %v", w)
 	}
 }
 
@@ -1623,8 +1636,8 @@ func TestValidateInDir_ParamUsedOnlyByChildModule(t *testing.T) {
 		{Name: "child", Source: "./child", Params: map[string]string{"name": "{{ .svc }}"}},
 	}
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("param passed to a child module must count as used: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("param passed to a child module must count as used, got %v", w)
 	}
 }
 
@@ -1636,8 +1649,8 @@ func TestValidateInDir_UnusedSkippedForTemplatedSource(t *testing.T) {
 		{Name: "nf", NewFiles: &NewFiles{Source: "{{ .which }}"}},
 	}
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("unwalkable source must skip the unused check: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("unwalkable source must skip the unused check, got %v", w)
 	}
 }
 
@@ -1649,16 +1662,16 @@ func TestValidateInDir_UnusedSkippedForTemplatedPatchPath(t *testing.T) {
 		{Name: "p", Patch: &Patch{Path: "{{ .which }}.yaml", Target: "t.yaml"}},
 	}
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("unreadable patch body must skip the unused check: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("unreadable patch body must skip the unused check, got %v", w)
 	}
 }
 
 func TestValidateInDir_UnusedSkippedForDotRebinding(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ range .list }}x{{ end }}\n"}, "svc")
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("dot-rebinding template must skip the unused check: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("dot-rebinding template must skip the unused check, got %v", w)
 	}
 }
 
@@ -1667,8 +1680,8 @@ func TestValidateInDir_UnusedSkippedForDotRebinding(t *testing.T) {
 func TestValidateInDir_UnusedSkippedForIndexOnDot(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": `{{ index . "my-svc" }}`}, "my-svc")
 
-	if err := ValidateInDir(lf, dir); err != nil {
-		t.Fatalf("index-on-dot must skip the unused check: %v", err)
+	if w := warnOnly(t, lf, dir); len(w) != 0 {
+		t.Errorf("index-on-dot must skip the unused check, got %v", w)
 	}
 }
 
@@ -1677,7 +1690,7 @@ func TestValidate_UnusedSkippedWithoutModuleDir(t *testing.T) {
 	lf := validLoomFile()
 	lf.Spec.Params = []ParamDef{{Name: "svc"}}
 
-	if err := Validate(lf); err != nil {
-		t.Fatalf("in-memory Validate must not report unused params: %v", err)
+	if w := warnOnly(t, lf, ""); len(w) != 0 {
+		t.Errorf("in-memory validation must not report unused params, got %v", w)
 	}
 }

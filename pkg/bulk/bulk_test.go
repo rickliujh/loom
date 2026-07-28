@@ -39,7 +39,7 @@ spec:
   operations:
     - name: announce
       shell:
-        command: "echo {{ .serviceName }} {{ .namespace }} {{ .commitHash }}"
+        command: "echo {{ .serviceName }}"
 `
 	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)

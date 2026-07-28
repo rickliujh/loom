@@ -945,6 +945,15 @@ The following constraints are enforced when loading a module. All violations
 are collected and reported together as one joined error (one violation per
 line), not just the first, so a config can be fixed in a single pass.
 
+Validation covers one module: the config being loaded, and the files that
+module renders. A module named in `spec.modules` is a separate config with its
+own params, resolved and validated in its own right when a run reaches it, so
+it is not opened here — fetching it may mean a clone, and it may be perfectly
+valid while being none of this module's business. `loom validate --recursive`
+opts into walking the tree, validating each referenced module on its own terms;
+a module reached twice is checked once, and a templated `source` is reported
+and skipped, since its value is only known at run time.
+
 Every templatable string field (see T4) must also parse as a valid Go
 template with the loom function map; syntax errors are reported as
 `<field>: invalid template: <parse error>`. Fields without `{{` always pass.
@@ -962,12 +971,15 @@ bodies walked by `newFiles`, their path names after `__param__` conversion
 params are a `map[string]string`, so an undeclared name is not an error at run
 time, it renders as the literal `<no value>` into the target.
 
-The reverse is also a violation: a param declared in `params` or
-`dynamicParams` that no template references is dead config the run cannot
-report, since a value that is never read produces no symptom — a param left
-behind by a rename looks exactly like one that is deliberately optional, and a
-value the user passes on the command line is silently discarded. This check is
-reported only when every reference is visible, and is skipped entirely when
+The reverse is reported as a **warning** rather than a violation: a param
+declared in `params` or `dynamicParams` that no template references is dead
+config, but the run is correct — it simply never reads the value, so the config
+stays valid. Nothing else reports it either: a param left behind by a rename
+looks exactly like one that is deliberately optional, and a value the user
+passes on the command line is silently discarded. Warnings do not affect
+validity or exit status, and callers that only need to know whether a config
+loads may ignore them. The warning is emitted only when every reference is
+visible, and is skipped entirely when
 any template could not be accounted for: an in-memory `Validate` (no module
 directory), a templated `newFiles.source` or `patch.path`, a source that
 cannot be walked or a body that cannot be read, or any template exempt from
@@ -998,8 +1010,8 @@ exclude/include pattern is templated, since the run-time filter would differ.
 | `metadata.name` required | `metadata.name is required` |
 | Param names non-empty | `param name cannot be empty` |
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
-| Every declared param is referenced by some template (module dir known; skipped when any template's references are not statically visible) | `param "<name>" is declared but never referenced by any template` |
-| Every declared dynamic param is referenced by some template (same conditions) | `dynamicParam "<name>" is declared but never referenced by any template` |
+| *(warning)* Every declared param is referenced by some template (module dir known; skipped when any template's references are not statically visible) | `param "<name>" is declared but never referenced by any template` |
+| *(warning)* Every declared dynamic param is referenced by some template (same conditions) | `dynamicParam "<name>" is declared but never referenced by any template` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
 | `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
 | Exclude/include patterns non-empty (skipped when templated) | `spec.excludes[<i>]: pattern cannot be empty` |

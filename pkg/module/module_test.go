@@ -308,10 +308,6 @@ spec:
   dynamicParams:
     - name: hash
       command: "echo abc123"
-  operations:
-    - name: use
-      shell:
-        command: "echo {{ .env }} {{ .hash }}"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

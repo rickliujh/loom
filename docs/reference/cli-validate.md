@@ -3,8 +3,30 @@
 Check that a `loom.yaml` is well-formed.
 
 ```
-loom validate [path]
+loom validate [path] [--recursive]
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--recursive`, `-r` | Also validate the modules referenced by `spec.modules`, and theirs in turn |
+
+## Scope
+
+By default only the module at `path` is checked, along with the files it
+renders. A module named in `spec.modules` is a separate config with its own
+params — a run validates it when it gets there, and fetching it may mean a
+clone — so it is left alone.
+
+`--recursive` walks the whole tree, validating each referenced module on its
+own terms and naming the module each finding came from:
+
+```
+⚠ kid: param "svc" is declared but never referenced by any template
+✖ kid: operation "create-files": template file "app.yaml": references undeclared param "typo"
+```
+
+A module reached twice is checked once, and a templated `source` is reported
+and skipped — its value is only known at run time.
 
 ## What It Checks
 
@@ -19,7 +41,7 @@ loom validate [path]
 - Durations parse: `shell.timeout`, `llm.retryDelay`
 - Every templatable field parses as a Go template and only references declared params
 - The same holds for the files a run renders — see [Params and templates](#params-and-templates) below
-- Every declared param is actually referenced by some template
+- Every declared param is actually referenced by some template (a warning, not an error)
 - Exclude/include patterns are usable globs — see [File filtering](#file-filtering) below
 - Destinations stay inside the target directory: `patch.target`, `newFiles.dest`, `llm.target`
 - `newFiles.source` is an existing directory and `patch.path` an existing file
@@ -47,14 +69,17 @@ params:
 name: {{ .servicename }}   # error: references undeclared param "servicename"
 ```
 
-The reverse is checked too. A param nothing references is dead config, and it
-is invisible at run time — an unused value produces no symptom, so a param left
-behind by a rename looks the same as one that is deliberately optional, and a
-value you pass on the command line is silently dropped:
+The reverse is checked too, as a **warning**: the config is still valid and the
+run is still correct, it just never reads the value. Nothing else tells you
+either — a param left behind by a rename looks the same as one that is
+deliberately optional, and a value you pass on the command line is silently
+dropped:
 
 ```
-param "namespace" is declared but never referenced by any template
+⚠ param "namespace" is declared but never referenced by any template
 ```
+
+Warnings print alongside any violations and do not affect the exit status.
 
 Params reach submodules only through `spec.modules[].params`, so forwarding one
 to a child counts as using it. This check is skipped whenever a template's

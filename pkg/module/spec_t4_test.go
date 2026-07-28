@@ -70,12 +70,10 @@ func TestSpecT4(t *testing.T) {
 			// exclude/include patterns.
 			name: "load",
 			cfg: func(t *testing.T) any {
-				// p and dp are referenced downstream so the baseline has no
-				// declared-but-unreferenced param.
 				return &config.Spec{
 					Params:        []config.ParamDef{{Name: "p", Default: "v"}},
-					DynamicParams: []config.DynamicParamDef{{Name: "dp", Command: "exit 1 {{ .p }}", Default: "fallback"}},
-					Excludes:      []string{"*.tmp{{ .dp }}"},
+					DynamicParams: []config.DynamicParamDef{{Name: "dp", Command: "exit 1", Default: "fallback"}},
+					Excludes:      []string{"*.tmp"},
 					Includes:      []string{"*.keep"},
 				}
 			},
@@ -93,9 +91,6 @@ func TestSpecT4(t *testing.T) {
 				childDir := t.TempDir()
 				writeLoomSpec(t, childDir, config.Spec{
 					Params: []config.ParamDef{{Name: "k", Default: "x"}},
-					// Referenced so the child has no unreferenced param; the
-					// harness walks the ModuleRef below, not this spec.
-					Excludes: []string{"*.{{ .k }}"},
 				})
 				return &config.ModuleRef{
 					Name:   "child",

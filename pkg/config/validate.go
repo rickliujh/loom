@@ -24,21 +24,37 @@ const (
 // All violations are collected and returned as a single joined error so a
 // config can be fixed in one pass.
 func Validate(lf *LoomFile) error {
-	return validate(lf, "")
+	_, err := validate(lf, "")
+	return err
 }
 
 // ValidateInDir runs all Validate checks plus filesystem checks that need
 // the module directory: newFiles.source must be an existing directory and
 // patch.path an existing file (both resolved like at run time, skipped when
-// templated).
+// templated). Warnings are discarded; use ValidateInDirWithWarnings to see
+// them.
 func ValidateInDir(lf *LoomFile, moduleDir string) error {
+	_, err := validate(lf, moduleDir)
+	return err
+}
+
+// ValidateInDirWithWarnings is ValidateInDir plus the warnings it collected:
+// findings that do not make the config invalid — the run proceeds and does
+// exactly what the config says — but that are near-certainly not what was
+// meant. They are advisory, so a caller that only cares whether the config
+// loads can keep ignoring them.
+func ValidateInDirWithWarnings(lf *LoomFile, moduleDir string) (warnings []string, err error) {
 	return validate(lf, moduleDir)
 }
 
-func validate(lf *LoomFile, moduleDir string) error {
+func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 	var errs []error
 	fail := func(format string, args ...any) {
 		errs = append(errs, fmt.Errorf(format, args...))
+	}
+	var warnings []string
+	warn := func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
 	}
 	// paramNames is consulted by checkTmpl while still being built: dynamic
 	// param templates may only reference params declared before them, while
@@ -439,10 +455,11 @@ func validate(lf *LoomFile, moduleDir string) error {
 		usageComplete = false
 	}
 
-	// A declared param that nothing references is dead config. The run cannot
-	// report it — an unused value is simply never read — so a param left behind
-	// by a rename looks identical to one that is deliberately optional, and the
-	// template that was supposed to consume it silently renders without it.
+	// A declared param that nothing references is dead config. It is a warning
+	// rather than a violation: the run is correct, it just ignores the value —
+	// but nothing reports that, so a param left behind by a rename looks
+	// identical to one that is deliberately optional, and a value passed on the
+	// command line is silently discarded.
 	//
 	// Only reported once every template has been accounted for: a source that
 	// could not be walked, a body that could not be read, or a template that
@@ -451,17 +468,17 @@ func validate(lf *LoomFile, moduleDir string) error {
 	if usageComplete {
 		for _, p := range lf.Spec.Params {
 			if p.Name != "" && !usedParams[p.Name] {
-				fail("param %q is declared but never referenced by any template", p.Name)
+				warn("param %q is declared but never referenced by any template", p.Name)
 			}
 		}
 		for _, dp := range lf.Spec.DynamicParams {
 			if dp.Name != "" && !usedParams[dp.Name] {
-				fail("dynamicParam %q is declared but never referenced by any template", dp.Name)
+				warn("dynamicParam %q is declared but never referenced by any template", dp.Name)
 			}
 		}
 	}
 
-	return errors.Join(errs...)
+	return warnings, errors.Join(errs...)
 }
 
 // checkGlob records a violation for exclude/include patterns that can never

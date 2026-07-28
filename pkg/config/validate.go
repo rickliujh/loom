@@ -44,6 +44,32 @@ func validate(lf *LoomFile, moduleDir string) error {
 	// param templates may only reference params declared before them, while
 	// everything after the param loops sees the complete set.
 	paramNames := make(map[string]bool)
+	// usedParams records every name any template references, and usageComplete
+	// tracks whether that record is exhaustive. Together they drive the
+	// declared-but-never-referenced check, which must stay silent the moment
+	// any template could have referenced a param out of sight.
+	usedParams := make(map[string]bool)
+	// Without the module directory the rendered files cannot be read at all,
+	// so an in-memory Validate never has a complete record.
+	usageComplete := moduleDir != ""
+	// checkTmplRefs reports references to undeclared params and folds the rest
+	// into usedParams. Templates whose references cannot be resolved statically
+	// are skipped, and mark the usage record incomplete.
+	checkTmplRefs := func(field string, root *ttparse.ListNode) {
+		refs, ok := templateParamRefs(root)
+		if !ok {
+			usageComplete = false
+			return
+		}
+		seen := make(map[string]bool)
+		for _, r := range refs {
+			usedParams[r] = true
+			if !paramNames[r] && !seen[r] {
+				seen[r] = true
+				fail("%s: references undeclared param %q", field, r)
+			}
+		}
+	}
 	// checkTmpl parses value as a Go template with the loom function map and
 	// records a violation on syntax errors or references to undeclared
 	// params. Values without template expressions always pass, so they are
@@ -57,17 +83,7 @@ func validate(lf *LoomFile, moduleDir string) error {
 			fail("%s: invalid template: %v", field, err)
 			return
 		}
-		refs, ok := templateParamRefs(t.Tree.Root)
-		if !ok {
-			return
-		}
-		seen := make(map[string]bool)
-		for _, r := range refs {
-			if !paramNames[r] && !seen[r] {
-				seen[r] = true
-				fail("%s: references undeclared param %q", field, r)
-			}
-		}
+		checkTmplRefs(field, t.Tree.Root)
 	}
 
 	if lf.APIVersion != ExpectedAPIVersion {
@@ -209,6 +225,10 @@ func validate(lf *LoomFile, moduleDir string) error {
 				} else {
 					newFilesSources = append(newFilesSources, opPath{op.Name, op.NewFiles.Source})
 				}
+			} else {
+				// The directory this operation renders cannot be walked, so the
+				// params its files reference stay unknown.
+				usageComplete = false
 			}
 			checkTmpl(fmt.Sprintf("operation %q newFiles.source", op.Name), op.NewFiles.Source)
 			checkTmpl(fmt.Sprintf("operation %q newFiles.dest", op.Name), op.NewFiles.Dest)
@@ -227,6 +247,10 @@ func validate(lf *LoomFile, moduleDir string) error {
 				} else {
 					patchPaths = append(patchPaths, opPath{op.Name, op.Patch.Path})
 				}
+			} else {
+				// The patch body this operation renders cannot be read, so the
+				// params it references stay unknown.
+				usageComplete = false
 			}
 			if op.Patch.Target == "" {
 				fail("operation %q: patch target is required", op.Name)
@@ -358,28 +382,81 @@ func validate(lf *LoomFile, moduleDir string) error {
 		}
 	}
 
-	// A patch file that also survives a newFiles walk is rendered into the
-	// target as module output — the classic symptom of forgetting to list the
-	// utility directory in spec.excludes. Skipped when any filter pattern is
-	// templated, since the run-time filter would then differ from this one.
-	if moduleDir != "" && len(newFilesSources) > 0 && len(patchPaths) > 0 && !anyTemplated(lf.Spec.Excludes, lf.Spec.Includes) {
+	// The files a run renders — newFiles bodies and their path names, patch
+	// bodies — are templates too (T4), and their param references are checked
+	// the same way loom.yaml fields are. Nothing else catches a typo there: a
+	// name that is not a declared param is not an error at run time, it renders
+	// as the literal "<no value>" into the target. Walking them here also
+	// completes the usage record the unused-param check needs.
+	//
+	// Skipped when any filter pattern is templated, since the run-time walk
+	// would then cover a different set of files than this one.
+	if !anyTemplated(lf.Spec.Excludes, lf.Spec.Includes) {
 		filter := &util.FilterOptions{Excludes: lf.Spec.Excludes, Includes: lf.Spec.Includes}
 		for _, src := range newFilesSources {
 			srcDir := util.ExpandPath(moduleDir, src.path)
 			rendered, err := util.WalkTemplateFiles(srcDir, filter)
 			if err != nil {
+				usageComplete = false
 				continue
 			}
 			renderedSet := make(map[string]bool, len(rendered))
-			for _, f := range rendered {
-				renderedSet[f] = true
+			for _, rel := range rendered {
+				renderedSet[rel] = true
+
+				content, err := os.ReadFile(filepath.Join(srcDir, rel))
+				if err != nil {
+					usageComplete = false
+					continue
+				}
+				checkTmpl(fmt.Sprintf("operation %q: template file %q", src.op, rel), string(content))
+				// T3: __param__ placeholders in the path become {{ .param }}
+				// before the destination path is rendered.
+				checkTmpl(fmt.Sprintf("operation %q: template file path %q", src.op, rel), tmpl.ConvertPathTemplate(rel))
 			}
+
+			// A patch file that also survives a newFiles walk is rendered into
+			// the target as module output — the classic symptom of forgetting
+			// to list the utility directory in spec.excludes.
 			for _, p := range patchPaths {
 				rel, err := filepath.Rel(srcDir, util.ExpandPath(moduleDir, p.path))
 				if err != nil || !renderedSet[rel] {
 					continue
 				}
 				fail("operation %q: patch file %q is also rendered into the target by newFiles operation %q — exclude it via spec.excludes", p.op, p.path, src.op)
+			}
+		}
+
+		for _, p := range patchPaths {
+			content, err := os.ReadFile(util.ExpandPath(moduleDir, p.path))
+			if err != nil {
+				usageComplete = false
+				continue
+			}
+			checkTmpl(fmt.Sprintf("operation %q: patch file %q", p.op, p.path), string(content))
+		}
+	} else {
+		usageComplete = false
+	}
+
+	// A declared param that nothing references is dead config. The run cannot
+	// report it — an unused value is simply never read — so a param left behind
+	// by a rename looks identical to one that is deliberately optional, and the
+	// template that was supposed to consume it silently renders without it.
+	//
+	// Only reported once every template has been accounted for: a source that
+	// could not be walked, a body that could not be read, or a template that
+	// rebinds dot all leave references unseen, and a param used only there must
+	// not be called unused.
+	if usageComplete {
+		for _, p := range lf.Spec.Params {
+			if p.Name != "" && !usedParams[p.Name] {
+				fail("param %q is declared but never referenced by any template", p.Name)
+			}
+		}
+		for _, dp := range lf.Spec.DynamicParams {
+			if dp.Name != "" && !usedParams[dp.Name] {
+				fail("dynamicParam %q is declared but never referenced by any template", dp.Name)
 			}
 		}
 	}
@@ -440,8 +517,9 @@ func isTemplated(s string) bool {
 
 // templateParamRefs collects the names referenced as top-level fields
 // ({{ .name }}, {{ .name.sub }} → "name") in a parsed template. ok is false
-// when the template rebinds dot (range/with) — field references inside such
-// templates cannot be resolved statically, so reference checking is skipped.
+// when the template rebinds dot (range/with) or addresses it as a whole
+// ({{ index . "name" }}, {{ . }}) — the names reached that way cannot be
+// resolved statically, so reference checking is skipped.
 func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
 	ok = true
 	var walkNode func(n ttparse.Node)
@@ -475,6 +553,12 @@ func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
 				walkNode(n.ElseList)
 			}
 		case *ttparse.RangeNode, *ttparse.WithNode:
+			ok = false
+		case *ttparse.DotNode:
+			// The param map is being passed around whole — most often
+			// {{ index . "my-param" }}, the only way to reach a name that is
+			// not a valid template identifier. Which names it reads is not
+			// visible here.
 			ok = false
 		case *ttparse.TemplateNode:
 			walkPipe(n.Pipe)

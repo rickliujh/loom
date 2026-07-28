@@ -811,7 +811,7 @@ spec:
   operations:
     - name: write-greeting
       shell:
-        command: echo done
+        command: echo {{ .greeting }}
 `)
 
 	writeLoomYAML(t, parentDir, `
@@ -865,7 +865,7 @@ spec:
   operations:
     - name: hello
       shell:
-        command: echo hi
+        command: echo hi {{ .who }}
 `)
 
 	writeLoomYAML(t, parentDir, `

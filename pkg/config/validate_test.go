@@ -694,7 +694,7 @@ func TestValidateInDir_NewFilesSourceExists(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "templates"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates"}})
+	lf := fsLoomFile(Operation{Name: "nf", NewFiles: &NewFiles{Source: "templates", Dest: "{{ .svc }}"}})
 
 	if err := ValidateInDir(lf, dir); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -741,7 +741,7 @@ func TestValidateInDir_PatchPathIsDir(t *testing.T) {
 
 func TestValidateInDir_PatchFileExists(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "patch.yaml"), []byte("a: b"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "patch.yaml"), []byte("a: {{ .svc }}"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	lf := fsLoomFile(Operation{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "t.yaml"}})
@@ -1450,5 +1450,234 @@ func TestValidate_PatchLeakNotCheckedWithoutModuleDir(t *testing.T) {
 
 	if err := Validate(lf); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- template file param references (ValidateInDir) ---
+
+// tmplModule writes a module directory whose newFiles source "templates"
+// contains the given files (relative path -> contents), and returns a config
+// declaring params and a newFiles operation over that source.
+func tmplModule(t *testing.T, files map[string]string, params ...string) (*LoomFile, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, content := range files {
+		path := filepath.Join(dir, "templates", rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "templates"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	lf := validLoomFile()
+	for _, p := range params {
+		lf.Spec.Params = append(lf.Spec.Params, ParamDef{Name: p})
+	}
+	lf.Spec.Operations = []Operation{
+		{Name: "nf", NewFiles: &NewFiles{Source: "templates"}},
+	}
+	return lf, dir
+}
+
+func TestValidateInDir_TemplateFileUndeclaredParam(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for undeclared param in template file")
+	}
+	if !strings.Contains(err.Error(), `template file "app.yaml": references undeclared param "svc"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_TemplateFileDeclaredParamOK(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"}, "svc")
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// A __param__ placeholder in a path is a template reference too.
+func TestValidateInDir_T3_TemplateFilePathUndeclaredParam(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"__svc__/app.yaml": "a: b\n"})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for undeclared param in template file path")
+	}
+	if !strings.Contains(err.Error(), `references undeclared param "svc"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_TemplateFileInvalidTemplate(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc\n"})
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for unparseable template file")
+	}
+	if !strings.Contains(err.Error(), `template file "app.yaml": invalid template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// A file the run never renders is never checked.
+func TestValidateInDir_ExcludedTemplateFileSkipped(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"skip.yaml": "name: {{ .svc }}\n"})
+	lf.Spec.Excludes = []string{"skip.yaml"}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("excluded file must not be checked: %v", err)
+	}
+}
+
+// A templated filter makes the run-time file set unknown, so the walk is skipped.
+func TestValidateInDir_TemplatedFilterSkipsTemplateFiles(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"}, "keep")
+	lf.Spec.Excludes = []string{"{{ .keep }}"}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("templated filter must skip template file checks: %v", err)
+	}
+}
+
+func TestValidateInDir_PatchFileUndeclaredParam(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "patch.yaml"), []byte("a: {{ .svc }}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := validLoomFile()
+	lf.Spec.Operations = []Operation{
+		{Name: "p", Patch: &Patch{Path: "patch.yaml", Target: "t.yaml"}},
+	}
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for undeclared param in patch file")
+	}
+	if !strings.Contains(err.Error(), `patch file "patch.yaml": references undeclared param "svc"`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// --- declared but never referenced ---
+
+func TestValidateInDir_UnusedParam(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "a: b\n"}, "svc")
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for declared but unreferenced param")
+	}
+	if !strings.Contains(err.Error(), `param "svc" is declared but never referenced by any template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateInDir_UnusedDynamicParam(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "a: b\n"})
+	lf.Spec.DynamicParams = []DynamicParamDef{{Name: "hash", Command: "git rev-parse HEAD"}}
+
+	err := ValidateInDir(lf, dir)
+	if err == nil {
+		t.Fatal("expected error for declared but unreferenced dynamic param")
+	}
+	if !strings.Contains(err.Error(), `dynamicParam "hash" is declared but never referenced by any template`) {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// A param used only by a rendered file counts as used — the cross-check that
+// makes the unused rule safe to enforce.
+func TestValidateInDir_ParamUsedOnlyInTemplateFile(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"}, "svc")
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("param used in a template file must count as used: %v", err)
+	}
+}
+
+func TestValidateInDir_T3_ParamUsedOnlyInTemplateFilePath(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"__svc__/app.yaml": "a: b\n"}, "svc")
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("param used in a template file path must count as used: %v", err)
+	}
+}
+
+// A param handed to a submodule is used: children inherit nothing implicitly,
+// so spec.modules[].params is the only way a value reaches them.
+func TestValidateInDir_ParamUsedOnlyByChildModule(t *testing.T) {
+	dir := t.TempDir()
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+	lf.Spec.Modules = []ModuleRef{
+		{Name: "child", Source: "./child", Params: map[string]string{"name": "{{ .svc }}"}},
+	}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("param passed to a child module must count as used: %v", err)
+	}
+}
+
+// --- unused check bails when references cannot be seen ---
+
+func TestValidateInDir_UnusedSkippedForTemplatedSource(t *testing.T) {
+	lf, dir := tmplModule(t, nil, "svc", "which")
+	lf.Spec.Operations = []Operation{
+		{Name: "nf", NewFiles: &NewFiles{Source: "{{ .which }}"}},
+	}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unwalkable source must skip the unused check: %v", err)
+	}
+}
+
+func TestValidateInDir_UnusedSkippedForTemplatedPatchPath(t *testing.T) {
+	dir := t.TempDir()
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}, {Name: "which"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "p", Patch: &Patch{Path: "{{ .which }}.yaml", Target: "t.yaml"}},
+	}
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("unreadable patch body must skip the unused check: %v", err)
+	}
+}
+
+func TestValidateInDir_UnusedSkippedForDotRebinding(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ range .list }}x{{ end }}\n"}, "svc")
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("dot-rebinding template must skip the unused check: %v", err)
+	}
+}
+
+// {{ index . "x" }} is the only way to reach a param whose name is not a valid
+// template identifier, and which names it reads is not visible statically.
+func TestValidateInDir_UnusedSkippedForIndexOnDot(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": `{{ index . "my-svc" }}`}, "my-svc")
+
+	if err := ValidateInDir(lf, dir); err != nil {
+		t.Fatalf("index-on-dot must skip the unused check: %v", err)
+	}
+}
+
+// Without a module directory the rendered files cannot be read at all.
+func TestValidate_UnusedSkippedWithoutModuleDir(t *testing.T) {
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "svc"}}
+
+	if err := Validate(lf); err != nil {
+		t.Fatalf("in-memory Validate must not report unused params: %v", err)
 	}
 }

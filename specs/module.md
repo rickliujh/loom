@@ -952,8 +952,28 @@ template with the loom function map; syntax errors are reported as
 Template param references (`{{ .name }}`) must resolve to declared params:
 `<field>: references undeclared param "<name>"`. Dynamic param templates may
 only reference static params and dynamic params declared before them (P4/P5
-evaluation order). Templates that rebind dot (`range`/`with`) are exempt from
-reference checking, since their fields cannot be resolved statically.
+evaluation order). Templates that rebind dot (`range`/`with`) or address it as
+a whole (`{{ index . "name" }}`, `{{ . }}`) are exempt from reference checking,
+since the names they read cannot be resolved statically.
+
+This applies to the files a run renders as well as to `loom.yaml` fields: the
+bodies walked by `newFiles`, their path names after `__param__` conversion
+(T3), and the bodies of patch files. Nothing else catches a typo there —
+params are a `map[string]string`, so an undeclared name is not an error at run
+time, it renders as the literal `<no value>` into the target.
+
+The reverse is also a violation: a param declared in `params` or
+`dynamicParams` that no template references is dead config the run cannot
+report, since a value that is never read produces no symptom — a param left
+behind by a rename looks exactly like one that is deliberately optional, and a
+value the user passes on the command line is silently discarded. This check is
+reported only when every reference is visible, and is skipped entirely when
+any template could not be accounted for: an in-memory `Validate` (no module
+directory), a templated `newFiles.source` or `patch.path`, a source that
+cannot be walked or a body that cannot be read, or any template exempt from
+reference checking. Params reach submodules only through
+`spec.modules[].params` (children inherit nothing implicitly, P3), so a value
+forwarded to a child counts as used.
 
 When the module directory is known (`loom validate`, `loom run`, `loom bulk`
 — i.e. everywhere except in-memory configs), filesystem checks also apply:
@@ -978,6 +998,8 @@ exclude/include pattern is templated, since the run-time filter would differ.
 | `metadata.name` required | `metadata.name is required` |
 | Param names non-empty | `param name cannot be empty` |
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
+| Every declared param is referenced by some template (module dir known; skipped when any template's references are not statically visible) | `param "<name>" is declared but never referenced by any template` |
+| Every declared dynamic param is referenced by some template (same conditions) | `dynamicParam "<name>" is declared but never referenced by any template` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
 | `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
 | Exclude/include patterns non-empty (skipped when templated) | `spec.excludes[<i>]: pattern cannot be empty` |
@@ -997,6 +1019,8 @@ exclude/include pattern is templated, since the run-time filter would differ.
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
 | `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (skipped when templated) | `operation "<name>": patch target "<path>" escapes the target directory` |
 | A patch file is not also rendered into the target by a `newFiles` operation (module dir known, non-templated paths and filters) | `operation "<name>": patch file "<path>" is also rendered into the target by newFiles operation "<name>" — exclude it via spec.excludes` |
+| Rendered file bodies and path names parse as templates and reference only declared params (module dir known, non-templated filters) | `operation "<name>": template file "<rel>": references undeclared param "<name>"` |
+| Patch file bodies parse as templates and reference only declared params (module dir known, non-templated path) | `operation "<name>": patch file "<path>": references undeclared param "<name>"` |
 | `llm.maxTokens` is >= 0 | `operation "<name>": llm maxTokens must be >= 0` |
 | `shell.command` required | `operation "<name>": shell command is required` |
 | `shell.timeout` is a valid duration (skipped when templated) | `operation "<name>": invalid shell timeout "<value>"` |

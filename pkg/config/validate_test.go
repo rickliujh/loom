@@ -1643,45 +1643,114 @@ func TestValidateInDir_ParamUsedOnlyByChildModule(t *testing.T) {
 
 // --- unused check bails when references cannot be seen ---
 
-func TestValidateInDir_UnusedSkippedForTemplatedSource(t *testing.T) {
-	lf, dir := tmplModule(t, nil, "svc", "which")
+// A source resolved at run time no longer abandons the whole module: the fixed
+// part of the path stands in for it, so a param referenced under there is still
+// seen as used.
+func TestValidateInDir_TemplatedSourceStillCountsUsage(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "name: {{ .svc }}\n"}, "svc", "which")
 	lf.Spec.Operations = []Operation{
 		{Name: "nf", NewFiles: &NewFiles{Source: "{{ .which }}"}},
 	}
 
 	if w := warnOnly(t, lf, dir); len(w) != 0 {
-		t.Errorf("unwalkable source must skip the unused check, got %v", w)
+		t.Errorf("stand-in scan should have found svc, got %v", w)
 	}
 }
 
-func TestValidateInDir_UnusedSkippedForTemplatedPatchPath(t *testing.T) {
+func TestValidateInDir_TemplatedPatchPathStillCountsUsage(t *testing.T) {
 	dir := t.TempDir()
+	patches := filepath.Join(dir, "__functions", "patches")
+	if err := os.MkdirAll(patches, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(patches, "deploy.yaml"), []byte("a: {{ .svc }}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	lf := validLoomFile()
 	lf.Spec.Params = []ParamDef{{Name: "svc"}, {Name: "which"}}
 	lf.Spec.Operations = []Operation{
-		{Name: "p", Patch: &Patch{Path: "{{ .which }}.yaml", Target: "t.yaml"}},
+		{Name: "p", Patch: &Patch{Path: "__functions/patches/{{ .which }}.yaml", Target: "t.yaml"}},
 	}
 
 	if w := warnOnly(t, lf, dir); len(w) != 0 {
-		t.Errorf("unreadable patch body must skip the unused check, got %v", w)
+		t.Errorf("stand-in scan should have found svc, got %v", w)
 	}
 }
 
-func TestValidateInDir_UnusedSkippedForDotRebinding(t *testing.T) {
-	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ range .list }}x{{ end }}\n"}, "svc")
+// The stand-in scan only gathers references. Its files may never be rendered,
+// so a bad reference in one cannot be blamed on the config.
+func TestValidateInDir_StandInScanRaisesNoViolations(t *testing.T) {
+	dir := t.TempDir()
+	patches := filepath.Join(dir, "__functions", "patches")
+	if err := os.MkdirAll(patches, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(patches, "deploy.yaml"), []byte("a: {{ .neverDeclared }}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lf := validLoomFile()
+	lf.Spec.Params = []ParamDef{{Name: "which"}}
+	lf.Spec.Operations = []Operation{
+		{Name: "p", Patch: &Patch{Path: "__functions/patches/{{ .which }}.yaml", Target: "t.yaml"}},
+	}
 
-	if w := warnOnly(t, lf, dir); len(w) != 0 {
-		t.Errorf("dot-rebinding template must skip the unused check, got %v", w)
+	if _, err := ValidateInDirWithWarnings(lf, dir); err != nil {
+		t.Fatalf("stand-in files must not raise violations: %v", err)
+	}
+}
+
+func TestStaticPrefixDir(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"__functions/patches/{{ .kind }}.yaml", "__functions/patches"},
+		{"__functions/{{ .kind }}/p.yaml", "__functions"},
+		{"{{ .dir }}/p.yaml", "."},
+		{"{{ .whole }}", "."},
+		{"patches/p.yaml", "patches"},
+	} {
+		if got := staticPrefixDir(tc.in); got != tc.want {
+			t.Errorf("staticPrefixDir(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// A range body rebinds dot to a string element of a flat map, so nothing in it
+// can name a param — only the ranged-over pipeline can. The analysis therefore
+// stays on, and still reports the params the template really does not touch.
+func TestValidateInDir_RangeDoesNotDisableUnusedCheck(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ range .list }}x{{ end }}\n"}, "list", "svc")
+
+	warnings := warnOnly(t, lf, dir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"svc"`) {
+		t.Errorf("expected only svc to be unused, got %v", warnings)
+	}
+}
+
+func TestValidateInDir_WithDoesNotDisableUnusedCheck(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ with .maybe }}{{ . }}{{ end }}\n"}, "maybe", "svc")
+
+	warnings := warnOnly(t, lf, dir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"svc"`) {
+		t.Errorf("expected only svc to be unused, got %v", warnings)
 	}
 }
 
 // {{ index . "x" }} is the only way to reach a param whose name is not a valid
-// template identifier, and which names it reads is not visible statically.
-func TestValidateInDir_UnusedSkippedForIndexOnDot(t *testing.T) {
-	lf, dir := tmplModule(t, map[string]string{"app.yaml": `{{ index . "my-svc" }}`}, "my-svc")
+// template identifier. Its key is a literal, so the reference is exact.
+func TestValidateInDir_IndexOnDotCountsAsUse(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": `{{ index . "my-svc" }}`}, "my-svc", "svc")
+
+	warnings := warnOnly(t, lf, dir)
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `"svc"`) {
+		t.Errorf("expected only svc to be unused, got %v", warnings)
+	}
+}
+
+// A computed key really is unknowable, so that one still stands down.
+func TestValidateInDir_UnusedSkippedForComputedIndexKey(t *testing.T) {
+	lf, dir := tmplModule(t, map[string]string{"app.yaml": `{{ index . .which }}`}, "which", "svc")
 
 	if w := warnOnly(t, lf, dir); len(w) != 0 {
-		t.Errorf("index-on-dot must skip the unused check, got %v", w)
+		t.Errorf("computed index key must skip the unused check, got %v", w)
 	}
 }
 

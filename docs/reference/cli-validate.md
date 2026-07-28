@@ -82,11 +82,18 @@ dropped:
 Warnings print alongside any violations and do not affect the exit status.
 
 Params reach submodules only through `spec.modules[].params`, so forwarding one
-to a child counts as using it. This check is skipped whenever a template's
-references cannot all be seen — a templated `newFiles.source` or `patch.path`,
-a body that cannot be read, or a template that rebinds dot (`range`, `with`) or
-addresses it whole (`{{ index . "my-param" }}`, the only way to reference a
-param whose name is not a valid template identifier).
+to a child counts as using it — but only forwarding does. A param a child
+module references under its *own* declaration is not a use of the parent's, and
+gets reported.
+
+`range`, `with` and `{{ index . "my-param" }}` are all read correctly: params
+are a flat string map, so a `range` body can only name elements, never params,
+and an `index` key is a literal. The check stands down only when a template
+reaches dot unknowably (a computed index key, or dot passed to a function) or a
+file cannot be read. A `newFiles.source` or `patch.path` resolved at run time
+does not disable it — the fixed part of the path
+(`__functions/patches/{{ .kind }}.yaml` → `__functions/patches`) is scanned for
+references instead.
 
 ## File filtering
 

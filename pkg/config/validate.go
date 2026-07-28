@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -193,6 +194,11 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 	type opPath struct{ op, path string }
 	var newFilesSources, patchPaths []opPath
 
+	// Directories standing in for an asset path that is only resolved at run
+	// time. They are read for param references but never for violations: which
+	// of their files a run actually renders is not known here.
+	var usageOnlyDirs []string
+
 	opNames := make(map[string]bool)
 	for _, op := range lf.Spec.Operations {
 		if op.Name == "" {
@@ -241,10 +247,12 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 				} else {
 					newFilesSources = append(newFilesSources, opPath{op.Name, op.NewFiles.Source})
 				}
-			} else {
-				// The directory this operation renders cannot be walked, so the
-				// params its files reference stay unknown.
-				usageComplete = false
+			} else if moduleDir != "" {
+				// Which directory this renders is only known at run time, so
+				// the fixed part of the path stands in for it: every file under
+				// it is read for references, and none of it is reported as a
+				// violation, since these files may not be rendered at all.
+				usageOnlyDirs = append(usageOnlyDirs, staticPrefixDir(op.NewFiles.Source))
 			}
 			checkTmpl(fmt.Sprintf("operation %q newFiles.source", op.Name), op.NewFiles.Source)
 			checkTmpl(fmt.Sprintf("operation %q newFiles.dest", op.Name), op.NewFiles.Dest)
@@ -263,10 +271,10 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 				} else {
 					patchPaths = append(patchPaths, opPath{op.Name, op.Patch.Path})
 				}
-			} else {
-				// The patch body this operation renders cannot be read, so the
-				// params it references stay unknown.
-				usageComplete = false
+			} else if moduleDir != "" {
+				// Same as newFiles above: the fixed part of the path stands in
+				// for the file, contributing references but no violations.
+				usageOnlyDirs = append(usageOnlyDirs, staticPrefixDir(op.Patch.Path))
 			}
 			if op.Patch.Target == "" {
 				fail("operation %q: patch target is required", op.Name)
@@ -455,6 +463,38 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 		usageComplete = false
 	}
 
+	// Stand-in directories for run-time-resolved asset paths. Only the usage
+	// record is updated: a reference here proves a param is read somewhere, but
+	// a bad reference cannot be blamed on a file that may never be rendered.
+	for _, dir := range usageOnlyDirs {
+		root := util.ExpandPath(moduleDir, dir)
+		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			content, err := os.ReadFile(path)
+			if err != nil || !isTemplated(string(content)) {
+				return nil
+			}
+			t, err := template.New("").Funcs(tmpl.FuncMap()).Parse(string(content))
+			if err != nil {
+				return nil
+			}
+			refs, ok := templateParamRefs(t.Tree.Root)
+			if !ok {
+				usageComplete = false
+				return nil
+			}
+			for _, r := range refs {
+				usedParams[r] = true
+			}
+			return nil
+		})
+		if err != nil {
+			usageComplete = false
+		}
+	}
+
 	// A declared param that nothing references is dead config. It is a warning
 	// rather than a violation: the run is correct, it just ignores the value —
 	// but nothing reports that, so a param left behind by a rename looks
@@ -515,6 +555,20 @@ func checkTargetPath(fail func(string, ...any), opName, field, value string) {
 	}
 }
 
+// staticPrefixDir returns the deepest directory of a path that is fixed before
+// templating: "__functions/patches/{{ .kind }}.yaml" → "__functions/patches".
+// A path templated from its first segment yields ".", the module root.
+func staticPrefixDir(path string) string {
+	dir := filepath.Dir(path)
+	for dir != "." && dir != string(filepath.Separator) {
+		if !isTemplated(dir) {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	return "."
+}
+
 // anyTemplated reports whether any string in the given lists is templated.
 func anyTemplated(lists ...[]string) bool {
 	for _, l := range lists {
@@ -533,21 +587,43 @@ func isTemplated(s string) bool {
 }
 
 // templateParamRefs collects the names referenced as top-level fields
-// ({{ .name }}, {{ .name.sub }} → "name") in a parsed template. ok is false
-// when the template rebinds dot (range/with) or addresses it as a whole
-// ({{ index . "name" }}, {{ . }}) — the names reached that way cannot be
-// resolved statically, so reference checking is skipped.
+// ({{ .name }}, {{ .name.sub }} → "name") in a parsed template.
+//
+// Params are a flat map[string]string, which makes most of the template
+// language statically readable: a range or with body rebinds dot to a *string*,
+// so a field reference inside it can never be a param — only the pipeline being
+// ranged over is one. Likewise {{ index . "name" }}, the one way to reach a
+// name that is not a valid template identifier, names its key literally.
+//
+// ok is false only when dot is passed somewhere its keys genuinely cannot be
+// known: a computed index key, or dot handed whole to a function. Reference
+// checking is skipped for such templates.
 func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
 	ok = true
 	var walkNode func(n ttparse.Node)
+	// walkCmd reads one command's arguments. `index . "key"` is recognised
+	// before the arguments are walked, so its dot does not read as opaque.
+	walkCmd := func(c *ttparse.CommandNode, walk func(ttparse.Node)) {
+		if len(c.Args) == 3 {
+			if id, isID := c.Args[0].(*ttparse.IdentifierNode); isID && id.Ident == "index" {
+				if _, isDot := c.Args[1].(*ttparse.DotNode); isDot {
+					if key, isStr := c.Args[2].(*ttparse.StringNode); isStr {
+						refs = append(refs, key.Text)
+						return
+					}
+				}
+			}
+		}
+		for _, arg := range c.Args {
+			walk(arg)
+		}
+	}
 	walkPipe := func(p *ttparse.PipeNode) {
 		if p == nil {
 			return
 		}
 		for _, c := range p.Cmds {
-			for _, arg := range c.Args {
-				walkNode(arg)
-			}
+			walkCmd(c, walkNode)
 		}
 	}
 	walkNode = func(n ttparse.Node) {
@@ -569,13 +645,16 @@ func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
 			if n.ElseList != nil {
 				walkNode(n.ElseList)
 			}
-		case *ttparse.RangeNode, *ttparse.WithNode:
-			ok = false
+		case *ttparse.RangeNode:
+			// Only the ranged-over pipeline can name a param; inside the body
+			// dot is an element of it, never the param map.
+			walkPipe(n.Pipe)
+		case *ttparse.WithNode:
+			walkPipe(n.Pipe)
 		case *ttparse.DotNode:
-			// The param map is being passed around whole — most often
-			// {{ index . "my-param" }}, the only way to reach a name that is
-			// not a valid template identifier. Which names it reads is not
-			// visible here.
+			// Dot reaching here is the whole param map used opaquely — a
+			// computed index key, or dot passed to a function. Which names it
+			// reads is not visible.
 			ok = false
 		case *ttparse.TemplateNode:
 			walkPipe(n.Pipe)

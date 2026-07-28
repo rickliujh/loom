@@ -961,9 +961,16 @@ template with the loom function map; syntax errors are reported as
 Template param references (`{{ .name }}`) must resolve to declared params:
 `<field>: references undeclared param "<name>"`. Dynamic param templates may
 only reference static params and dynamic params declared before them (P4/P5
-evaluation order). Templates that rebind dot (`range`/`with`) or address it as
-a whole (`{{ index . "name" }}`, `{{ . }}`) are exempt from reference checking,
-since the names they read cannot be resolved statically.
+evaluation order).
+
+Params are a flat `map[string]string`, which makes most of the template
+language statically readable. A `range` or `with` body rebinds dot to a
+*string*, so a field reference inside it can never name a param — only the
+pipeline being ranged over can, and that is checked. `{{ index . "name" }}` —
+the one way to reach a name that is not a valid template identifier — states
+its key literally, and is read as a reference to it. Only a template that
+reaches dot's keys unknowably (a computed index key, or dot handed whole to a
+function) is exempt from reference checking.
 
 This applies to the files a run renders as well as to `loom.yaml` fields: the
 bodies walked by `newFiles`, their path names after `__param__` conversion
@@ -981,9 +988,16 @@ validity or exit status, and callers that only need to know whether a config
 loads may ignore them. The warning is emitted only when every reference is
 visible, and is skipped entirely when
 any template could not be accounted for: an in-memory `Validate` (no module
-directory), a templated `newFiles.source` or `patch.path`, a source that
-cannot be walked or a body that cannot be read, or any template exempt from
-reference checking. Params reach submodules only through
+directory), a source that cannot be walked or a body that cannot be read, or
+any template exempt from reference checking.
+
+A `newFiles.source` or `patch.path` that is only resolved at run time does not
+disable the check. The fixed part of the path stands in for it —
+`__functions/patches/{{ .kind }}.yaml` scans `__functions/patches` — and every
+file under that directory is read for references only. Nothing found there is
+reported as a violation, since which of those files a run renders is unknown.
+
+Params reach submodules only through
 `spec.modules[].params` (children inherit nothing implicitly, P3), so a value
 forwarded to a child counts as used.
 

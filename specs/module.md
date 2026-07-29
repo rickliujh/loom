@@ -945,6 +945,15 @@ The following constraints are enforced when loading a module. All violations
 are collected and reported together as one joined error (one violation per
 line), not just the first, so a config can be fixed in a single pass.
 
+Validation covers one module: the config being loaded, and the files that
+module renders. A module named in `spec.modules` is a separate config with its
+own params, resolved and validated in its own right when a run reaches it, so
+it is not opened here — fetching it may mean a clone, and it may be perfectly
+valid while being none of this module's business. `loom validate --recursive`
+opts into walking the tree, validating each referenced module on its own terms;
+a module reached twice is checked once, and a templated `source` is reported
+and skipped, since its value is only known at run time.
+
 Every templatable string field (see T4) must also parse as a valid Go
 template with the loom function map; syntax errors are reported as
 `<field>: invalid template: <parse error>`. Fields without `{{` always pass.
@@ -952,14 +961,60 @@ template with the loom function map; syntax errors are reported as
 Template param references (`{{ .name }}`) must resolve to declared params:
 `<field>: references undeclared param "<name>"`. Dynamic param templates may
 only reference static params and dynamic params declared before them (P4/P5
-evaluation order). Templates that rebind dot (`range`/`with`) are exempt from
-reference checking, since their fields cannot be resolved statically.
+evaluation order).
+
+Params are a flat `map[string]string`, which makes most of the template
+language statically readable. A `range` or `with` body rebinds dot to a
+*string*, so a field reference inside it can never name a param — only the
+pipeline being ranged over can, and that is checked. `{{ index . "name" }}` —
+the one way to reach a name that is not a valid template identifier — states
+its key literally, and is read as a reference to it. Only a template that
+reaches dot's keys unknowably (a computed index key, or dot handed whole to a
+function) is exempt from reference checking.
+
+This applies to the files a run renders as well as to `loom.yaml` fields: the
+bodies walked by `newFiles`, their path names after `__param__` conversion
+(T3), and the bodies of patch files. Nothing else catches a typo there —
+params are a `map[string]string`, so an undeclared name is not an error at run
+time, it renders as the literal `<no value>` into the target.
+
+The reverse is reported as a **warning** rather than a violation: a param
+declared in `params` or `dynamicParams` that no template references is dead
+config, but the run is correct — it simply never reads the value, so the config
+stays valid. Nothing else reports it either: a param left behind by a rename
+looks exactly like one that is deliberately optional, and a value the user
+passes on the command line is silently discarded. Warnings do not affect
+validity or exit status, and callers that only need to know whether a config
+loads may ignore them. The warning is emitted only when every reference is
+visible, and is skipped entirely when
+any template could not be accounted for: an in-memory `Validate` (no module
+directory), a source that cannot be walked or a body that cannot be read, or
+any template exempt from reference checking.
+
+A `newFiles.source` or `patch.path` that is only resolved at run time does not
+disable the check. The fixed part of the path stands in for it —
+`__functions/patches/{{ .kind }}.yaml` scans `__functions/patches` — and every
+file under that directory is read for references only. Nothing found there is
+reported as a violation, since which of those files a run renders is unknown.
+
+Params reach submodules only through
+`spec.modules[].params` (children inherit nothing implicitly, P3), so a value
+forwarded to a child counts as used.
 
 When the module directory is known (`loom validate`, `loom run`, `loom bulk`
 — i.e. everywhere except in-memory configs), filesystem checks also apply:
 `newFiles.source` must be an existing directory and `patch.path` an existing
 file, resolved against the module directory exactly as at run time. Templated
 paths are skipped.
+
+Two classes of mistake are rejected because the run itself cannot report them.
+File filtering (F1/F2) matches base names with `filepath.Match` and discards its
+error, so an exclude/include pattern that is malformed or carries a path
+separator silently matches nothing; both are violations. For the same reason, a
+patch file that survives a `newFiles` walk is a violation: it would be rendered
+into the target as module output instead of being applied as a patch (the
+`__functions` footgun in F3). That last check is skipped when any
+exclude/include pattern is templated, since the run-time filter would differ.
 
 | Rule | Error |
 |------|-------|
@@ -969,8 +1024,13 @@ paths are skipped.
 | `metadata.name` required | `metadata.name is required` |
 | Param names non-empty | `param name cannot be empty` |
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
+| *(warning)* Every declared param is referenced by some template (module dir known; skipped when any template's references are not statically visible) | `param "<name>" is declared but never referenced by any template` |
+| *(warning)* Every declared dynamic param is referenced by some template (same conditions) | `dynamicParam "<name>" is declared but never referenced by any template` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
 | `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
+| Exclude/include patterns non-empty (skipped when templated) | `spec.excludes[<i>]: pattern cannot be empty` |
+| Exclude/include patterns carry no path separator, since only base names are matched (skipped when templated) | `spec.excludes[<i>]: pattern "<p>" contains a path separator, but patterns match base names only` |
+| Exclude/include patterns compile as globs (skipped when templated) | `spec.includes[<i>]: invalid glob pattern "<p>": <err>` |
 | Module names non-empty | `module name cannot be empty` |
 | Module names unique | `duplicate module name "<name>"` |
 | Module `source` required | `module "<name>": source is required` |
@@ -983,6 +1043,11 @@ paths are skipped.
 | `patch.path` exists and is a file (module dir known, non-templated) | `operation "<name>": patch file "<path>" not found in module directory` |
 | `patch.target` required | `operation "<name>": patch target is required` |
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
+| `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (skipped when templated) | `operation "<name>": patch target "<path>" escapes the target directory` |
+| A patch file is not also rendered into the target by a `newFiles` operation (module dir known, non-templated paths and filters) | `operation "<name>": patch file "<path>" is also rendered into the target by newFiles operation "<name>" — exclude it via spec.excludes` |
+| Rendered file bodies and path names parse as templates and reference only declared params (module dir known, non-templated filters) | `operation "<name>": template file "<rel>": references undeclared param "<name>"` |
+| Patch file bodies parse as templates and reference only declared params (module dir known, non-templated path) | `operation "<name>": patch file "<path>": references undeclared param "<name>"` |
+| `llm.maxTokens` is >= 0 | `operation "<name>": llm maxTokens must be >= 0` |
 | `shell.command` required | `operation "<name>": shell command is required` |
 | `shell.timeout` is a valid duration (skipped when templated) | `operation "<name>": invalid shell timeout "<value>"` |
 | `commitPush.message` required | `operation "<name>": commitPush message is required` |

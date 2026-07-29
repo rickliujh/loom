@@ -60,6 +60,8 @@ func resetFlags() {
 	diffParamsFile = ""
 	diffAuthor = ""
 	diffEmail = ""
+
+	validateRecursive = false
 }
 
 // L1: --local-run without --target-path errors (with target spec).

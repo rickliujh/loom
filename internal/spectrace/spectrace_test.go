@@ -28,7 +28,7 @@ var uncovered = map[string]bool{
 	"F1": true, "F2": true, "F3": true,
 	"GO1": true, "M1": true, "M3": true, "M4": true,
 	"P2": true, "PM1": true, "PM2": true, "PM3": true, "PM4": true,
-	"T1": true, "T2": true, "T3": true,
+	"T1": true, "T2": true,
 	"TG1": true, "TG2": true, "TG3": true, "TG4": true, "TG5": true,
 	"CP1": true, "CP2": true, "CP3": true, "CP4": true,
 	"J1": true, "J2": true, "L6": true, "L7": true,

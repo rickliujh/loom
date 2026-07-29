@@ -263,7 +263,7 @@ spec:
   operations:
     - name: noop
       shell:
-        command: "true"
+        command: "echo {{ index . \"service-name\" }}"
 `
 	if err := os.WriteFile(filepath.Join(child, "loom.yaml"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)

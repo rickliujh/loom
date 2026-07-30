@@ -9,7 +9,7 @@ import (
 // a terminal. Used for closing status output that is not a log record.
 func Successf(w io.Writer, format string, args ...any) {
 	check := "✔"
-	if isTerminal(w) {
+	if IsTerminal(w) {
 		check = colorSuccess + "✔" + colorReset
 	}
 	fmt.Fprintf(w, "%s %s\n", check, fmt.Sprintf(format, args...))
@@ -20,7 +20,7 @@ func Successf(w io.Writer, format string, args ...any) {
 // main and so never flows through the log handler.
 func Failuref(w io.Writer, format string, args ...any) {
 	cross := "✖"
-	if isTerminal(w) {
+	if IsTerminal(w) {
 		cross = colorError + "✖" + colorReset
 	}
 	fmt.Fprintf(w, "%s %s\n", cross, fmt.Sprintf(format, args...))
@@ -30,7 +30,7 @@ func Failuref(w io.Writer, format string, args ...any) {
 // terminal. Used for standalone notices that are not log records.
 func Warningf(w io.Writer, format string, args ...any) {
 	warn := "⚠"
-	if isTerminal(w) {
+	if IsTerminal(w) {
 		warn = colorWarn + "⚠" + colorReset
 	}
 	fmt.Fprintf(w, "%s %s\n", warn, fmt.Sprintf(format, args...))

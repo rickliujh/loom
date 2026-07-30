@@ -93,7 +93,17 @@ spec:
         tokenEnv: GITHUB_TOKEN
 ```
 
-### 3. Preview with dry-run
+### 3. See what the module needs
+
+```bash
+loom inspect ./onboard-service
+```
+
+[`loom inspect`](/reference/cli-inspect) describes the module — its operations, any
+submodules it composes, and the parameters each one needs — without running
+anything. It closes with the required parameters you have not supplied yet.
+
+### 4. Preview with dry-run
 
 ```bash
 loom run ./onboard-service \
@@ -109,7 +119,7 @@ loom diff ./onboard-service \
   --quick
 ```
 
-### 4. Run it for real
+### 5. Run it for real
 
 ```bash
 loom run ./onboard-service -p serviceName=payments
@@ -117,7 +127,7 @@ loom run ./onboard-service -p serviceName=payments
 
 Loom clones the target repo, renders templates, creates a feature branch, commits, pushes, and opens a PR.
 
-### 5. Or test locally first
+### 6. Or test locally first
 
 ```bash
 loom run ./onboard-service \

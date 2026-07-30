@@ -1,0 +1,308 @@
+package cmd
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	prettylog "github.com/rickliujh/loom/internal/log"
+	"github.com/rickliujh/loom/pkg/module"
+)
+
+// inspectPrinter renders an inspected module tree as indented text.
+//
+// The layout is one tree, not a report per module: a module's parameters,
+// target, operations, and submodules all hang off it as branches, so nesting is
+// read from the indentation alone. It borrows the run log's vocabulary — the
+// "≡ … ≡" root chip and the "▸" hand-off marker — so the same module is
+// recognizable whether you are inspecting it or watching it run.
+type inspectPrinter struct {
+	w     io.Writer
+	style prettylog.Style
+	// tree is the whole walked tree, which the described modules are nodes of.
+	// The summary needs it to phrase a --module hint the reader can actually run,
+	// since that flag resolves against the tree rather than against a subject.
+	tree *module.Inspection
+}
+
+// branch is one child line of a module: a label, and optionally the body lines
+// printed beneath it at the deeper indentation.
+type branch struct {
+	label string
+	body  func(prefix string)
+}
+
+// root heads the report with the described module and prints its branches. The
+// path is its breadcrumb from the run's root: when it has one, the module is
+// somebody's submodule, and where it sits is part of identifying it.
+func (p *inspectPrinter) root(n *module.Inspection, path []string) {
+	fmt.Fprintln(p.w)
+	line := p.style.RootChip(n.Instance)
+	switch {
+	case n.Dir != "":
+		line += " " + p.style.Muted(n.Dir)
+	case n.Source != "":
+		line += " " + p.style.Muted(n.Source)
+	}
+	fmt.Fprintln(p.w, line)
+	if len(path) > 1 {
+		fmt.Fprintln(p.w, p.style.Muted("in "+strings.Join(path, " › ")))
+	}
+	p.branches(n, "")
+}
+
+// branches prints every branch of one module beneath prefix, connecting each
+// with the usual box-drawing elbows so the last one closes its subtree.
+func (p *inspectPrinter) branches(n *module.Inspection, prefix string) {
+	bs := p.buildBranches(n)
+	for i, b := range bs {
+		connector, childPrefix := "├─ ", prefix+"│  "
+		if i == len(bs)-1 {
+			connector, childPrefix = "└─ ", prefix+"   "
+		}
+		fmt.Fprintf(p.w, "%s%s%s\n", prefix, p.style.Muted(connector), b.label)
+		if b.body != nil {
+			b.body(childPrefix)
+		}
+	}
+}
+
+func (p *inspectPrinter) buildBranches(n *module.Inspection) []branch {
+	var bs []branch
+
+	// Why this module could not be described comes first: everything below it
+	// is missing as a consequence, and the reader should know that up front.
+	if n.Error != "" {
+		bs = append(bs, branch{label: p.style.Error("✖ " + n.Error)})
+	}
+	if n.Cycle {
+		bs = append(bs, branch{label: p.style.Warn("↺ already inspected further up this branch — not expanded")})
+	}
+	if n.Unfetched {
+		bs = append(bs, branch{label: p.style.Muted("⤓ remote module not fetched (--no-fetch)")})
+	}
+	for _, w := range n.Warnings {
+		bs = append(bs, branch{label: p.style.Warn("⚠ " + w)})
+	}
+
+	if len(n.Params) > 0 {
+		params := n.Params
+		bs = append(bs, branch{
+			label: p.style.Bold("params"),
+			body:  func(prefix string) { p.printParams(params, prefix) },
+		})
+	}
+	if n.Target != nil {
+		bs = append(bs, branch{label: p.style.Bold("target") + "  " + p.targetLine(n.Target)})
+	}
+	if len(n.Excludes) > 0 {
+		bs = append(bs, branch{label: p.style.Bold("excludes") + "  " + p.style.Muted(strings.Join(n.Excludes, ", "))})
+	}
+	if len(n.Includes) > 0 {
+		bs = append(bs, branch{label: p.style.Bold("includes") + "  " + p.style.Muted(strings.Join(n.Includes, ", "))})
+	}
+	if len(n.Operations) > 0 {
+		ops := n.Operations
+		bs = append(bs, branch{
+			label: p.style.Bold("operations") + p.style.Muted(fmt.Sprintf(" (%d, in order)", len(ops))),
+			body:  func(prefix string) { p.printOperations(ops, prefix) },
+		})
+	}
+
+	// Submodules hang off the parent directly rather than under a "modules"
+	// heading: a run dispatches them as steps of the parent, and one less level
+	// of indentation per generation keeps a deep tree readable.
+	for _, child := range n.Children {
+		child := child
+		bs = append(bs, branch{
+			label: p.childLabel(child),
+			body:  func(prefix string) { p.branches(child, prefix) },
+		})
+	}
+	return bs
+}
+
+// childLabel names one submodule: the instance name a run logs it under, the
+// source it came from, the metadata name when it differs from the instance, and
+// the condition gating it.
+func (p *inspectPrinter) childLabel(n *module.Inspection) string {
+	var b strings.Builder
+	b.WriteString(p.style.Module("▸ "))
+	b.WriteString(p.style.Bold(n.Instance))
+	if n.Name != "" && n.Name != n.Instance {
+		b.WriteString(p.style.Muted(" (" + n.Name + ")"))
+	}
+	if n.Source != "" {
+		b.WriteString("  " + p.style.Muted(n.Source))
+		if n.SourceTemplate != "" {
+			b.WriteString(p.style.Muted(" ← " + n.SourceTemplate))
+		}
+	}
+	if n.If != "" {
+		b.WriteString("  " + p.style.Warn("if: "+n.If))
+	}
+	// A listed module has no branches of its own, so without a marker it would
+	// read as a module that simply does nothing. The ellipsis says "there is more
+	// here"; the summary says how to get it.
+	if n.Listed {
+		b.WriteString("  " + p.style.Muted("…"))
+	}
+	return b.String()
+}
+
+func (p *inspectPrinter) targetLine(t *module.Target) string {
+	line := t.URL
+	if t.Branch != "" {
+		line += " (" + t.Branch + ")"
+	}
+	if t.FeatureBranch != "" {
+		line += " → " + t.FeatureBranch
+	}
+	return line
+}
+
+func (p *inspectPrinter) printParams(params []module.Param, prefix string) {
+	nameW, stateW := 0, 0
+	for _, prm := range params {
+		nameW = max(nameW, len(prm.Name))
+		stateW = max(stateW, len(paramStateLabel(prm)))
+	}
+	for _, prm := range params {
+		label := paramStateLabel(prm)
+		// Pad before coloring: escape codes have width on the wire but not on
+		// screen, so padding a colored string would misalign the column.
+		state := pad(label, stateW)
+		switch prm.State {
+		case module.ParamMissing:
+			state = p.style.Error(state)
+		case module.ParamProvided, module.ParamDefault:
+			state = p.style.Success(state)
+		default:
+			state = p.style.Muted(state)
+		}
+		fmt.Fprintf(p.w, "%s  %s  %s  %s\n", prefix, pad(prm.Name, nameW), state, p.paramDetail(prm))
+	}
+}
+
+// paramStateLabel names where a parameter's value comes from. A missing one is
+// labelled "required" rather than "missing" — that is the fact the reader acts
+// on, and the detail column says it is unsatisfied.
+func paramStateLabel(prm module.Param) string {
+	switch prm.State {
+	case module.ParamMissing:
+		return "required"
+	case module.ParamUnset:
+		return "optional"
+	default:
+		return string(prm.State)
+	}
+}
+
+func (p *inspectPrinter) paramDetail(prm module.Param) string {
+	var b strings.Builder
+	switch prm.State {
+	case module.ParamMissing:
+		b.WriteString(p.style.Error("must be supplied"))
+	case module.ParamProvided, module.ParamDefault:
+		b.WriteString(fmt.Sprintf("= %q", prm.Value))
+	case module.ParamDynamic:
+		b.WriteString(p.style.Muted("$ " + prm.Command))
+		if prm.Default != "" {
+			b.WriteString(p.style.Muted(fmt.Sprintf(" (falls back to %q)", prm.Default)))
+		}
+	case module.ParamUnresolved:
+		b.WriteString(p.style.Muted("resolved at run time"))
+	case module.ParamUnset:
+		b.WriteString(p.style.Muted(`= ""`))
+	}
+	// Where a parent-supplied value came from, so a templated hand-off stays
+	// traceable back to the expression that produced it.
+	if prm.From != "" {
+		b.WriteString(p.style.Muted(" ← " + prm.From))
+	}
+	return b.String()
+}
+
+func (p *inspectPrinter) printOperations(ops []module.OpSummary, prefix string) {
+	nameW, kindW := 0, 0
+	for _, op := range ops {
+		nameW = max(nameW, len(op.Name))
+		kindW = max(kindW, len(op.Kind))
+	}
+	for _, op := range ops {
+		detail := op.Detail
+		if op.Error != "" {
+			detail = p.style.Error("✖ " + op.Error)
+		}
+		line := fmt.Sprintf("%s  %s  %s  %s", prefix, pad(op.Name, nameW), p.style.Module(pad(op.Kind, kindW)), detail)
+		if op.If != "" {
+			line += "  " + p.style.Warn("if: "+op.If)
+		}
+		fmt.Fprintln(p.w, strings.TrimRight(line, " "))
+	}
+}
+
+// summary closes the report with what a run would still need from the caller.
+// Parameters are listed with the breadcrumb of the module that declares them,
+// because in a composed tree the module that needs a value is often not the one
+// you invoke.
+//
+// Everything it says is scoped to the modules actually read. A shallow look
+// leaves submodules unopened, and claiming a tree is fully parameterized on the
+// strength of the parts you did not look at would be worse than saying nothing.
+func (p *inspectPrinter) summary(subjects []subject) {
+	fmt.Fprintln(p.w)
+	missing := collectMissing(subjects)
+	unexpanded := collectUnexpanded(subjects)
+
+	switch {
+	case len(missing) > 0:
+		prettylog.Warningf(p.w, "%d required parameter(s) not supplied — a run would fail:", len(missing))
+		nameW := 0
+		for _, m := range missing {
+			nameW = max(nameW, len(m.Name))
+		}
+		for _, m := range missing {
+			fmt.Fprintf(p.w, "  %s  %s\n", pad(m.Name, nameW), p.style.Muted(strings.Join(m.Path, " › ")))
+		}
+		fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("supply them with -p name=value"))
+	case len(unexpanded) > 0:
+		prettylog.Successf(p.w, "every required parameter of the module(s) shown is satisfied")
+	default:
+		prettylog.Successf(p.w, "every required parameter is satisfied")
+	}
+
+	if len(unexpanded) == 0 {
+		return
+	}
+	fmt.Fprintf(p.w, "\n%s\n", p.style.Muted(fmt.Sprintf("%d submodule(s) not expanded — they may need parameters of their own:", len(unexpanded))))
+	for _, crumb := range unexpanded {
+		fmt.Fprintf(p.w, "  %s\n", p.style.Muted(strings.Join(crumb, " › ")))
+	}
+	fmt.Fprintf(p.w, "\n  %s\n", p.style.Muted("--full describes all of them; --module "+moduleQuery(p.tree, unexpanded[0])+" describes one"))
+}
+
+// moduleQuery phrases a breadcrumb as a --module argument that will actually
+// resolve, and as briefly as it can: the flag matches on the tail of a path, so
+// the shortest suffix that picks out exactly one module is the nicest thing to
+// type. Two submodules can share a name — as they do whenever a tree composes
+// the same module twice — so a bare name is offered only once it has been
+// checked, rather than handing the reader a command that errors as ambiguous.
+// The full path always resolves, so the loop terminates on something usable.
+func moduleQuery(tree *module.Inspection, crumb []string) string {
+	for i := len(crumb) - 1; i > 0; i-- {
+		q := strings.Join(crumb[i:], "/")
+		if _, _, err := tree.FindModule(q); err == nil {
+			return q
+		}
+	}
+	return strings.Join(crumb, "/")
+}
+
+// pad right-aligns a column to width, on the uncolored text.
+func pad(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
+}

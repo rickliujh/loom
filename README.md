@@ -753,6 +753,87 @@ loom run ./onboard-service \
 loom run ./onboard-service --params-file params.yaml
 ```
 
+### `loom inspect`
+
+Show what a module is made of — its operations, the submodules it composes, and the parameters it needs — without running any of it.
+
+```
+loom inspect [path] [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param key=value` | Set a parameter for the root module (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--full` | Describe every module in the tree (same as `--depth 0`) |
+| `--depth n` | Levels of module to describe (`1`, the default, is the subject alone) |
+| `-m, --module name` | Describe this submodule instead of the root, by name or `parent/child` path (repeatable) |
+| `--no-fetch` | Don't clone modules sourced from a Git URL; list them instead |
+| `-o, --output format` | `tree` (default) or `json` |
+
+Nothing executes: operations don't run, `dynamicParams` commands are shown but never evaluated, `if` conditions are shown but never tested, and no target repo is cloned.
+
+By default one module is described and its submodules are listed by name — the usual question, answered without reading a tree that may span several repositories. A listed submodule is never fetched, so the default view does no network I/O.
+
+```bash
+loom inspect ./platform-rollout -p env=prod
+```
+
+```
+[≡ platform-rollout ≡] ./platform-rollout
+├─ params
+│    env         provided  = "prod"
+│    owner       default   = "platform-team"
+│    commitHash  dynamic   $ git rev-parse --short HEAD
+├─ operations (1, in order)
+│    announce  shell  echo rolling out to {{ .env }}
+├─ ▸ svc-a-prod  ../child  if: test -d ./svc-a  …
+└─ ▸ svc-b  ../child  …
+
+✔ every required parameter of the module(s) shown is satisfied
+
+2 submodule(s) not expanded — they may need parameters of their own:
+  platform-rollout › svc-a-prod
+  platform-rollout › svc-b
+
+  --full describes all of them; --module svc-a-prod describes one
+```
+
+A `…` marks a module that was listed but not read. Open one up with `--full`, `--depth n`, or `-m`:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod
+```
+
+```
+[≡ svc-a-prod ≡] ../child
+in platform-rollout › svc-a-prod
+├─ params
+│    service    provided    = "svc-a"
+│    namespace  provided    = "prod-apps" ← {{ .env }}-apps
+│    region     required    must be supplied
+│    stamp      unresolved  resolved at run time ← {{ .commitHash }}
+├─ target  https://github.com/acme/svc-a-gitops.git (main) → loom/onboard-svc-a
+├─ operations (3, in order)
+│    render   newFiles  templates → manifests
+│    gate     shell     kubeconform manifests  if: test -f manifests/app.yaml
+│    open-pr  pr        github: Onboard {{ .service }}
+└─ ▸ docs  ../grandchild  …
+
+⚠ 1 required parameter(s) not supplied — a run would fail:
+  region  platform-rollout › svc-a-prod
+```
+
+Repeat `-m` to describe several modules at once — two siblings side by side, say — each with its own breadcrumb, under one shared summary:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod -m svc-b
+```
+
+Each parameter carries where its value comes from, and a value handed down by a parent is shown with the expression that produced it (`← {{ .env }}-apps`). The summary collects every required parameter still unsupplied, located by the module that declares it — in a composed tree, that is often not the module you invoke. It never claims a tree is fully parameterized on the strength of modules it did not read.
+
+Use `-o json` for scripting; the document carries the described modules plus `missingParams`, `problems`, and `unexpanded` roll-ups.
+
 ### `loom diff`
 
 Show the changes a module run would produce, without opening a PR.

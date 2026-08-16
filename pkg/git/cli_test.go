@@ -700,3 +700,19 @@ func runGitCmd(name string, args ...string) (string, error) {
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
+
+func TestCliCheckout(t *testing.T) {
+	bare := initTaggedBareRepo(t)
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	if err := cliClone(ctx, bare, dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := cliCheckout(ctx, dir, "v1"); err != nil {
+		t.Fatalf("cliCheckout v1: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "extra.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected extra.txt absent at v1, stat err = %v", err)
+	}
+}

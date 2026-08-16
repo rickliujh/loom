@@ -47,6 +47,11 @@ type ModuleRef struct {
 	Name   string            `yaml:"name"`
 	Source string            `yaml:"source"`
 	Params map[string]string `yaml:"params,omitempty"`
+	// Version optionally pins a git module source to a specific branch, tag, or
+	// commit. Empty means the source's default branch. Templatable. Ignored for
+	// local sources (an error to combine). Equivalent to a "?ref=" suffix on the
+	// source, which the field takes precedence over.
+	Version string `yaml:"version,omitempty"`
 	// If is an optional shell predicate gating child execution. Empty means
 	// always run. Templated with the parent's params, then run via sh -c in
 	// the child's resolved target dir: exit 0 runs the child, non-zero skips it.

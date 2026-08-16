@@ -47,6 +47,7 @@ func resetFlags() {
 	dryRun = false
 	localRun = false
 	targetPath = ""
+	moduleRef = ""
 	params = nil
 	paramsFile = ""
 	verbose = false
@@ -56,6 +57,7 @@ func resetFlags() {
 	diffQuick = false
 	diffPartial = false
 	diffTargetPath = ""
+	diffRef = ""
 	diffParams = nil
 	diffParamsFile = ""
 	diffAuthor = ""
@@ -242,6 +244,65 @@ spec:
 	}
 	if string(content) != "from git" {
 		t.Errorf("expected 'from git', got %q", string(content))
+	}
+}
+
+// M5: --ref pins the root git source to a tag; the older tagged content wins
+// over the newer default branch.
+func TestRun_RefFlag_PinsVersion(t *testing.T) {
+	resetFlags()
+
+	// Work repo: tag v1 has greeting "from v1"; default branch adds "from main".
+	work := t.TempDir()
+	initGitRepo(t, work)
+	tpl := filepath.Join(work, "templates")
+	os.MkdirAll(tpl, 0o755)
+	writeLoomYAML(t, work, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: greeter
+spec:
+  operations:
+    - name: write
+      newFiles:
+        source: "templates"
+        dest: ""
+`)
+	os.WriteFile(filepath.Join(tpl, "greeting.txt"), []byte("from v1"), 0o644)
+	gitRun(t, work, "add", ".")
+	gitRun(t, work, "commit", "-m", "v1")
+	gitRun(t, work, "tag", "v1")
+	os.WriteFile(filepath.Join(tpl, "greeting.txt"), []byte("from main"), 0o644)
+	gitRun(t, work, "add", ".")
+	gitRun(t, work, "commit", "-m", "main")
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone failed: %v\n%s", err, out)
+	}
+
+	targetDir := t.TempDir()
+	rootCmd.SetArgs([]string{"run", "file://" + bare, "--ref", "v1", "--target-path", targetDir})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(targetDir, "greeting.txt"))
+	if err != nil {
+		t.Fatal("expected greeting.txt in target dir")
+	}
+	if string(content) != "from v1" {
+		t.Errorf("expected --ref v1 content 'from v1', got %q", string(content))
+	}
+}
+
+// gitRun runs a git command in dir, failing the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	if out, err := exec.Command("git", full...).CombinedOutput(); err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, out)
 	}
 }
 

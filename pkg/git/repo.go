@@ -76,6 +76,46 @@ func Open(dir string, logger *slog.Logger) (Repository, error) {
 	return &Repo{gg: r, dir: dir, logger: logger}, nil
 }
 
+// Checkout switches the working tree in dir to an arbitrary git ref — a branch,
+// tag, or commit SHA. It is used to pin a module source to a specific version.
+// A full clone (as produced by Clone with an empty branch) has every branch,
+// tag, and reachable commit on disk, so any of these refs resolves.
+//
+// Like the rest of this package it tries go-git first and falls back to the git
+// CLI, whose `git checkout` resolves refs (notably remote-tracking branches via
+// DWIM) that go-git's ResolveRevision does not.
+func Checkout(ctx context.Context, dir, ref string, logger *slog.Logger) error {
+	logger.Info("checking out module version", "ref", ref)
+
+	if err := checkoutLib(dir, ref); err == nil {
+		return nil
+	} else if !hasBinary("git") {
+		return err
+	} else {
+		logger.Debug("go-git checkout failed, falling back to git CLI", "ref", ref, "error", err)
+	}
+	return cliCheckout(ctx, dir, ref)
+}
+
+// checkoutLib resolves ref to a commit and checks it out via go-git. Tags and
+// commits produce a detached HEAD, which is exactly what a pinned, read-only
+// module source needs.
+func checkoutLib(dir, ref string) error {
+	r, err := gogit.PlainOpen(dir)
+	if err != nil {
+		return err
+	}
+	hash, err := r.ResolveRevision(plumbing.Revision(ref))
+	if err != nil {
+		return fmt.Errorf("resolving ref %q: %w", ref, err)
+	}
+	wt, err := r.Worktree()
+	if err != nil {
+		return err
+	}
+	return wt.Checkout(&gogit.CheckoutOptions{Hash: *hash})
+}
+
 func (r *Repo) Dir() string { return r.dir }
 
 // ---------------------------------------------------------------------------

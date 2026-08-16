@@ -141,7 +141,15 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			return fmt.Errorf("rendering source for child %q: %w", childName, err)
 		}
 
-		childDir, sourceCleanup, err := ResolveSource(renderedSource, mod.Dir, childLogger)
+		// The version field pins the child to a branch, tag, or commit. Like
+		// name/source/params it is authored in the parent and renders with the
+		// parent's params (M4/IF2).
+		renderedVersion, err := tmpl.RenderString(childRef.Version, mod.Params)
+		if err != nil {
+			return fmt.Errorf("rendering version for child %q: %w", childName, err)
+		}
+
+		childDir, sourceCleanup, err := ResolveSource(renderedSource, renderedVersion, mod.Dir, childLogger)
 		if err != nil {
 			return fmt.Errorf("resolving child module %q: %w", childName, err)
 		}

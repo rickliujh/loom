@@ -26,6 +26,16 @@ func cliClone(ctx context.Context, url, dir, branch string) error {
 	return nil
 }
 
+func cliCheckout(ctx context.Context, dir, ref string) error {
+	cmd := exec.CommandContext(ctx, "git", "checkout", ref)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git checkout %s: %w\n%s", ref, err, output)
+	}
+	return nil
+}
+
 func cliCreateBranch(dir, name string) error {
 	cmd := exec.Command("git", "checkout", "-b", name)
 	cmd.Dir = dir

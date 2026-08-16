@@ -20,6 +20,7 @@ loom diff [path] [flags]
 | `-p, --param key=value` | Set a parameter (repeatable) |
 | `--params-file file.yaml` | Load parameters from a YAML file |
 | `--target-path /path` | Keep target clones here for inspection instead of a cleaned-up temp dir |
+| `--ref version` | Pin the module source to a git branch, tag, or commit. Overrides a `?ref=` in the source; git sources only |
 | `--author name` | Default git author name for `commitPush` |
 | `--email email` | Default git author email for `commitPush` |
 | `-v, --verbose` | Enable debug logging |

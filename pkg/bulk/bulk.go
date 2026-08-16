@@ -46,7 +46,7 @@ func Run(opts Options, logger *slog.Logger) error {
 	}
 
 	// B1: load and validate the child module.
-	moduleDir, cleanup, err := module.ResolveSource(opts.ModuleRef, ".", logger)
+	moduleDir, cleanup, err := module.ResolveSource(opts.ModuleRef, "", ".", logger)
 	if err != nil {
 		return err
 	}

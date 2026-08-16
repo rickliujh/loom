@@ -49,6 +49,7 @@ Sources can be:
 - **Local paths** (`./relative/path` or `/absolute/path`) — resolved relative to the parent module
 - **Git URLs** — cloned to a temporary directory automatically
 - **Git URLs with `//` separator** — `repo.git//subdir` clones the repo and uses `subdir/` as the module root
+- **Git URLs with `?ref=<version>`** — pins the clone to a branch, tag, or commit (see [Pinning a module version](#pinning-a-module-version))
 
 The `//` convention (borrowed from Terraform) lets a single Git repository host multiple modules in different directories:
 
@@ -87,6 +88,48 @@ modules:
 ```
 
 This means you can publish reusable modules as Git repositories. A platform team maintains the standard modules; product teams compose them.
+
+### Pinning a module version
+
+Without a version, loom clones a git module's default branch — so a run picks up
+whatever is on `main` at the time. Pin a module to an exact **branch, tag, or
+commit SHA** to make runs reproducible.
+
+For a child module, add a `version` field next to `source`:
+
+```yaml
+modules:
+  - name: networking
+    source: https://github.com/myorg/loom-modules.git//networking
+    version: v1.4.0        # branch, tag, or commit
+```
+
+Because `version` is templatable, it can be a parameter:
+
+```yaml
+params:
+  - name: modVersion
+    default: "v1.4.0"
+modules:
+  - name: networking
+    source: "https://github.com/myorg/loom-modules.git//networking"
+    version: "{{ .modVersion }}"
+```
+
+The **root module** is passed on the command line, so it has no `version` field
+to set. Version it with the `--ref` flag, or with a `?ref=<version>` suffix on
+the source (the Terraform convention — `?ref=` comes last, after any
+`//subdir`). `--ref` takes precedence over a `?ref=` suffix:
+
+```bash
+loom run https://github.com/myorg/loom-modules.git//onboard --ref v2.0.0 -p serviceName=payments
+loom run 'https://github.com/myorg/loom-modules.git//onboard?ref=v2.0.0' -p serviceName=payments
+```
+
+The `?ref=` suffix also works in a child `source`; the `version` field takes
+precedence if you set both. Version pinning applies to git sources only —
+combining it with a local path is an error, since a local path is already fixed
+on disk.
 
 ## Parameter Flow
 

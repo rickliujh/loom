@@ -922,3 +922,83 @@ func TestCrossPath_FullLoomFlow_CLIPush(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Checkout — pin a module clone to a ref (branch, tag, or commit)
+// ---------------------------------------------------------------------------
+
+// initTaggedBareRepo builds a bare repo whose default branch adds extra.txt on
+// top of a base commit tagged "v1" (base.txt only). Returns the bare repo path.
+func initTaggedBareRepo(t *testing.T) string {
+	t.Helper()
+
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"git", "init", work},
+		{"git", "-C", work, "config", "user.email", "test@test.com"},
+		{"git", "-C", work, "config", "user.name", "Test"},
+	} {
+		if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(work, "base.txt"), []byte("base\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, work, "add", ".")
+	gitCmd(t, work, "commit", "-m", "base")
+	gitCmd(t, work, "tag", "v1")
+
+	if err := os.WriteFile(filepath.Join(work, "extra.txt"), []byte("extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, work, "add", ".")
+	gitCmd(t, work, "commit", "-m", "extra")
+
+	bare := t.TempDir()
+	if out, err := exec.Command("git", "clone", "--bare", work, bare).CombinedOutput(); err != nil {
+		t.Fatalf("bare clone failed: %v\n%s", err, out)
+	}
+	return bare
+}
+
+func TestCheckout_Tag(t *testing.T) {
+	bare := initTaggedBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	if _, err := Clone(ctx, bare, cloneDir, "", logger); err != nil {
+		t.Fatal(err)
+	}
+	// The default branch carries the newer commit.
+	if _, err := os.Stat(filepath.Join(cloneDir, "extra.txt")); err != nil {
+		t.Fatalf("expected extra.txt on default branch: %v", err)
+	}
+
+	if err := Checkout(ctx, cloneDir, "v1", logger); err != nil {
+		t.Fatalf("checkout v1: %v", err)
+	}
+	// v1 predates extra.txt.
+	if _, err := os.Stat(filepath.Join(cloneDir, "extra.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected extra.txt absent at v1, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cloneDir, "base.txt")); err != nil {
+		t.Errorf("expected base.txt at v1: %v", err)
+	}
+}
+
+func TestCheckout_UnknownRef(t *testing.T) {
+	bare := initTaggedBareRepo(t)
+	ctx := context.Background()
+	logger := testLogger()
+
+	cloneDir := t.TempDir()
+	if _, err := Clone(ctx, bare, cloneDir, "", logger); err != nil {
+		t.Fatal(err)
+	}
+	if err := Checkout(ctx, cloneDir, "does-not-exist", logger); err == nil {
+		t.Fatal("expected error checking out a nonexistent ref")
+	}
+}

@@ -13,7 +13,7 @@ import (
 )
 
 func TestBuildModule_AddedFiles(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
 		HeadBranch: "feat/payments",
@@ -62,7 +62,7 @@ func TestBuildModule_AddedFiles(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update config",
 		Provider: "github",
 		Files: []FileChange{
@@ -96,7 +96,7 @@ func TestBuildModule_ModifiedYAML(t *testing.T) {
 }
 
 func TestBuildModule_DeletedFiles(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Cleanup",
 		Provider: "github",
 		Files: []FileChange{
@@ -117,7 +117,7 @@ func TestBuildModule_DeletedFiles(t *testing.T) {
 }
 
 func TestBuildModule_DefaultGitOps(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Add feature",
 		BaseBranch: "main",
 		HeadBranch: "feat/add-feature",
@@ -158,7 +158,7 @@ func TestBuildModule_DefaultGitOps(t *testing.T) {
 }
 
 func TestBuildModule_DefaultGitOps_ParameterizesTarget(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
 		HeadBranch: "feat/onboard-payments",
@@ -181,7 +181,6 @@ func TestBuildModule_DefaultGitOps_ParameterizesTarget(t *testing.T) {
 		t.Errorf("expected parameterized featureBranch, got %q", target.FeatureBranch)
 	}
 }
-
 
 func TestEmitModule(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -254,7 +253,7 @@ func TestEmitModule(t *testing.T) {
 // --- G3: Module name derivation priority ---
 
 func TestBuildModule_NamePriority_ExplicitName(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Some PR Title",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -266,7 +265,7 @@ func TestBuildModule_NamePriority_ExplicitName(t *testing.T) {
 }
 
 func TestBuildModule_NamePriority_SlugifiedTitle(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Add Payment Service",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -320,9 +319,9 @@ func TestSlugify_TruncatesAt60(t *testing.T) {
 	}
 }
 
-// --- PD1/PD2: Provider detection via ParsePRRef ---
+// --- PD1/PD2: Provider detection via ParseSourceRef ---
 
-func TestParsePRRef_GitHub(t *testing.T) {
+func TestParseSourceRef_GitHub(t *testing.T) {
 	tests := []struct {
 		ref      string
 		provider string
@@ -335,21 +334,24 @@ func TestParsePRRef_GitHub(t *testing.T) {
 		{"github:owner/repo#1", "github"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParsePRRef(tt.ref, testLogger())
+		src, err := ParseSourceRef(tt.ref, SnapshotOptions{}, testLogger())
 		if err != nil {
-			t.Errorf("ParsePRRef(%q): %v", tt.ref, err)
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
-		if provider != tt.provider {
-			t.Errorf("ParsePRRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+		if src.Provider != tt.provider {
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, src.Provider, tt.provider)
 		}
-		if dp == nil {
-			t.Errorf("ParsePRRef(%q) returned nil DiffProvider", tt.ref)
+		if src.Kind != KindPR {
+			t.Errorf("ParseSourceRef(%q) kind = %v, want pr", tt.ref, src.Kind)
+		}
+		if src.ChangeSource == nil {
+			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
 }
 
-func TestParsePRRef_RejectsBadURLs(t *testing.T) {
+func TestParseSourceRef_RejectsBadURLs(t *testing.T) {
 	// These contain "/pull/" or "/-/merge_requests/" as substrings but
 	// are not valid PR/MR URLs — the strict regex should reject them.
 	badRefs := []string{
@@ -358,14 +360,14 @@ func TestParsePRRef_RejectsBadURLs(t *testing.T) {
 		"this-has-/pull/42-in-the-middle",
 	}
 	for _, ref := range badRefs {
-		_, _, err := ParsePRRef(ref, testLogger())
+		_, err := ParseSourceRef(ref, SnapshotOptions{}, testLogger())
 		if err == nil {
-			t.Errorf("ParsePRRef(%q) should have been rejected", ref)
+			t.Errorf("ParseSourceRef(%q) should have been rejected", ref)
 		}
 	}
 }
 
-func TestParsePRRef_GitLab(t *testing.T) {
+func TestParseSourceRef_GitLab(t *testing.T) {
 	tests := []struct {
 		ref      string
 		provider string
@@ -378,21 +380,24 @@ func TestParsePRRef_GitLab(t *testing.T) {
 		{"gitlab:group/repo!5", "gitlab"},
 	}
 	for _, tt := range tests {
-		provider, dp, err := ParsePRRef(tt.ref, testLogger())
+		src, err := ParseSourceRef(tt.ref, SnapshotOptions{}, testLogger())
 		if err != nil {
-			t.Errorf("ParsePRRef(%q): %v", tt.ref, err)
+			t.Errorf("ParseSourceRef(%q): %v", tt.ref, err)
 			continue
 		}
-		if provider != tt.provider {
-			t.Errorf("ParsePRRef(%q) provider = %q, want %q", tt.ref, provider, tt.provider)
+		if src.Provider != tt.provider {
+			t.Errorf("ParseSourceRef(%q) provider = %q, want %q", tt.ref, src.Provider, tt.provider)
 		}
-		if dp == nil {
-			t.Errorf("ParsePRRef(%q) returned nil DiffProvider", tt.ref)
+		if src.Kind != KindPR {
+			t.Errorf("ParseSourceRef(%q) kind = %v, want pr", tt.ref, src.Kind)
+		}
+		if src.ChangeSource == nil {
+			t.Errorf("ParseSourceRef(%q) returned nil ChangeSource", tt.ref)
 		}
 	}
 }
 
-func TestParsePRRef_UnknownProvider(t *testing.T) {
+func TestParseSourceRef_UnknownProvider(t *testing.T) {
 	refs := []string{
 		"https://example.com/repo/changes/1",
 		"bitbucket:owner/repo#1",
@@ -400,9 +405,9 @@ func TestParsePRRef_UnknownProvider(t *testing.T) {
 		"",
 	}
 	for _, ref := range refs {
-		_, _, err := ParsePRRef(ref, testLogger())
+		_, err := ParseSourceRef(ref, SnapshotOptions{}, testLogger())
 		if err == nil {
-			t.Errorf("ParsePRRef(%q) expected error for unknown provider", ref)
+			t.Errorf("ParseSourceRef(%q) expected error for unknown provider", ref)
 		}
 	}
 }
@@ -464,8 +469,8 @@ func TestParseGitHubPRRef(t *testing.T) {
 func TestParseGitHubPRRef_Errors(t *testing.T) {
 	badRefs := []string{
 		"https://github.com/myorg/myrepo/pull/notanumber",
-		"github:myorg/myrepo",  // missing #number
-		"github:myorg#42",      // missing /repo
+		"github:myorg/myrepo",   // missing #number
+		"github:myorg#42",       // missing /repo
 		"not-a-valid-reference", // no /pull/ or github: prefix
 	}
 	for _, ref := range badRefs {
@@ -508,8 +513,8 @@ func TestParseGitLabMRRef(t *testing.T) {
 
 func TestParseGitLabMRRef_Errors(t *testing.T) {
 	badRefs := []string{
-		"gitlab:group/repo",      // missing !number
-		"gitlab:group/repo!abc",  // non-numeric
+		"gitlab:group/repo",     // missing !number
+		"gitlab:group/repo!abc", // non-numeric
 	}
 	for _, ref := range badRefs {
 		_, _, _, err := parseGitLabMRRef(ref)
@@ -522,7 +527,7 @@ func TestParseGitLabMRRef_Errors(t *testing.T) {
 // --- FC1: Added files — single newFiles operation from root ---
 
 func TestBuildModule_AddedFiles_SingleNewFilesOp(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Add multiple dirs",
 		Provider: "github",
 		Files: []FileChange{
@@ -551,7 +556,7 @@ func TestBuildModule_AddedFiles_SingleNewFilesOp(t *testing.T) {
 }
 
 func TestBuildModule_AddedFiles_SourceIsDot(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Root files",
 		Provider: "github",
 		Files: []FileChange{
@@ -574,7 +579,7 @@ func TestBuildModule_AddedFiles_SourceIsDot(t *testing.T) {
 }
 
 func TestBuildModule_AddedFiles_NilContentSkipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Nil content",
 		Provider: "github",
 		Files: []FileChange{
@@ -596,7 +601,7 @@ func TestBuildModule_AddedFiles_NilContentSkipped(t *testing.T) {
 // --- FC2: Modified files — YAML with SMP only; others skipped with warning ---
 
 func TestBuildModule_ModifiedNonYAML_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update JSON",
 		Provider: "github",
 		Files: []FileChange{
@@ -620,7 +625,7 @@ func TestBuildModule_ModifiedNonYAML_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_NoOldContent_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update YAML without old",
 		Provider: "github",
 		Files: []FileChange{
@@ -644,7 +649,7 @@ func TestBuildModule_ModifiedYAML_NoOldContent_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_InvalidYAML_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Bad YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -668,7 +673,7 @@ func TestBuildModule_ModifiedYAML_InvalidYAML_Skipped(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_YmlExtension(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Update yml",
 		Provider: "github",
 		Files: []FileChange{
@@ -692,7 +697,7 @@ func TestBuildModule_ModifiedYAML_YmlExtension(t *testing.T) {
 }
 
 func TestBuildModule_ModifiedYAML_NilNewContent_Skipped(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "No new content",
 		Provider: "github",
 		Files: []FileChange{
@@ -717,7 +722,7 @@ func TestBuildModule_ModifiedYAML_NilNewContent_Skipped(t *testing.T) {
 // --- FC3: Deleted files → shell rm ---
 
 func TestBuildModule_DeletedFiles_Parameterized(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Remove payments config",
 		Provider: "github",
 		Files: []FileChange{
@@ -744,7 +749,7 @@ func TestBuildModule_DeletedFiles_Parameterized(t *testing.T) {
 // --- FC4: Renamed files → mv, then SMP patch if content also changed ---
 
 func TestBuildModule_RenamedFiles_MvOnly_NoOldContent(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename file",
 		Provider: "github",
 		Files: []FileChange{
@@ -788,7 +793,7 @@ func TestBuildModule_RenamedFiles_MvOnly_NoOldContent(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_MvAndPatch(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename and modify",
 		Provider: "github",
 		Files: []FileChange{
@@ -844,7 +849,7 @@ func TestBuildModule_RenamedFiles_MvAndPatch(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_NonYAML_ContentChanged(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename non-YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -873,7 +878,7 @@ func TestBuildModule_RenamedFiles_NonYAML_ContentChanged(t *testing.T) {
 
 func TestBuildModule_RenamedFiles_YAML_IdenticalContent(t *testing.T) {
 	content := []byte("key: value\nother: data")
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Pure rename YAML",
 		Provider: "github",
 		Files: []FileChange{
@@ -901,7 +906,7 @@ func TestBuildModule_RenamedFiles_YAML_IdenticalContent(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_Parameterized(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Rename payments",
 		Provider: "github",
 		Files: []FileChange{
@@ -927,7 +932,7 @@ func TestBuildModule_RenamedFiles_Parameterized(t *testing.T) {
 }
 
 func TestBuildModule_RenamedFiles_PureRename_NoNewContent(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Pure rename",
 		Provider: "github",
 		Files: []FileChange{
@@ -955,7 +960,7 @@ func TestBuildModule_RenamedFiles_PureRename_NoNewContent(t *testing.T) {
 // --- PM5/GO3/GO4: GitOps metadata parameterization ---
 
 func TestBuildModule_GitOps_ParameterizesCommitAndPR(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "onboard payments service",
 		Body:       "Adding payments to the platform",
 		BaseBranch: "main",
@@ -1034,7 +1039,7 @@ func TestToSSHURL(t *testing.T) {
 // --- E2: loom.yaml structure conformance ---
 
 func TestBuildModule_LoomFileStructure(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "test",
 		Provider:   "github",
 		BaseBranch: "main",
@@ -1058,7 +1063,7 @@ func TestBuildModule_LoomFileStructure(t *testing.T) {
 // --- PM6: All params declared as required ---
 
 func TestBuildModule_ParamDefs_AllRequired(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "test",
 		Provider: "github",
 		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
@@ -1082,7 +1087,7 @@ func TestBuildModule_ParamDefs_AllRequired(t *testing.T) {
 // --- E3: Operation ordering ---
 
 func TestBuildModule_OperationOrdering(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:      "Full change set",
 		Provider:   "github",
 		BaseBranch: "main",
@@ -1152,7 +1157,7 @@ func TestSanitizeFilename(t *testing.T) {
 // --- SMP5: Patch file path in operation ---
 
 func TestBuildModule_PatchFilePath(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Patch test",
 		Provider: "github",
 		Files: []FileChange{
@@ -1343,7 +1348,7 @@ func TestEmitModule_LoomYAMLRoundTrip(t *testing.T) {
 // --- Mixed change types in a single PR ---
 
 func TestBuildModule_MixedChangeTypes(t *testing.T) {
-	pr := &PRInfo{
+	pr := &ChangeSet{
 		Title:    "Mixed changes",
 		Provider: "github",
 		Files: []FileChange{
@@ -1395,6 +1400,184 @@ func TestChangeType_String(t *testing.T) {
 		if got := tt.ct.String(); got != tt.want {
 			t.Errorf("ChangeType(%d).String() = %q, want %q", tt.ct, got, tt.want)
 		}
+	}
+}
+
+// --- Degraded gitops paths (commit / snapshot sources) ---
+
+func TestBuildModule_NoRepoURL_OmitsTarget(t *testing.T) {
+	cs := &ChangeSet{
+		Title:    "local change",
+		Provider: "github",
+		Files:    []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "test", nil, testLogger())
+
+	if mod.loomFile.Spec.Target != nil {
+		t.Error("expected target to be omitted when repo URL is unknown")
+	}
+	// commitPush is still emitted.
+	hasCommit := false
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.CommitPush != nil {
+			hasCommit = true
+		}
+	}
+	if !hasCommit {
+		t.Error("expected commitPush operation")
+	}
+}
+
+func TestBuildModule_NoProvider_OmitsPROp(t *testing.T) {
+	cs := &ChangeSet{
+		Title:      "bitbucket change",
+		RepoURL:    "git@bitbucket.org:o/r.git",
+		BaseBranch: "main",
+		Files:      []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "test", nil, testLogger())
+
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.PR != nil {
+			t.Error("expected pr operation to be omitted when provider is unknown")
+		}
+	}
+	if mod.loomFile.Spec.Target == nil {
+		t.Fatal("expected target (repo URL is known)")
+	}
+}
+
+func TestBuildModule_SynthesizesFeatureBranchAndTitle(t *testing.T) {
+	cs := &ChangeSet{
+		// No Title, no HeadBranch — e.g. a snapshot source.
+		RepoURL:    "https://github.com/o/r.git",
+		BaseBranch: "main",
+		Provider:   "github",
+		Files:      []FileChange{{Type: ChangeAdded, Path: "f.yaml", NewContent: []byte("x: 1")}},
+	}
+	mod := buildModule(cs, "my-module", nil, testLogger())
+
+	if mod.loomFile.Spec.Target.FeatureBranch != "loom/my-module" {
+		t.Errorf("featureBranch = %q, want loom/my-module", mod.loomFile.Spec.Target.FeatureBranch)
+	}
+	for _, op := range mod.loomFile.Spec.Operations {
+		if op.CommitPush != nil && op.CommitPush.Message != "apply my-module" {
+			t.Errorf("commit message = %q, want 'apply my-module'", op.CommitPush.Message)
+		}
+		if op.PR != nil && op.PR.Title != "apply my-module" {
+			t.Errorf("pr title = %q, want 'apply my-module'", op.PR.Title)
+		}
+	}
+}
+
+// --- End-to-end: multiple sources composed through Run ---
+
+func TestRun_ComposesMultipleCommitSources(t *testing.T) {
+	r := newFixtureRepo(t)
+	c1, c2, c3 := seedHistory(r)
+	outputDir := filepath.Join(t.TempDir(), "module")
+
+	opts := Options{
+		Refs: []string{
+			r.dir + "@" + c1 + "..." + c2,
+			r.dir + "@" + c2 + "..." + c3,
+		},
+		OutputDir:  outputDir,
+		ModuleName: "combo",
+	}
+	if err := Run(t.Context(), opts, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(outputDir, "loom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lf config.LoomFile
+	if err := yaml.Unmarshal(data, &lf); err != nil {
+		t.Fatalf("invalid loom.yaml: %v", err)
+	}
+	if lf.Metadata.Name != "combo" {
+		t.Errorf("module name = %q", lf.Metadata.Name)
+	}
+
+	// Net effect of both ranges: renamed.yaml added (add+rename composed),
+	// base.yaml patched, app.json deleted. Fixture has no origin remote, so
+	// target and pr degrade away; commitPush remains.
+	var hasNewFiles, hasPatch, hasRm, hasCommit, hasPR bool
+	for _, op := range lf.Spec.Operations {
+		switch {
+		case op.NewFiles != nil:
+			hasNewFiles = true
+		case op.Patch != nil:
+			hasPatch = true
+			if op.Patch.Target != "config/base.yaml" {
+				t.Errorf("patch target = %q", op.Patch.Target)
+			}
+		case op.Shell != nil && strings.Contains(op.Shell.Command, "rm"):
+			hasRm = true
+		case op.CommitPush != nil:
+			hasCommit = true
+		case op.PR != nil:
+			hasPR = true
+		}
+	}
+	if !hasNewFiles || !hasPatch || !hasRm || !hasCommit {
+		t.Errorf("missing operations (newFiles=%v patch=%v rm=%v commit=%v): %+v",
+			hasNewFiles, hasPatch, hasRm, hasCommit, lf.Spec.Operations)
+	}
+	if hasPR {
+		t.Error("expected pr operation to be omitted (no remote)")
+	}
+	if lf.Spec.Target != nil {
+		t.Error("expected target to be omitted (no remote)")
+	}
+
+	// The added-then-renamed file lands as a template at its final path.
+	if _, err := os.Stat(filepath.Join(outputDir, "config", "renamed.yaml")); err != nil {
+		t.Errorf("expected template config/renamed.yaml: %v", err)
+	}
+}
+
+func TestRun_SnapshotOnlyRequiresName(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, dir, "a/f.yaml", "x: 1\n")
+
+	opts := Options{
+		Refs:      []string{dir},
+		Include:   []string{"a/**"},
+		OutputDir: t.TempDir(),
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "--name is required") {
+		t.Errorf("expected name-required error, got %v", err)
+	}
+}
+
+func TestRun_SnapshotFlagsRequireSnapshotSource(t *testing.T) {
+	opts := Options{
+		Refs:    []string{"github:o/r#1"},
+		Include: []string{"a/**"},
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "require a snapshot source") {
+		t.Errorf("expected flag-validation error, got %v", err)
+	}
+}
+
+func TestRun_AtMostOneSnapshotSource(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	mustWrite(t, dirA, "a/f.yaml", "x: 1\n")
+	mustWrite(t, dirB, "a/f.yaml", "x: 2\n")
+
+	opts := Options{
+		Refs:       []string{dirA, dirB},
+		Include:    []string{"a/**"},
+		ModuleName: "two-snaps",
+	}
+	err := Run(t.Context(), opts, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "at most one snapshot source") {
+		t.Errorf("expected single-snapshot guard error, got %v", err)
 	}
 }
 

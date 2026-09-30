@@ -1,6 +1,7 @@
 package bulk
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,13 +29,25 @@ type Options struct {
 	Name string
 	// ItemsFile is an optional YAML file with a list of param sets.
 	ItemsFile string
+	// Items are param sets given directly, as `loom serve` receives them;
+	// when non-nil they are used instead of ItemsFile and checked the same
+	// way. A top-level scalar is expected as its text, as a file gives it,
+	// and a string given for a list or map param is parsed as YAML
+	// (params.Coerce), so the wrapper holds the structure, not its text.
+	Items []map[string]any
 	// NameParam is an optional child param whose value names each entry
 	// (default: the item index).
 	NameParam string
 }
 
 // Run generates a bulk wrapper module from an existing module's config.
+// It is RunContext under context.Background().
 func Run(opts Options, logger *slog.Logger) error {
+	return RunContext(context.Background(), opts, logger)
+}
+
+// RunContext is Run with the clone of a git-URL module bound by ctx.
+func RunContext(ctx context.Context, opts Options, logger *slog.Logger) error {
 	outputDir := opts.OutputDir
 	if outputDir == "" {
 		outputDir = "."
@@ -49,7 +62,7 @@ func Run(opts Options, logger *slog.Logger) error {
 	}
 
 	// B1: load and validate the child module.
-	moduleDir, cleanup, err := module.ResolveSource(opts.ModuleRef, ".", logger)
+	moduleDir, cleanup, err := module.ResolveSourceContext(ctx, opts.ModuleRef, ".", logger)
 	if err != nil {
 		return err
 	}
@@ -83,7 +96,7 @@ func Run(opts Options, logger *slog.Logger) error {
 	}
 
 	// B2: seed items from file, or B1: a single placeholder item.
-	items, err := loadItems(opts.ItemsFile, cfg)
+	items, err := loadItems(opts, cfg)
 	if err != nil {
 		return err
 	}
@@ -117,7 +130,7 @@ func Run(opts Options, logger *slog.Logger) error {
 	}
 
 	logger.Info("bulk wrapper generated", "name", wrapperName, "child", cfg.Metadata.Name, "items", len(items))
-	if opts.ItemsFile == "" {
+	if !opts.seeded() {
 		logger.Info("edit the items list in loom.jsonnet, then run it", "path", path)
 	}
 	return nil
@@ -142,9 +155,33 @@ func declaredType(cfg *config.LoomFile, name string) config.ParamType {
 	return config.ParamString
 }
 
-// loadItems returns the items list: parsed from ItemsFile if given (B2),
+// seeded reports whether the items list was supplied rather than derived.
+func (o Options) seeded() bool {
+	return o.Items != nil || o.ItemsFile != ""
+}
+
+// loadItems returns the items list: Items or ItemsFile if given (B2),
 // otherwise a single placeholder derived from the declared params (B1).
-func loadItems(itemsFile string, cfg *config.LoomFile) ([]item, error) {
+func loadItems(opts Options, cfg *config.LoomFile) ([]item, error) {
+	if opts.Items != nil {
+		if len(opts.Items) == 0 {
+			return nil, fmt.Errorf("items list contains no items")
+		}
+		items := make([]item, len(opts.Items))
+		for i, it := range opts.Items {
+			items[i] = make(item, len(it))
+			for k, v := range it {
+				if s, ok := v.(string); ok && declaredType(cfg, k) != config.ParamString {
+					if parsed, err := params.Coerce(k, declaredType(cfg, k), s); err == nil {
+						v = parsed
+					}
+				}
+				items[i][k] = v
+			}
+		}
+		return checkItems(items, cfg)
+	}
+	itemsFile := opts.ItemsFile
 	if itemsFile == "" {
 		placeholder := make(item, len(cfg.Spec.Params))
 		for _, p := range cfg.Spec.Params {
@@ -187,7 +224,12 @@ func loadItems(itemsFile string, cfg *config.LoomFile) ([]item, error) {
 		}
 		items[i] = m
 	}
+	return checkItems(items, cfg)
+}
 
+// checkItems rejects an item a run of the child could not take: an
+// undeclared param, a value of the wrong type, a required param left out.
+func checkItems(items []item, cfg *config.LoomFile) ([]item, error) {
 	declared := make(map[string]bool)
 	for _, p := range cfg.Spec.Params {
 		declared[p.Name] = true
@@ -276,7 +318,7 @@ func render(cfg *config.LoomFile, wrapperName, source string, opts Options, item
 				continue
 			}
 			comment := ""
-			if opts.ItemsFile == "" && p.Required && !p.HasDefault() {
+			if !opts.seeded() && p.Required && !p.HasDefault() {
 				comment = "  // required"
 			}
 			fmt.Fprintf(&b, "    %s: %s,%s\n", jsonnetField(p.Name), jsonnetValue(v, "    "), comment)

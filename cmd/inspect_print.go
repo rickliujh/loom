@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
+	"github.com/rickliujh/loom/pkg/engine"
 	"github.com/rickliujh/loom/pkg/module"
 	"github.com/rickliujh/loom/pkg/params"
 )
@@ -256,10 +257,10 @@ func (p *inspectPrinter) printOperations(ops []module.OpSummary, prefix string) 
 // Everything it says is scoped to the modules actually read. A shallow look
 // leaves submodules unopened, and claiming a tree is fully parameterized on the
 // strength of the parts you did not look at would be worse than saying nothing.
-func (p *inspectPrinter) summary(subjects []subject) {
+func (p *inspectPrinter) summary(subjects []engine.Subject) {
 	fmt.Fprintln(p.w)
-	missing := collectMissing(subjects)
-	unexpanded := collectUnexpanded(subjects)
+	report := engine.BuildReport(subjects)
+	missing, unexpanded := report.MissingParams, report.Unexpanded
 
 	switch {
 	case len(missing) > 0:

@@ -1,17 +1,14 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
-	"github.com/rickliujh/loom/pkg/git"
+	"github.com/rickliujh/loom/pkg/engine"
 	"github.com/rickliujh/loom/pkg/module"
 	"github.com/rickliujh/loom/pkg/params"
-	tmpl "github.com/rickliujh/loom/pkg/template"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +40,7 @@ func init() {
 }
 
 func runModule(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 	logger := newLogger()
 
 	source := "."
@@ -51,7 +49,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve source — handles git URLs, //subdir, and local paths.
-	moduleDir, cleanup, err := module.ResolveSource(source, ".", logger)
+	moduleDir, cleanup, err := module.ResolveSourceContext(ctx, source, ".", logger)
 	if err != nil {
 		return err
 	}
@@ -59,144 +57,37 @@ func runModule(cmd *cobra.Command, args []string) error {
 		defer cleanup()
 	}
 
-	// Parse parameters.
 	paramMap, err := params.Parse(runParams, paramsFile)
 	if err != nil {
 		return err
 	}
 
-	// Load module.
-	mod, err := module.Load(moduleDir, paramMap, logger)
-	if err != nil {
-		return err
-	}
-
-	// In --local-run mode, require --target-path so the user can inspect results.
-	if localRun && targetPath == "" {
-		return fmt.Errorf("--local-run requires --target-path: provide a local directory to write results into")
-	}
-
-	summary := &action.RunSummary{}
-	opts := module.RunOptions{
+	res, execErr := engine.Run(ctx, engine.RunRequest{
+		ModuleDir:  moduleDir,
+		Params:     paramMap,
 		DryRun:     dryRun,
 		LocalRun:   localRun,
 		TargetPath: targetPath,
 		GitAuthor:  gitAuthor,
 		GitEmail:   gitEmail,
-		Summary:    summary,
-	}
-
-	// Resolve target directory.
-	var targetDir string
-	if mod.Config.Spec.Target != nil {
-		cloneDir, cleanup, err := cloneTarget(cmd.Context(), mod, mod.Params, &opts, logger)
-		if err != nil {
-			return err
-		}
-		if cleanup != nil {
-			defer cleanup()
-		}
-		targetDir = cloneDir
-	}
-
-	if targetDir == "" && targetPath != "" {
-		// No target spec but --target-path provided — use it directly.
-		targetDir = targetPath
-	}
-	if targetDir == "" {
-		// No target specified — default to the module directory.
-		// This supports modules that only use local operations (shell, newFiles)
-		// without needing a git clone.
-		targetDir = moduleDir
-	}
-
-	ctx := context.Background()
-	execErr := module.Execute(ctx, mod, targetDir, opts)
+		Logger:     logger,
+	})
 
 	// Print even when the run failed partway — PRs opened before the
 	// failure are exactly what the user needs to track down.
 	if showSummary {
-		summary.Print(os.Stdout)
+		(&action.RunSummary{PRs: res.PRs}).Print(os.Stdout)
 	}
 	if execErr == nil {
 		fmt.Fprintln(os.Stderr)
 		switch {
 		case dryRun:
-			prettylog.Successf(os.Stderr, "dry run of %q complete — no changes were made", mod.Config.Metadata.Name)
+			prettylog.Successf(os.Stderr, "dry run of %q complete — no changes were made", res.ModuleName)
 		case localRun:
-			prettylog.Successf(os.Stderr, "run of %q complete — results in %s", mod.Config.Metadata.Name, targetPath)
+			prettylog.Successf(os.Stderr, "run of %q complete — results in %s", res.ModuleName, targetPath)
 		default:
-			prettylog.Successf(os.Stderr, "run of %q complete", mod.Config.Metadata.Name)
+			prettylog.Successf(os.Stderr, "run of %q complete", res.ModuleName)
 		}
 	}
 	return execErr
-}
-
-// cloneTarget clones the module's target repo. In --local-run mode, it clones into
-// a numbered subdirectory of TargetPath (no cleanup). Otherwise, it clones into
-// a temp directory and returns a cleanup function.
-func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]any, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
-	target := mod.Config.Spec.Target
-
-	// Determine clone destination.
-	var cloneDir string
-	var cleanup func()
-	if opts.LocalRun && opts.TargetPath != "" {
-		cloneDir = opts.NextLocalDir(mod.Config.Metadata.Name)
-		if err := os.MkdirAll(cloneDir, 0o755); err != nil {
-			return "", nil, fmt.Errorf("creating local target dir: %w", err)
-		}
-		// The root module has no parent to name it, so its breadcrumb is just its
-		// own name; Execute has not run yet to seed opts.ModulePath.
-		opts.RegisterDirLabel(cloneDir, mod.Config.Metadata.Name)
-	} else {
-		tmpDir, err := os.MkdirTemp("", "loom-target-*")
-		if err != nil {
-			return "", nil, fmt.Errorf("creating temp dir: %w", err)
-		}
-		cloneDir = tmpDir
-		cleanup = func() { os.RemoveAll(tmpDir) }
-	}
-
-	targetURL, err := tmpl.RenderString(target.URL, paramMap)
-	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
-		return "", nil, fmt.Errorf("rendering target URL: %w", err)
-	}
-	targetBranch, err := tmpl.RenderString(target.Branch, paramMap)
-	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
-		return "", nil, fmt.Errorf("rendering target branch: %w", err)
-	}
-
-	repo, err := git.Clone(ctx, targetURL, cloneDir, targetBranch, logger)
-	if err != nil {
-		if cleanup != nil {
-			cleanup()
-		}
-		return "", nil, err
-	}
-
-	if target.FeatureBranch != "" {
-		branchName, err := tmpl.RenderString(target.FeatureBranch, paramMap)
-		if err != nil {
-			if cleanup != nil {
-				cleanup()
-			}
-			return "", nil, fmt.Errorf("rendering featureBranch: %w", err)
-		}
-		logger.Info("creating feature branch", "branch", branchName)
-		if err := repo.CreateBranch(branchName); err != nil {
-			if cleanup != nil {
-				cleanup()
-			}
-			return "", nil, fmt.Errorf("creating feature branch %q: %w", branchName, err)
-		}
-	}
-
-	return cloneDir, cleanup, nil
 }

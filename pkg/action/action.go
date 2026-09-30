@@ -6,10 +6,15 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+
+	"github.com/rickliujh/loom/pkg/event"
 )
 
 // PRResult records one pull/merge request created during a run.
 type PRResult struct {
+	// Path is the instance breadcrumb of the module whose pr operation
+	// created it — unlike Module, unique per bulk item.
+	Path []string
 	// Module is the name of the module whose pr operation created it.
 	Module string
 	// Title is the rendered PR title.
@@ -27,10 +32,16 @@ type RunSummary struct {
 
 // AddPR records a created PR/MR. Safe to call on a nil summary.
 func (s *RunSummary) AddPR(module, title, url string) {
+	s.AddPRAt(nil, module, title, url)
+}
+
+// AddPRAt records a created PR/MR along with the breadcrumb of the module
+// that created it. Safe to call on a nil summary.
+func (s *RunSummary) AddPRAt(path []string, module, title, url string) {
 	if s == nil {
 		return
 	}
-	s.PRs = append(s.PRs, PRResult{Module: module, Title: title, URL: url})
+	s.PRs = append(s.PRs, PRResult{Path: append([]string(nil), path...), Module: module, Title: title, URL: url})
 }
 
 // Print writes the collected PR/MR list to w. Nothing is written when the
@@ -45,13 +56,24 @@ func (s *RunSummary) Print(w io.Writer) {
 	}
 }
 
-// diffEntry is one captured file diff plus the context needed to read it once
+// DiffEntry is one captured file diff plus the context needed to read it once
 // diffs are printed together at the end: the instance breadcrumb of the module
 // that produced it and the target (repo) it applies to.
-type diffEntry struct {
-	breadcrumb []string // root instance name … producing instance name
-	target     string
-	text       string // uncolored unified diff
+type DiffEntry struct {
+	// Breadcrumb runs from the root instance name to the producing instance.
+	Breadcrumb []string
+	// Target is the target's display label: repo URL and branch, or the target
+	// directory when the module has no target spec.
+	Target string
+	// Repo and Branch are the rendered target repo URL and branch; empty for a
+	// module without a target spec.
+	Repo, Branch string
+	// Dir is the target directory the diff applies to.
+	Dir string
+	// Text is the uncolored unified diff as printed, "---"/"+++" lines included.
+	Text string
+	// File is the same diff as data.
+	File event.FileDiff
 }
 
 // DiffCollector accumulates file diffs across a whole run, shared by parent
@@ -61,20 +83,33 @@ type diffEntry struct {
 // per-operation logs. Each diff carries a module/target header so it stays
 // legible out of the surrounding log context.
 type DiffCollector struct {
-	entries []diffEntry
+	entries []DiffEntry
 }
 
 // Add records one file diff along with the instance breadcrumb and target it
 // belongs to. Safe to call on a nil collector.
 func (c *DiffCollector) Add(breadcrumb []string, target, diff string) {
+	c.AddEntry(DiffEntry{Breadcrumb: breadcrumb, Target: target, Text: diff})
+}
+
+// AddEntry records one file diff. The breadcrumb is copied, so later reuse of
+// the caller's slice cannot change a recorded entry. Safe to call on a nil
+// collector.
+func (c *DiffCollector) AddEntry(e DiffEntry) {
 	if c == nil {
 		return
 	}
-	c.entries = append(c.entries, diffEntry{
-		breadcrumb: append([]string(nil), breadcrumb...),
-		target:     target,
-		text:       diff,
-	})
+	e.Breadcrumb = append([]string(nil), e.Breadcrumb...)
+	c.entries = append(c.entries, e)
+}
+
+// Entries returns the collected diffs in the order they were recorded. The
+// slice is a copy; nil for a nil collector.
+func (c *DiffCollector) Entries() []DiffEntry {
+	if c == nil {
+		return nil
+	}
+	return append([]DiffEntry(nil), c.entries...)
 }
 
 // Print writes all collected diffs to w, colorized when w is a terminal.
@@ -88,15 +123,24 @@ func (c *DiffCollector) Add(breadcrumb []string, target, diff string) {
 // header (deduplicated per target), unchanged. Nothing is written when the
 // collector is nil or empty.
 func (c *DiffCollector) Print(w io.Writer) {
-	if c == nil || len(c.entries) == 0 {
+	if c == nil {
+		return
+	}
+	PrintDiffEntries(w, c.entries)
+}
+
+// PrintDiffEntries writes entries to w exactly as DiffCollector.Print does,
+// for a caller that holds the entries rather than the collector.
+func PrintDiffEntries(w io.Writer, entries []DiffEntry) {
+	if len(entries) == 0 {
 		return
 	}
 	color := isTerminalWriter(w)
 	var lastTurn, lastCrumb, lastKey string
-	for i, e := range c.entries {
-		segs := nonEmptySegs(e.breadcrumb)
+	for i, e := range entries {
+		segs := nonEmptySegs(e.Breadcrumb)
 		crumb := strings.Join(segs, "\x00")
-		key := crumb + "\x00" + e.target
+		key := crumb + "\x00" + e.Target
 
 		if len(segs) > 1 {
 			turn := segs[0] + "\x00" + segs[1]
@@ -113,18 +157,18 @@ func (c *DiffCollector) Print(w io.Writer) {
 				fmt.Fprint(w, diffHandoffChain(segs, color))
 			}
 			if i == 0 || key != lastKey {
-				fmt.Fprint(w, diffTargetLine(e.target, color))
+				fmt.Fprint(w, diffTargetLine(e.Target, color))
 			}
 			lastTurn = turn
 		} else {
 			if i == 0 || key != lastKey {
-				fmt.Fprint(w, DiffHeader(segs, e.target, color))
+				fmt.Fprint(w, DiffHeader(segs, e.Target, color))
 			}
 			lastTurn = ""
 		}
 
 		lastCrumb, lastKey = crumb, key
-		fmt.Fprint(w, colorizeDiff(e.text, color))
+		fmt.Fprint(w, colorizeDiff(e.Text, color))
 	}
 }
 
@@ -243,6 +287,9 @@ type ExecutionContext struct {
 	// branch, or the target dir), shown as a header above collected diffs so
 	// they stay legible out of the surrounding log context. May be empty.
 	TargetLabel string
+	// TargetRepo and TargetBranch are the rendered target repo URL and branch
+	// the label is made of; empty when the module has no target spec.
+	TargetRepo, TargetBranch string
 	// Params are the resolved template parameters.
 	Params map[string]any
 	// Excludes are glob patterns for files/dirs to exclude from template walking.
@@ -264,6 +311,9 @@ type ExecutionContext struct {
 	GitEmail string
 	// Summary collects created PRs/MRs across the run. May be nil.
 	Summary *RunSummary
+	// Events receives structured progress (diff.file, pr.created). May be
+	// nil.
+	Events event.Sink
 	// Logger is the structured logger.
 	Logger *slog.Logger
 }

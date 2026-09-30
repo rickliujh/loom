@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
+	"github.com/rickliujh/loom/pkg/engine"
 	"github.com/rickliujh/loom/pkg/module"
 	"github.com/rickliujh/loom/pkg/params"
 	"github.com/spf13/cobra"
@@ -88,7 +88,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 
 	// Resolve the root the same way run does, so `loom inspect <git-url>//sub`
 	// works on a module you have not cloned yet.
-	moduleDir, cleanup, err := module.ResolveSource(source, ".", logger)
+	moduleDir, cleanup, err := module.ResolveSourceContext(cmd.Context(), source, ".", logger)
 	if err != nil {
 		return err
 	}
@@ -101,224 +101,46 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Finding a submodule by name means reading the tree that holds it, so a
-	// focused inspection walks in full and trims afterwards. Without --module the
-	// limit goes to the walker instead, and a listed submodule is never fetched.
-	walkDepth := depth
-	if len(inspectModules) > 0 {
-		walkDepth = 0
-	}
-	tree, err := module.Inspect(moduleDir, module.InspectOptions{
-		Params:   paramMap,
-		MaxDepth: walkDepth,
-		NoFetch:  inspectNoFetch,
-		Logger:   logger,
+	res, err := engine.Inspect(cmd.Context(), engine.InspectRequest{
+		ModuleDir: moduleDir,
+		Params:    paramMap,
+		Depth:     depth,
+		Modules:   inspectModules,
+		NoFetch:   inspectNoFetch,
+		Logger:    logger,
 	})
 	if err != nil {
 		return err
 	}
 
-	subjects, err := selectSubjects(tree, inspectModules, depth)
-	if err != nil {
-		return err
-	}
-
 	if inspectOutput == "json" {
-		if err := printInspectJSON(os.Stdout, subjects); err != nil {
+		if err := printInspectJSON(os.Stdout, res.Subjects); err != nil {
 			return err
 		}
 	} else {
-		printInspectTree(os.Stdout, tree, subjects)
+		printInspectTree(os.Stdout, res.Tree, res.Subjects)
 	}
 
 	// A module that cannot be described is a failure of the inspection itself,
-	// so it sets the exit code. Missing parameters are not: reporting them is
-	// the point of the command, and a caller may well be inspecting precisely
-	// to find out what to pass.
-	if problems := collectProblems(subjects); len(problems) > 0 {
-		return fmt.Errorf("%d module(s) could not be inspected", len(problems))
-	}
-	return nil
+	// so it sets the exit code; the report is printed first all the same.
+	return res.Report.Err()
 }
 
-// subject is one module the report describes, with its breadcrumb from the
-// root. There is one unless --module named others.
-type subject struct {
-	Path   []string           `json:"path"`
-	Module *module.Inspection `json:"module"`
-}
-
-// selectSubjects resolves the --module queries against the walked tree, in the
-// order they were given: a report that reordered them would be answering a
-// different question than the one asked. A query that names no module, or more
-// than one, fails the command — with several subjects in play, quietly dropping
-// the one that did not resolve would be easy to miss.
-func selectSubjects(tree *module.Inspection, queries []string, depth int) ([]subject, error) {
-	if len(queries) == 0 {
-		return []subject{{Path: []string{tree.Instance}, Module: tree}}, nil
-	}
-
-	var subjects []subject
-	seen := make(map[string]bool)
-	for _, q := range queries {
-		node, path, err := tree.FindModule(q)
-		if err != nil {
-			return nil, err
-		}
-		// Naming one module twice — directly and by another spelling — should
-		// not describe it twice.
-		key := strings.Join(path, "/")
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		// Copy before pruning: two subjects can overlap (a module and one it
-		// composes), and trimming one in place would hollow out the other.
-		node = node.Clone()
-		node.Prune(depth)
-		subjects = append(subjects, subject{Path: path, Module: node})
-	}
-	return subjects, nil
-}
-
-// inspectReport is the --output json document: the described modules plus the
-// roll-ups the tree view prints as footers, so a caller does not have to walk
-// the tree to answer "what must I supply?", "what is broken?", and "what did I
-// not look at?".
-//
-// modules is always a list, whether one module was described or several, so a
-// consumer indexes it the same way either way.
-type inspectReport struct {
-	Modules       []subject             `json:"modules"`
-	MissingParams []module.MissingParam `json:"missingParams"`
-	Problems      []string              `json:"problems"`
-	// Unexpanded names the modules listed but not read. While it is non-empty,
-	// missingParams is a statement about part of the tree, not all of it.
-	Unexpanded [][]string `json:"unexpanded"`
-}
-
-func printInspectJSON(w io.Writer, subjects []subject) error {
-	report := inspectReport{
-		Modules:       subjects,
-		MissingParams: collectMissing(subjects),
-		Problems:      collectProblems(subjects),
-		Unexpanded:    collectUnexpanded(subjects),
-	}
-	if report.MissingParams == nil {
-		report.MissingParams = []module.MissingParam{}
-	}
-	if report.Problems == nil {
-		report.Problems = []string{}
-	}
-	if report.Unexpanded == nil {
-		report.Unexpanded = [][]string{}
-	}
+// printInspectJSON writes the --output json document.
+func printInspectJSON(w io.Writer, subjects []engine.Subject) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(report)
+	return enc.Encode(engine.BuildReport(subjects))
 }
 
 // printInspectTree writes the human-readable report: each described module,
 // then one summary of what a run would still need. The summary is shared rather
 // than repeated per module, because what the caller has to supply is a single
 // list no matter how many modules they asked to see.
-func printInspectTree(w io.Writer, tree *module.Inspection, subjects []subject) {
+func printInspectTree(w io.Writer, tree *module.Inspection, subjects []engine.Subject) {
 	p := &inspectPrinter{w: w, style: prettylog.NewStyle(w), tree: tree}
 	for _, s := range subjects {
 		p.root(s.Module, s.Path)
 	}
 	p.summary(subjects)
-}
-
-// The roll-ups below aggregate across every described module, re-rooting each
-// breadcrumb at the run's root and dropping repeats. Subjects can overlap — one
-// can sit inside another — and counting the same missing parameter twice would
-// overstate what is actually needed.
-
-func collectMissing(subjects []subject) []module.MissingParam {
-	var out []module.MissingParam
-	seen := make(map[string]bool)
-	for _, s := range subjects {
-		for _, m := range prefixPaths(s.Module.MissingParams(), s.Path) {
-			key := strings.Join(m.Path, "/") + "\x00" + m.Name
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func collectProblems(subjects []subject) []string {
-	var out []string
-	seen := make(map[string]bool)
-	for _, s := range subjects {
-		for _, p := range s.Module.Problems() {
-			if seen[p] {
-				continue
-			}
-			seen[p] = true
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func collectUnexpanded(subjects []subject) [][]string {
-	var out [][]string
-	seen := make(map[string]bool)
-	for _, s := range subjects {
-		for _, crumb := range prefixCrumbs(s.Module.Unexpanded(), s.Path) {
-			key := strings.Join(crumb, "/")
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			out = append(out, crumb)
-		}
-	}
-	return out
-}
-
-// prefixPaths re-roots breadcrumbs at the run's root. The roll-ups walk from the
-// described module, so a --module report would otherwise locate a parameter
-// relative to a subject the reader has to remember the position of. It copies
-// rather than rewrites in place, so callers keep the subject-relative form too.
-func prefixPaths(missing []module.MissingParam, path []string) []module.MissingParam {
-	prefix := ancestry(path)
-	if len(prefix) == 0 {
-		return missing
-	}
-	out := make([]module.MissingParam, len(missing))
-	for i, m := range missing {
-		out[i] = module.MissingParam{Name: m.Name, Path: join(prefix, m.Path)}
-	}
-	return out
-}
-
-func prefixCrumbs(crumbs [][]string, path []string) [][]string {
-	prefix := ancestry(path)
-	if len(prefix) == 0 {
-		return crumbs
-	}
-	out := make([][]string, len(crumbs))
-	for i, c := range crumbs {
-		out[i] = join(prefix, c)
-	}
-	return out
-}
-
-func join(prefix, rest []string) []string {
-	return append(append([]string(nil), prefix...), rest...)
-}
-
-// ancestry is the described module's path minus the module itself, which the
-// roll-up breadcrumbs already start with.
-func ancestry(path []string) []string {
-	if len(path) < 2 {
-		return nil
-	}
-	return path[:len(path)-1]
 }

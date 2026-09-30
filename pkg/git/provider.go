@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/google/go-github/v60/github"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
 	"golang.org/x/oauth2"
+
+	"github.com/rickliujh/loom/internal/proc"
 )
 
 // PRProvider is the interface for creating pull requests / merge requests.
@@ -146,7 +147,7 @@ func ghCLICreatePR(ctx context.Context, opts PROptions) (string, error) {
 		args = append(args, "--repo", nwo)
 	}
 
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := proc.Command(ctx, "gh", args...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}
@@ -175,7 +176,7 @@ func ghAddLabels(ctx context.Context, opts PROptions, nwo, prURL string) {
 		if nwo != "" {
 			cArgs = append(cArgs, "--repo", nwo)
 		}
-		cmd := exec.CommandContext(ctx, "gh", cArgs...)
+		cmd := proc.Command(ctx, "gh", cArgs...)
 		if opts.WorkDir != "" {
 			cmd.Dir = opts.WorkDir
 		}
@@ -186,7 +187,7 @@ func ghAddLabels(ctx context.Context, opts PROptions, nwo, prURL string) {
 	for _, l := range opts.Labels {
 		eArgs = append(eArgs, "--add-label", l)
 	}
-	cmd := exec.CommandContext(ctx, "gh", eArgs...)
+	cmd := proc.Command(ctx, "gh", eArgs...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}
@@ -259,7 +260,7 @@ func (p *GitLabProvider) createMRAPI(ctx context.Context, opts PROptions) (strin
 		mrOpts.Labels = &labels
 	}
 
-	mr, _, err := client.MergeRequests.CreateMergeRequest(projectPath, mrOpts)
+	mr, _, err := client.MergeRequests.CreateMergeRequest(projectPath, mrOpts, gitlab.WithContext(ctx))
 	if err != nil {
 		return "", fmt.Errorf("creating MR: %w", err)
 	}
@@ -299,7 +300,7 @@ func glabCLICreateMR(ctx context.Context, opts PROptions) (string, error) {
 		args = append(args, "--label", strings.Join(opts.Labels, ","))
 	}
 
-	cmd := exec.CommandContext(ctx, "glab", args...)
+	cmd := proc.Command(ctx, "glab", args...)
 	if opts.WorkDir != "" {
 		cmd.Dir = opts.WorkDir
 	}

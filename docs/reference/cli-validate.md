@@ -43,7 +43,7 @@ and skipped — its value is only known at run time.
 - The same holds for the files a run renders — see [Params and templates](#params-and-templates) below
 - Every declared param is actually referenced by some template (a warning, not an error)
 - Exclude/include patterns are usable globs — see [File filtering](#file-filtering) below
-- Destinations stay inside the target directory: `patch.target`, `newFiles.dest`, `llm.target`
+- Destinations stay inside the target directory: `patch.target`, `newFiles.dest`, `llm.target`. A templated destination cannot be checked until its params resolve, so the run checks it instead and fails if it escapes
 - `newFiles.source` is an existing directory and `patch.path` an existing file
 - No patch file is also rendered into the target as module output
 

@@ -8,12 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	"github.com/google/go-github/v60/github"
 	"golang.org/x/oauth2"
+
+	"github.com/rickliujh/loom/internal/proc"
 )
 
 // GitHubDiffProvider fetches PR diffs from GitHub.
@@ -189,7 +190,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 	nwo := owner + "/" + repo
 
 	// Fetch PR metadata including commit SHAs for resilience against branch deletion.
-	prJSON, err := exec.CommandContext(ctx, "gh", "pr", "view", strconv.Itoa(number),
+	prJSON, err := proc.Command(ctx, "gh", "pr", "view", strconv.Itoa(number),
 		"--repo", nwo, "--json", "title,body,baseRefName,headRefName,headRefOid,baseRefOid").Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr view: %w", err)
@@ -230,14 +231,14 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 	}
 
 	// Fetch file list.
-	filesJSON, err := exec.CommandContext(ctx, "gh", "pr", "diff", strconv.Itoa(number),
+	filesJSON, err := proc.Command(ctx, "gh", "pr", "diff", strconv.Itoa(number),
 		"--repo", nwo, "--name-only").Output()
 	if err != nil {
 		return nil, fmt.Errorf("gh pr diff --name-only: %w", err)
 	}
 
 	// Fetch full diff to classify changes.
-	diffJSON, err := exec.CommandContext(ctx, "gh", "api",
+	diffJSON, err := proc.Command(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/pulls/%d/files", nwo, number),
 		"--paginate").Output()
 	if err != nil {
@@ -314,7 +315,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 }
 
 func ghCLIFetchContent(ctx context.Context, nwo, path, ref string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, "gh", "api",
+	out, err := proc.Command(ctx, "gh", "api",
 		fmt.Sprintf("repos/%s/contents/%s?ref=%s", nwo, path, ref),
 		"--jq", ".content").Output()
 	if err != nil {

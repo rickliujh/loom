@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 func TestEvalCondition_IF1_EmptyRuns(t *testing.T) {
 	for _, raw := range []string{"", "   ", "\t\n"} {
-		run, err := evalCondition(raw, nil, t.TempDir())
+		run, err := evalCondition(context.Background(), raw, nil, t.TempDir())
 		if err != nil {
 			t.Fatalf("raw %q: unexpected error: %v", raw, err)
 		}
@@ -34,7 +35,7 @@ func TestEvalCondition_IF3_ExitCodeSemantics(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			run, err := evalCondition(tc.cmd, nil, t.TempDir())
+			run, err := evalCondition(context.Background(), tc.cmd, nil, t.TempDir())
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -48,7 +49,7 @@ func TestEvalCondition_IF3_ExitCodeSemantics(t *testing.T) {
 func TestEvalCondition_IF2_Templated(t *testing.T) {
 	params := map[string]any{"env": "prod"}
 	// Rendered to `[ prod = prod ]`, which succeeds.
-	run, err := evalCondition(`[ {{ .env }} = prod ]`, params, t.TempDir())
+	run, err := evalCondition(context.Background(), `[ {{ .env }} = prod ]`, params, t.TempDir())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +58,7 @@ func TestEvalCondition_IF2_Templated(t *testing.T) {
 	}
 
 	// Rendered to `[ prod = dev ]`, which fails.
-	run, err = evalCondition(`[ {{ .env }} = dev ]`, params, t.TempDir())
+	run, err = evalCondition(context.Background(), `[ {{ .env }} = dev ]`, params, t.TempDir())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +73,7 @@ func TestEvalCondition_IF4_RunsInWorkDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The file exists only in dir, so the predicate is true only when run there.
-	run, err := evalCondition("test -f marker", nil, dir)
+	run, err := evalCondition(context.Background(), "test -f marker", nil, dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestEvalCondition_IF4_RunsInWorkDir(t *testing.T) {
 		t.Error("expected predicate to run in workDir where marker exists")
 	}
 
-	run, err = evalCondition("test -f marker", nil, t.TempDir())
+	run, err = evalCondition(context.Background(), "test -f marker", nil, t.TempDir())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,7 +91,7 @@ func TestEvalCondition_IF4_RunsInWorkDir(t *testing.T) {
 }
 
 func TestEvalCondition_TemplateErrorSurfaces(t *testing.T) {
-	_, err := evalCondition("{{ .unterminated", nil, t.TempDir())
+	_, err := evalCondition(context.Background(), "{{ .unterminated", nil, t.TempDir())
 	if err == nil {
 		t.Fatal("expected a template render error")
 	}

@@ -36,7 +36,14 @@ func splitSourceURL(source string) (repoURL, subDir string) {
 // Other sources are treated as git URLs and cloned to a temp directory.
 // The "//" separator in git URLs denotes a subdirectory within the repo.
 // Callers must call cleanup (if non-nil) when the directory is no longer needed.
+// It is ResolveSourceContext under context.Background().
 func ResolveSource(source, parentDir string, logger *slog.Logger) (dir string, cleanup func(), err error) {
+	return ResolveSourceContext(context.Background(), source, parentDir, logger)
+}
+
+// ResolveSourceContext is ResolveSource with the clone of a git source bound
+// by ctx.
+func ResolveSourceContext(ctx context.Context, source, parentDir string, logger *slog.Logger) (dir string, cleanup func(), err error) {
 	if strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/") {
 		path := source
 		if strings.HasPrefix(source, ".") {
@@ -56,7 +63,7 @@ func ResolveSource(source, parentDir string, logger *slog.Logger) (dir string, c
 	repoURL, subDir := splitSourceURL(source)
 
 	// Git URL — clone to temp directory.
-	cloneDir, err := cloneToTemp(repoURL, logger)
+	cloneDir, err := cloneToTemp(ctx, repoURL, logger)
 	if err != nil {
 		return "", nil, err
 	}
@@ -79,13 +86,13 @@ func ResolveSource(source, parentDir string, logger *slog.Logger) (dir string, c
 }
 
 // cloneToTemp clones a git URL to a temporary directory.
-func cloneToTemp(url string, logger *slog.Logger) (string, error) {
+func cloneToTemp(ctx context.Context, url string, logger *slog.Logger) (string, error) {
 	dir, err := os.MkdirTemp("", "loom-module-*")
 	if err != nil {
 		return "", err
 	}
 
-	_, err = git.Clone(context.Background(), url, dir, "", logger)
+	_, err = git.Clone(ctx, url, dir, "", logger)
 	if err != nil {
 		os.RemoveAll(dir)
 		return "", fmt.Errorf("cloning module %q: %w", url, err)

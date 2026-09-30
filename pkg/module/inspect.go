@@ -1,6 +1,7 @@
 package module
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -176,7 +177,15 @@ type InspectOptions struct {
 //
 // The error result is reserved for a root that cannot be described at all;
 // every deeper failure is reported on its node in the returned tree.
+//
+// It is InspectContext under context.Background().
 func Inspect(dir string, opts InspectOptions) (*Inspection, error) {
+	return InspectContext(context.Background(), dir, opts)
+}
+
+// InspectContext is Inspect with the clones of remote module sources bound by
+// ctx, the only part of the walk that can block.
+func InspectContext(ctx context.Context, dir string, opts InspectOptions) (*Inspection, error) {
 	var cleanups []func()
 	defer func() {
 		// Deepest-first, mirroring how the clones nest.
@@ -186,8 +195,13 @@ func Inspect(dir string, opts InspectOptions) (*Inspection, error) {
 	}()
 
 	node := &Inspection{Dir: dir}
-	w := &inspector{opts: opts, cleanups: &cleanups}
+	w := &inspector{ctx: ctx, opts: opts, cleanups: &cleanups}
 	w.describe(node, dir, opts.Params, nil, []string{localIdentity(dir)})
+	// A cancelled walk records every clone it abandoned as a per-node error;
+	// that tree describes the cancellation, not the module, so drop it.
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
+	}
 	if node.Error != "" {
 		return nil, fmt.Errorf("inspecting %s: %s", dir, node.Error)
 	}
@@ -196,6 +210,7 @@ func Inspect(dir string, opts InspectOptions) (*Inspection, error) {
 
 // inspector carries the walk-wide state so describe/walkChildren stay readable.
 type inspector struct {
+	ctx      context.Context
 	opts     InspectOptions
 	cleanups *[]func()
 }
@@ -317,7 +332,7 @@ func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, pa
 			continue
 		}
 
-		childDir, cleanup, err := ResolveSource(source, parentDir, w.opts.Logger)
+		childDir, cleanup, err := ResolveSourceContext(w.ctx, source, parentDir, w.opts.Logger)
 		if err != nil {
 			child.Error = err.Error()
 			continue

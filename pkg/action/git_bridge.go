@@ -4,21 +4,22 @@ import (
 	"context"
 	"os"
 
+	"github.com/rickliujh/loom/pkg/event"
 	"github.com/rickliujh/loom/pkg/git"
 )
 
 // commitOnly stages all changes and commits without pushing.
-func commitOnly(_ context.Context, execCtx *ExecutionContext, message, author, email string) error {
+func commitOnly(ctx context.Context, execCtx *ExecutionContext, message, author, email string) error {
 	repo, err := git.Open(execCtx.TargetDir, execCtx.Logger)
 	if err != nil {
 		return err
 	}
 
-	if err := repo.AddAll(); err != nil {
+	if err := repo.AddAllContext(ctx); err != nil {
 		return actionError("commitPush", err)
 	}
 
-	if err := repo.Commit(message, author, email); err != nil {
+	if err := repo.CommitContext(ctx, message, author, email); err != nil {
 		return actionError("commitPush", err)
 	}
 
@@ -32,11 +33,11 @@ func commitAndPush(ctx context.Context, execCtx *ExecutionContext, message, auth
 		return err
 	}
 
-	if err := repo.AddAll(); err != nil {
+	if err := repo.AddAllContext(ctx); err != nil {
 		return actionError("commitPush", err)
 	}
 
-	if err := repo.Commit(message, author, email); err != nil {
+	if err := repo.CommitContext(ctx, message, author, email); err != nil {
 		return actionError("commitPush", err)
 	}
 
@@ -60,12 +61,12 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, providerName, tokenE
 		return actionError("pr", err)
 	}
 
-	headBranch, err := repo.CurrentBranch()
+	headBranch, err := repo.CurrentBranchContext(ctx)
 	if err != nil {
 		return actionError("pr", err)
 	}
 
-	repoURL, err := repo.RemoteURL()
+	repoURL, err := repo.RemoteURLContext(ctx)
 	if err != nil {
 		return actionError("pr", err)
 	}
@@ -88,6 +89,9 @@ func openPR(ctx context.Context, execCtx *ExecutionContext, providerName, tokenE
 	}
 
 	execCtx.Logger.Info("PR created", "url", prURL)
-	execCtx.Summary.AddPR(execCtx.ModuleName, title, prURL)
+	path := execCtx.diffBreadcrumb()
+	execCtx.Summary.AddPRAt(path, execCtx.ModuleName, title, prURL)
+	execCtx.Events.Emit(event.Event{Type: event.PRCreated, Path: path,
+		PR: &event.PR{Module: execCtx.ModuleName, Title: title, URL: prURL}})
 	return nil
 }

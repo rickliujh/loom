@@ -28,6 +28,10 @@ type Options struct {
 	// GitHub personal access token or GitLab private token used to
 	// authenticate API requests when fetching PR/MR data.
 	TokenEnv string
+	// Provider, when set, fetches the PR/MR in place of the provider Ref
+	// names — for a caller with its own client, and for tests. Ref must
+	// still parse, as it decides which token is read.
+	Provider DiffProvider
 }
 
 // Run generates a loom module from a PR/MR.
@@ -36,6 +40,9 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	provider, diffProvider, err := ParsePRRef(opts.Ref, logger)
 	if err != nil {
 		return err
+	}
+	if opts.Provider != nil {
+		diffProvider = opts.Provider
 	}
 
 	token := tokenFromEnv(opts.TokenEnv, provider, logger)
@@ -348,4 +355,3 @@ func toSSHURL(repoURL string) string {
 	path := strings.TrimPrefix(parsed.Path, "/")
 	return fmt.Sprintf("git@%s:%s", host, path)
 }
-

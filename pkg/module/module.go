@@ -2,12 +2,13 @@ package module
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
-	"os/exec"
 	"strings"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
+	"github.com/rickliujh/loom/internal/proc"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
 	"github.com/rickliujh/loom/pkg/params"
@@ -27,7 +28,15 @@ type Module struct {
 }
 
 // Load loads a module from a directory, merging provided params with defaults.
+// It is LoadContext under context.Background().
 func Load(dir string, providedParams map[string]any, logger *slog.Logger) (*Module, error) {
+	return LoadContext(context.Background(), dir, providedParams, logger)
+}
+
+// LoadContext loads a module from a directory, merging provided params with
+// defaults. ctx bounds the dynamic-param commands, the only part of loading
+// that runs anything.
+func LoadContext(ctx context.Context, dir string, providedParams map[string]any, logger *slog.Logger) (*Module, error) {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		return nil, err
@@ -42,7 +51,7 @@ func Load(dir string, providedParams map[string]any, logger *slog.Logger) (*Modu
 		return nil, fmt.Errorf("resolving params for %s: %w", cfg.Metadata.Name, err)
 	}
 
-	if err := resolveDynamicParams(cfg.Spec.DynamicParams, resolved, providedParams, dir, logger); err != nil {
+	if err := resolveDynamicParams(ctx, cfg.Spec.DynamicParams, resolved, providedParams, dir, logger); err != nil {
 		return nil, fmt.Errorf("resolving dynamic params for %s: %w", cfg.Metadata.Name, err)
 	}
 
@@ -124,9 +133,9 @@ func resolveParams(declared []config.ParamDef, dynamicDeclared []config.DynamicP
 // execution. Provided params override dynamic evaluation. Whichever value wins
 // — provided, the command's output, or the rendered fallback default — is
 // coerced to the param's declared type, so a list param's command prints YAML.
-func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string]any, provided map[string]any, moduleDir string, logger *slog.Logger) error {
+func resolveDynamicParams(ctx context.Context, declared []config.DynamicParamDef, resolved map[string]any, provided map[string]any, moduleDir string, logger *slog.Logger) error {
 	for _, dp := range declared {
-		val, err := dynamicValue(dp, resolved, provided, moduleDir, logger)
+		val, err := dynamicValue(ctx, dp, resolved, provided, moduleDir, logger)
 		if err != nil {
 			return err
 		}
@@ -140,7 +149,7 @@ func resolveDynamicParams(declared []config.DynamicParamDef, resolved map[string
 }
 
 // dynamicValue produces a dynamic param's raw value, before coercion.
-func dynamicValue(dp config.DynamicParamDef, resolved, provided map[string]any, moduleDir string, logger *slog.Logger) (any, error) {
+func dynamicValue(ctx context.Context, dp config.DynamicParamDef, resolved, provided map[string]any, moduleDir string, logger *slog.Logger) (any, error) {
 	// P6: Provided params always take priority; log warning.
 	if val, ok := provided[dp.Name]; ok {
 		logger.Warn("CLI override skipping dynamic param command", "param", dp.Name)
@@ -153,8 +162,13 @@ func dynamicValue(dp config.DynamicParamDef, resolved, provided map[string]any, 
 		return nil, fmt.Errorf("templating command for dynamic param %q: %w", dp.Name, err)
 	}
 
-	val, err := evalParamCommand(dp.Name, renderedCmd, moduleDir, logger)
+	val, err := evalParamCommand(ctx, dp.Name, renderedCmd, moduleDir, logger)
 	if err != nil {
+		// A stopped command did not fail on its own merits, so the fallback
+		// default does not apply: loading must stop too.
+		if ctx.Err() != nil {
+			return nil, err
+		}
 		if dp.Default != "" {
 			renderedDefault, tmplErr := tmpl.RenderString(dp.Default, resolved)
 			if tmplErr != nil {
@@ -169,14 +183,17 @@ func dynamicValue(dp config.DynamicParamDef, resolved, provided map[string]any, 
 }
 
 // evalParamCommand runs a shell command and returns its trimmed stdout as the param value.
-func evalParamCommand(name, command, moduleDir string, logger *slog.Logger) (string, error) {
+func evalParamCommand(ctx context.Context, name, command, moduleDir string, logger *slog.Logger) (string, error) {
 	logger.Info("evaluating dynamic parameter", "param", name, "command", command)
-	cmd := exec.Command("sh", "-c", command)
+	cmd := proc.Command(ctx, "sh", "-c", command)
 	cmd.Dir = moduleDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("dynamic parameter %q command stopped: %w", name, context.Cause(ctx))
+		}
 		return "", fmt.Errorf("dynamic parameter %q command failed: %w\nstderr: %s", name, err, stderr.String())
 	}
 	val := strings.TrimRight(stdout.String(), "\n")
@@ -186,23 +203,27 @@ func evalParamCommand(name, command, moduleDir string, logger *slog.Logger) (str
 
 // NewExecutionContext creates an ExecutionContext for this module.
 func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.ExecutionContext {
+	repo, branch := m.targetRepo()
 	return &action.ExecutionContext{
-		ModuleName:  m.Config.Metadata.Name,
-		ModulePath:  append([]string(nil), opts.ModulePath...),
-		ModuleDir:   m.Dir,
-		TargetDir:   targetDir,
-		TargetLabel: m.targetLabel(targetDir),
-		Params:      m.Params,
-		Excludes:    m.Config.Spec.Excludes,
-		Includes:    m.Config.Spec.Includes,
-		DryRun:      opts.DryRun,
-		LocalRun:    opts.LocalRun,
-		ShowDiff:    opts.ShowDiff,
-		Diffs:       opts.Diffs,
-		GitAuthor:   opts.GitAuthor,
-		GitEmail:    opts.GitEmail,
-		Summary:     opts.Summary,
-		Logger:      m.Logger,
+		ModuleName:   m.Config.Metadata.Name,
+		ModulePath:   append([]string(nil), opts.ModulePath...),
+		ModuleDir:    m.Dir,
+		TargetDir:    targetDir,
+		TargetLabel:  m.targetLabel(targetDir),
+		TargetRepo:   repo,
+		TargetBranch: branch,
+		Params:       m.Params,
+		Excludes:     m.Config.Spec.Excludes,
+		Includes:     m.Config.Spec.Includes,
+		DryRun:       opts.DryRun,
+		LocalRun:     opts.LocalRun,
+		ShowDiff:     opts.ShowDiff,
+		Diffs:        opts.Diffs,
+		GitAuthor:    opts.GitAuthor,
+		GitEmail:     opts.GitEmail,
+		Summary:      opts.Summary,
+		Events:       opts.Events,
+		Logger:       m.Logger,
 	}
 }
 
@@ -210,16 +231,29 @@ func (m *Module) NewExecutionContext(targetDir string, opts RunOptions) *action.
 // header above collected diffs: the rendered repo URL and branch when the
 // module has a target spec, otherwise the target directory it runs against.
 func (m *Module) targetLabel(targetDir string) string {
-	t := m.Config.Spec.Target
-	if t == nil {
+	url, branch := m.targetRepo()
+	if url == "" {
 		return targetDir
 	}
-	url, err := tmpl.RenderString(t.URL, m.Params)
-	if err != nil || url == "" {
-		return targetDir
-	}
-	if branch, err := tmpl.RenderString(t.Branch, m.Params); err == nil && branch != "" {
+	if branch != "" {
 		return url + " (" + branch + ")"
 	}
 	return url
+}
+
+// targetRepo renders the target spec's repo URL and branch, each empty when
+// there is no target spec or it does not render.
+func (m *Module) targetRepo() (url, branch string) {
+	t := m.Config.Spec.Target
+	if t == nil {
+		return "", ""
+	}
+	url, err := tmpl.RenderString(t.URL, m.Params)
+	if err != nil || url == "" {
+		return "", ""
+	}
+	if branch, err = tmpl.RenderString(t.Branch, m.Params); err != nil {
+		branch = ""
+	}
+	return url, branch
 }

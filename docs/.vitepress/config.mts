@@ -54,6 +54,7 @@ export default defineConfig({
             { text: 'Using Loom with AI Agents', link: '/guide/ai-agents' },
             { text: 'LLM-Powered Operations', link: '/guide/llm' },
             { text: 'Generate', link: '/guide/generate' },
+            { text: 'Web UI', link: '/guide/ui' },
           ],
         },
         {
@@ -97,6 +98,9 @@ export default defineConfig({
             { text: 'loom generate', link: '/reference/cli-generate' },
             { text: 'loom bulk', link: '/reference/cli-bulk' },
             { text: 'loom validate', link: '/reference/cli-validate' },
+            { text: 'loom skill', link: '/reference/cli-skill' },
+            { text: 'loom serve', link: '/reference/cli-serve' },
+            { text: 'serve API', link: '/reference/serve-api' },
           ],
         },
       ],

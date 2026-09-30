@@ -5,13 +5,15 @@ description: Author, validate, and run Loom modules (loom.yaml / loom.jsonnet Gi
 
 # Using Loom
 
-**First, read the canonical agent guide: `docs/guide/ai-agents.md`** (published at `/guide/ai-agents` on the docs site). It is tool-neutral and holds the full rules: param resolution, templating limits, operation gotchas, composition/target semantics, loom.jsonnet, bulk patterns, secrets, and a debugging table. This file is only the trigger and the safety workflow.
+**First, run `loom skill` and read what it prints.** That is the canonical agent guide, served from the binary, so it matches the version of Loom installed here. It holds the full rules: param resolution, templating, operation gotchas, composition and target semantics, loom.jsonnet, bulk patterns, secrets, and a debugging table. This file is only the trigger and the safety workflow.
+
+If `loom skill` is not available (an older Loom), read `docs/guide/ai-agents.md` in the Loom repository instead.
 
 ## Golden workflow (always follow)
 
 ```bash
 loom validate ./my-module                                  # 1. schema + semantic checks
-loom run ./my-module -p key=val --diff                     # 2. dry-run with file diffs
+loom diff ./my-module -p key=val                           # 2. the diff a run would produce
 loom run ./my-module -p key=val --local-run --target-path ./preview   # 3. real files locally, no push/PR
 loom run ./my-module -p key=val                            # 4. real run — pushes branches / opens PRs,
                                                            #    confirm with the user first
@@ -19,7 +21,9 @@ loom run ./my-module -p key=val                            # 4. real run — pus
 
 ## Deep references
 
-- `docs/guide/ai-agents.md` — canonical agent guide (read this)
-- `specs/module.md` — full behavioral spec
-- `specs/smp.md` — strategic-merge-patch semantics
-- `docs/guide/bulk-runs.md` — running one module against many param sets
+Each prints with `loom skill <topic>`; `loom skill list` shows them all.
+
+- `loom skill spec/module` — full behavioral spec
+- `loom skill spec/smp` — strategic-merge-patch semantics
+- `loom skill guide/bulk-runs` — running one module against many param sets
+- `loom skill reference/loom-yaml` — every field of loom.yaml

@@ -60,7 +60,7 @@ func writeLoomYAML(t *testing.T, dir, content string) {
 	}
 }
 
-// --- resolveChildTarget tests ---
+// --- ResolveTarget tests ---
 
 func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 	childMod := &Module{
@@ -68,7 +68,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 		Params: map[string]any{"env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 		Params: map[string]any{"repoPath": bare},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 		Params: map[string]any{"env": "prod"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 		Params: map[string]any{"repoPath": bare, "env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +288,7 @@ func TestResolveChildTarget_UsesModuleResolvedParams(t *testing.T) {
 		},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +316,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent", &RunOptions{}, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -981,7 +981,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 	}
 
 	opts := &RunOptions{LocalRun: true, TargetPath: targetPath}
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", opts, nil)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", opts, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1010,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	dir2, _, err := resolveChildTarget(context.Background(), childMod2, "/parent/target", opts, nil)
+	dir2, _, err := ResolveTarget(context.Background(), childMod2, "/parent/target", opts, nil, childMod2.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}

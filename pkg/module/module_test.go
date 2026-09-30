@@ -2,6 +2,7 @@ package module
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -104,7 +105,7 @@ func TestResolveDynamicParams_CommandEvaluated(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +121,7 @@ func TestResolveDynamicParams_CommandTrimsTrailingNewlines(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +141,7 @@ func TestResolveDynamicParams_CLIOverrideSkipsCommandWithWarning(t *testing.T) {
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	err := resolveDynamicParams(declared, resolved, provided, ".", logger)
+	err := resolveDynamicParams(context.Background(), declared, resolved, provided, ".", logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +162,7 @@ func TestResolveDynamicParams_CommandFailsNoDefault(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err == nil {
 		t.Fatal("expected error for failed command")
 	}
@@ -174,7 +175,7 @@ func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +191,7 @@ func TestResolveDynamicParams_DefaultTemplatedWithParams(t *testing.T) {
 	}
 	resolved := map[string]any{"env": "prod"}
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestResolveDynamicParams_DefaultTemplateError(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err == nil {
 		t.Fatal("expected error for unrenderable default")
 	}
@@ -222,7 +223,7 @@ func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	}
 	resolved := map[string]any{"name": "world"}
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestResolveDynamicParams_EvaluatedAfterStaticParams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = resolveDynamicParams(dynamicParams, resolved, nil, ".", testLogger())
+	err = resolveDynamicParams(context.Background(), dynamicParams, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +264,7 @@ func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,7 +285,7 @@ func TestResolveDynamicParams_CommandRunsInModuleDir(t *testing.T) {
 	}
 	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, dir, testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, dir, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

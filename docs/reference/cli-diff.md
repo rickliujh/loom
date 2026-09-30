@@ -52,6 +52,8 @@ A fast, no-execution preview of `newFiles`/`patch` changes:
 loom diff ./onboard-service -p serviceName=payments --quick
 ```
 
+Files are named by their path from the target repository's root — a `newFiles` file by its `dest` directory plus its path under `source` — the same paths a full diff shows.
+
 ### Failures
 
 When the run fails, `loom diff` prints the error right after the failing module's logs and exits non-zero — no diff is printed, so the error is not buried beneath it. To still inspect the changes made before the failure, add `--partial`; the partial diff is printed after the error, beneath a warning marking it incomplete:

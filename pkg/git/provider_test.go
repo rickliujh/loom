@@ -1,8 +1,12 @@
 package git
 
 import (
+	"context"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 )
 
@@ -408,5 +412,35 @@ func TestGitLabProvider_TokenStored(t *testing.T) {
 	}
 	if p.Token != "glpat-test" {
 		t.Errorf("token = %q, want %q", p.Token, "glpat-test")
+	}
+}
+
+// The GitLab API call must carry the caller's context: a cancelled run must
+// not go on to open the merge request.
+func TestGitLabProvider_CreateMRAPI_HonoursContext(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		// 404 rather than 5xx, so a request that does get through fails
+		// fast instead of being retried by the client.
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	p := &GitLabProvider{Token: "glpat-test", Logger: testLogger()}
+	_, err := p.createMRAPI(ctx, PROptions{
+		RepoURL:    srv.URL + "/group/project",
+		Title:      "title",
+		HeadBranch: "feature",
+		BaseBranch: "main",
+	})
+	if err == nil {
+		t.Fatal("expected an error with a cancelled context")
+	}
+	if n := hits.Load(); n != 0 {
+		t.Errorf("server received %d request(s); the cancelled context was not used", n)
 	}
 }

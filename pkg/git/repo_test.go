@@ -348,7 +348,7 @@ func TestPush_FullLoomFlow_FeatureBranch(t *testing.T) {
 	ctx := context.Background()
 	logger := testLogger()
 
-	// === resolveChildTarget phase ===
+	// === ResolveTarget phase ===
 	cloneDir := t.TempDir()
 	cloneRepo, err := Clone(ctx, bare, cloneDir, "", logger)
 	if err != nil {
@@ -870,7 +870,7 @@ func TestCrossPath_FullLoomFlow_CLIPush(t *testing.T) {
 	ctx := context.Background()
 	logger := testLogger()
 
-	// === resolveChildTarget phase (go-git) ===
+	// === ResolveTarget phase (go-git) ===
 	cloneDir := t.TempDir()
 	cloneRepo, err := Clone(ctx, bare, cloneDir, "", logger)
 	if err != nil {

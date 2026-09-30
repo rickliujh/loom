@@ -142,6 +142,10 @@ An explicit list of [RFC 6902](https://datatracker.ietf.org/doc/html/rfc6902) op
 
 Paths follow [RFC 6901 JSON Pointer](https://datatracker.ietf.org/doc/html/rfc6901) syntax -- `/` separated segments, with `~0` for `~` and `~1` for `/` in key names.
 
+## Staying Inside the Target
+
+`target` must resolve to a file inside the target repository. A value that climbs out of it — typically a templated `target` fed a param containing `..` — fails the operation with `patch target "<path>" escapes the target directory`, in every mode including `--dry-run` and `loom diff`.
+
 ## Dry Run
 
 In dry-run mode, patches are computed but not written to disk. Run [`loom diff`](/reference/cli-diff) to see a colored unified diff of the before/after.

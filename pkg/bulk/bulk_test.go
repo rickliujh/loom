@@ -373,3 +373,33 @@ func TestRun_SP16_ItemTypeMismatchFailsEarly(t *testing.T) {
 		t.Errorf("err = %v, want --name-param on a list rejected", err)
 	}
 }
+
+// Items given inline are checked like an items file, and a list or map
+// param sent as YAML text is written as the structure it parses to.
+func TestRun_InlineItems(t *testing.T) {
+	tmp := t.TempDir()
+	child := filepath.Join(tmp, "onboard-service")
+	writeTypedChildModule(t, child)
+	raw, lf := generate(t, Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bulk"), NameParam: "serviceName", Items: []map[string]any{
+		{"serviceName": "a", "sources": "- repoURL: x\n  targetRevision: 1.10\n"},
+		{"serviceName": "b", "labels": map[string]any{"team": "core"}},
+	}})
+	if len(lf.Spec.Modules) != 2 || lf.Spec.Modules[1].Name != "onboard-service-b" {
+		t.Fatalf("modules = %+v", lf.Spec.Modules)
+	}
+	if !strings.Contains(raw, "targetRevision: '1.10'") || strings.Contains(raw, "// required") {
+		t.Errorf("generated jsonnet:\n%s", raw)
+	}
+	if _, ok := lf.Spec.Modules[0].Params["sources"].([]any); !ok {
+		t.Errorf("sources = %#v, want a list", lf.Spec.Modules[0].Params["sources"])
+	}
+
+	err := Run(Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bad"), Items: []map[string]any{{"serviceName": "a", "sources": "a: b"}}}, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "item 0:") {
+		t.Errorf("err = %v, want the bad item reported", err)
+	}
+	err = Run(Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "none"), Items: []map[string]any{}}, testLogger())
+	if err == nil {
+		t.Error("an empty items list was accepted")
+	}
+}

@@ -1,10 +1,13 @@
 package module
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 
+	"github.com/rickliujh/loom/internal/proc"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
@@ -21,7 +24,10 @@ import (
 // because it is control flow: skipping it would misrepresent which steps a run
 // would actually perform. Like dynamicParams commands, an if predicate is
 // expected to be a side-effect-free check (test, grep, file existence).
-func evalCondition(raw string, params map[string]any, workDir string) (bool, error) {
+//
+// A predicate stopped by ctx is an error, not a false: a killed shell exits
+// non-zero, and reading that as "skip" would quietly carry on with the run.
+func evalCondition(ctx context.Context, raw string, params map[string]any, workDir string) (bool, error) {
 	if strings.TrimSpace(raw) == "" {
 		return true, nil
 	}
@@ -31,10 +37,14 @@ func evalCondition(raw string, params map[string]any, workDir string) (bool, err
 		return false, err
 	}
 
-	cmd := exec.Command("sh", "-c", rendered)
+	cmd := proc.Command(ctx, "sh", "-c", rendered)
 	cmd.Dir = workDir
 	if err := cmd.Run(); err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		if ctx.Err() != nil {
+			return false, fmt.Errorf("condition %q stopped: %w", rendered, context.Cause(ctx))
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			// Non-zero exit: the predicate is false, skip the step.
 			return false, nil
 		}

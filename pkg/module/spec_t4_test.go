@@ -18,16 +18,12 @@ import (
 // It is the companion of pkg/action's TestSpecT4, which covers the operation
 // configs. Like that test, it walks each config struct with reflection,
 // injects a malformed template into every reachable string, and asserts the
-// real execute path (Load, Execute, or resolveChildTarget) returns a template
+// real execute path (Load, Execute, or ResolveTarget) returns a template
 // parse error.
 //
 // T4's one exception — spec.params definitions are the source of template
 // values and are never rendered — is encoded in t4Exempt, along with param
 // names, which are identifiers rather than values.
-//
-// Not covered here: cmd/run.go renders the root module's spec.target with its
-// own copies of these render calls; this harness only reaches the child-module
-// path (resolveChildTarget).
 
 // t4Exempt maps "<case>/<field path>" to the reason the field is allowed to
 // bypass template rendering.
@@ -126,7 +122,8 @@ func TestSpecT4(t *testing.T) {
 			},
 		},
 		{
-			// resolveChildTarget renders url, branch, and featureBranch.
+			// ResolveTarget renders url, branch, and featureBranch — the one
+			// render site for the run's root (pkg/engine) and every child.
 			name: "target",
 			cfg: func(t *testing.T) any {
 				return &config.TargetSpec{URL: initBareRepo(t), FeatureBranch: "t4-branch"}
@@ -137,7 +134,7 @@ func TestSpecT4(t *testing.T) {
 					Params: map[string]any{},
 					Logger: testLogger(),
 				}
-				_, cleanup, err := resolveChildTarget(context.Background(), childMod, "/unused", &RunOptions{}, nil)
+				_, cleanup, err := ResolveTarget(context.Background(), childMod, "/unused", &RunOptions{}, nil, childMod.Logger)
 				if cleanup != nil {
 					cleanup()
 				}

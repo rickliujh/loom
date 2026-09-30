@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rickliujh/loom/pkg/engine"
 	"github.com/rickliujh/loom/pkg/module"
 )
 
@@ -72,8 +73,8 @@ func inspectTreeOutput(t *testing.T, dir string, params map[string]any) string {
 
 // rootSubject is the single-subject form: the whole tree, described from its
 // root, which is what an inspection without --module produces.
-func rootSubject(tree *module.Inspection) []subject {
-	return []subject{{Path: []string{tree.Instance}, Module: tree}}
+func rootSubject(tree *module.Inspection) []engine.Subject {
+	return []engine.Subject{{Path: []string{tree.Instance}, Module: tree}}
 }
 
 func inspectAll(t *testing.T, dir string, params map[string]any) *module.Inspection {
@@ -176,7 +177,7 @@ func TestInspectTree_IN17_FocusedModuleShowsBreadcrumb(t *testing.T) {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
-	printInspectTree(&buf, tree, []subject{{Path: path, Module: focused}})
+	printInspectTree(&buf, tree, []engine.Subject{{Path: path, Module: focused}})
 	out := buf.String()
 
 	if !strings.Contains(out, "in rollout › api-prod") {
@@ -266,7 +267,7 @@ func TestInspectJSON_ReportShape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var report inspectReport
+	var report engine.InspectReport
 	if err := json.Unmarshal(buf.Bytes(), &report); err != nil {
 		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
 	}
@@ -309,7 +310,7 @@ func TestInspect_MultipleModuleSubjects(t *testing.T) {
 `)
 
 	tree := inspectAll(t, dir, nil)
-	subjects, err := selectSubjects(tree, []string{"a", "b", "a"}, 1)
+	subjects, err := engine.SelectSubjects(tree, []string{"a", "b", "a"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestInspect_OverlappingSubjectsAreIndependent(t *testing.T) {
 	tree := inspectAll(t, dir, nil)
 	// Depth 1 prunes "mid" so its "leaf" becomes a stub — while "leaf" is itself
 	// a subject and must still be described.
-	subjects, err := selectSubjects(tree, []string{"mid", "mid/leaf"}, 1)
+	subjects, err := engine.SelectSubjects(tree, []string{"mid", "mid/leaf"}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}

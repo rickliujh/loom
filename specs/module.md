@@ -430,6 +430,62 @@ modules:
 
 Operations execute sequentially in declaration order. Each operation has exactly **one** action type. An operation may carry an optional `if` predicate that gates whether it runs — see [Conditional Execution](#conditional-execution-if).
 
+### Write Path Containment
+
+`newFiles`, `patch` and `llm` write into the target directory, at a location taken from a templatable field. These rules apply to all three.
+
+#### WP1: Writes stay inside the target directory
+
+After rendering, the destination is joined to the target directory and must resolve to the target directory itself or a path beneath it. Otherwise the operation fails and nothing is written.
+
+This is the run-time half of the check `validate` performs on values written literally in the config (see [Validation Rules](#validation-rules)): a templated value is unknown until its params resolve, so only the run can check it.
+
+```yaml
+# loom.yaml
+- name: files
+  newFiles:
+    source: "templates"
+    dest: "{{ .dest }}"
+
+# loom run ./module -p dest=../elsewhere
+# result: error — newFiles dest "../elsewhere" escapes the target directory
+```
+
+| Field | Checked path |
+|-------|--------------|
+| `newFiles.dest` | `<targetDir>/<dest>` |
+| `newFiles` rendered file and directory names | `<targetDir>/<dest>/<renderedPath>`, per file |
+| `patch.target` | `<targetDir>/<target>` |
+| `llm.target` | `<targetDir>/<target>` |
+
+A value that begins with `/` is joined beneath the target like any other: `dest: "/etc"` names `<targetDir>/etc`.
+
+#### WP2: Checked in every mode
+
+The check runs before the dry-run branch of each operation, so `--dry-run`, `loom diff --quick` and `--local-run` refuse the same destinations a real run refuses. For `llm`, it runs before the model is invoked.
+
+#### WP3: Symlinks are resolved
+
+A path can stay inside the target by name and still leave it through a symlink that lives in the target. The deepest part of the destination that already exists is resolved, and must lie inside the resolved target directory. A symlink that points elsewhere inside the target is allowed, and so is a target directory that is itself reached through a symlink.
+
+```
+# target repo contains: shared -> /home/user/other-repo
+# newFiles dest: "shared/config"
+# result: error — newFiles dest "shared/config" escapes the target directory through a symlink
+```
+
+#### Error Conditions
+
+| Condition | Error |
+|-----------|-------|
+| Rendered destination resolves outside the target directory | `<field> "<path>" escapes the target directory` |
+| Destination leaves the target directory through a symlink | `<field> "<path>" escapes the target directory through a symlink` |
+| A symlink on the destination path cannot be resolved | `resolving <field> "<path>": ...` |
+
+`<field>` is `newFiles dest`, `newFiles destination` (a rendered file path), `patch target` or `llm target`.
+
+---
+
 ### `newFiles` — Render and Write Template Files
 
 #### Inputs
@@ -448,7 +504,7 @@ Walks the `source` directory recursively, applying exclude/include filters (see 
 1. Read file content.
 2. Render content through Go templates with params (both `spec.params` and `spec.dynamicParams` after resolution).
 3. Render the file/directory path through Go templates with params. Paths use `{{ }}` syntax by default; double-underscore placeholders (`__paramName__`) are converted to `{{ .paramName }}` as a fallback (see T3).
-4. Write to `<targetDir>/<dest>/<renderedPath>`.
+4. Write to `<targetDir>/<dest>/<renderedPath>`, which must lie inside the target directory (WP1).
 
 ##### NF2: Fails on existing destination
 
@@ -1043,7 +1099,7 @@ exclude/include pattern is templated, since the run-time filter would differ.
 | `patch.path` exists and is a file (module dir known, non-templated) | `operation "<name>": patch file "<path>" not found in module directory` |
 | `patch.target` required | `operation "<name>": patch target is required` |
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
-| `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (skipped when templated) | `operation "<name>": patch target "<path>" escapes the target directory` |
+| `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (a templated value is checked at run time instead — WP1) | `operation "<name>": patch target "<path>" escapes the target directory` |
 | A patch file is not also rendered into the target by a `newFiles` operation (module dir known, non-templated paths and filters) | `operation "<name>": patch file "<path>" is also rendered into the target by newFiles operation "<name>" — exclude it via spec.excludes` |
 | Rendered file bodies and path names parse as templates and reference only declared params (module dir known, non-templated filters) | `operation "<name>": template file "<rel>": references undeclared param "<name>"` |
 | Patch file bodies parse as templates and reference only declared params (module dir known, non-templated path) | `operation "<name>": patch file "<path>": references undeclared param "<name>"` |

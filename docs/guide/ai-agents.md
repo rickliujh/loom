@@ -143,5 +143,6 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 | `operation "x" must have exactly one action type` | One action key per operation |
 | `both loom.yaml and loom.jsonnet found` | Keep exactly one config file |
 | `--local-run requires --target-path` | Add `--target-path ./preview` |
+| `… escapes the target directory` | A `newFiles.dest`, `patch.target` or `llm.target` resolved outside the target repo, usually from a param containing `..` — keep destinations relative and inside the target |
 | Patch error `reading target file` | `patch.target` is relative to the **target** dir and must exist |
 | Literal `<no value>` in rendered output | Unresolved param renders silently (no error) — check the param name and that it resolved; catch it with `loom diff` before a real run |

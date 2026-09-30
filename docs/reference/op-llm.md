@@ -86,6 +86,10 @@ When `retries > 0`, failed attempts are retried with exponential backoff. The de
 
 Retries trigger on inference errors and on empty responses. If the context is cancelled during a wait, the operation fails immediately.
 
+## Staying Inside the Target
+
+`target` must resolve to a file inside the target repository. A value that climbs out of it fails the operation with `llm target "<path>" escapes the target directory` before the model is invoked, in every mode including `--dry-run`.
+
 ## Dry Run
 
 In dry-run mode, the model is not called and no file is written. A log entry records the provider, model, target, and prompt length.

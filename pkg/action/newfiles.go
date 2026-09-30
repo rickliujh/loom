@@ -26,6 +26,10 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 	if err != nil {
 		return actionError("newFiles", fmt.Errorf("rendering dest: %w", err))
 	}
+	// Checked before the walk so a bad dest fails even when nothing is rendered.
+	if _, err := resolveTargetPath(execCtx.TargetDir, "newFiles dest", dest); err != nil {
+		return actionError("newFiles", err)
+	}
 
 	sourceDir := util.ExpandPath(execCtx.ModuleDir, source)
 
@@ -56,8 +60,13 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 			return actionError("newFiles", err)
 		}
 
-		destPath := filepath.Join(execCtx.TargetDir, dest, destRel)
+		// File and directory names are templates too, so each rendered path is
+		// checked, not just dest.
 		displayPath := filepath.Join(dest, destRel)
+		destPath, err := resolveTargetPath(execCtx.TargetDir, "newFiles destination", displayPath)
+		if err != nil {
+			return actionError("newFiles", err)
+		}
 
 		if execCtx.DryRun {
 			if _, err := os.Stat(destPath); err == nil {

@@ -178,7 +178,7 @@ namespace  provided  = "prod-apps" ← {{ .env }}-apps
 ```
 
 Templates that inspect cannot resolve are printed as authored rather than as a
-placeholder. `{{ .service }}` in an operation stays `{{ .service }}`.
+placeholder. <code v-pre>{{ .service }}</code> in an operation stays <code v-pre>{{ .service }}</code>.
 
 ## Parameter Requirements
 

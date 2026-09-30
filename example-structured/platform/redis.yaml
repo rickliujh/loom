@@ -1,0 +1,4 @@
+redisSources:
+  - repoURL: https://charts.bitnami.com/bitnami
+    chart: redis
+    targetRevision: 19.0.0

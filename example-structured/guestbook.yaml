@@ -1,0 +1,12 @@
+appName: guestbook
+namespace: guestbook
+sources:
+  - repoURL: https://charts.example.com
+    chart: guestbook
+    targetRevision: 1.10
+    helm:
+      releaseName: guestbook
+      valueFiles:
+        - $values/guestbook/values-prod.yaml
+  - repoURL: https://git.example.com/guestbook-values.git
+    ref: values

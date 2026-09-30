@@ -6,32 +6,32 @@ func TestRenderString(t *testing.T) {
 	tests := []struct {
 		name    string
 		tmpl    string
-		params  map[string]string
+		params  map[string]any
 		want    string
 		wantErr bool
 	}{
 		{
 			name:   "simple substitution",
 			tmpl:   "hello {{ .name }}",
-			params: map[string]string{"name": "world"},
+			params: map[string]any{"name": "world"},
 			want:   "hello world",
 		},
 		{
 			name:   "multiple params",
 			tmpl:   "{{ .greeting }}, {{ .name }}!",
-			params: map[string]string{"greeting": "Hi", "name": "Alice"},
+			params: map[string]any{"greeting": "Hi", "name": "Alice"},
 			want:   "Hi, Alice!",
 		},
 		{
 			name:   "no placeholders",
 			tmpl:   "static text",
-			params: map[string]string{"unused": "value"},
+			params: map[string]any{"unused": "value"},
 			want:   "static text",
 		},
 		{
 			name:   "empty params",
 			tmpl:   "no params here",
-			params: map[string]string{},
+			params: map[string]any{},
 			want:   "no params here",
 		},
 		{
@@ -43,49 +43,49 @@ func TestRenderString(t *testing.T) {
 		{
 			name:   "empty template",
 			tmpl:   "",
-			params: map[string]string{"k": "v"},
+			params: map[string]any{"k": "v"},
 			want:   "",
 		},
 		{
 			name:    "invalid template syntax",
 			tmpl:    "{{ .name",
-			params:  map[string]string{"name": "x"},
+			params:  map[string]any{"name": "x"},
 			wantErr: true,
 		},
 		{
 			name:   "custom func upper",
 			tmpl:   `{{ .name | upper }}`,
-			params: map[string]string{"name": "hello"},
+			params: map[string]any{"name": "hello"},
 			want:   "HELLO",
 		},
 		{
 			name:   "custom func lower",
 			tmpl:   `{{ .name | lower }}`,
-			params: map[string]string{"name": "HELLO"},
+			params: map[string]any{"name": "HELLO"},
 			want:   "hello",
 		},
 		{
 			name:   "custom func default with empty value",
 			tmpl:   `{{ default "fallback" .name }}`,
-			params: map[string]string{"name": ""},
+			params: map[string]any{"name": ""},
 			want:   "fallback",
 		},
 		{
 			name:   "custom func default with non-empty value",
 			tmpl:   `{{ default "fallback" .name }}`,
-			params: map[string]string{"name": "actual"},
+			params: map[string]any{"name": "actual"},
 			want:   "actual",
 		},
 		{
 			name:   "chained funcs",
 			tmpl:   `{{ default "fallback" .name | upper }}`,
-			params: map[string]string{"name": ""},
+			params: map[string]any{"name": ""},
 			want:   "FALLBACK",
 		},
 		{
 			name:   "multiline template",
 			tmpl:   "line1: {{ .a }}\nline2: {{ .b }}",
-			params: map[string]string{"a": "x", "b": "y"},
+			params: map[string]any{"a": "x", "b": "y"},
 			want:   "line1: x\nline2: y",
 		},
 	}
@@ -113,50 +113,50 @@ func TestRenderFile(t *testing.T) {
 	tests := []struct {
 		name    string
 		content []byte
-		params  map[string]string
+		params  map[string]any
 		want    []byte
 		wantErr bool
 	}{
 		{
 			name:    "simple substitution",
 			content: []byte("name: {{ .name }}"),
-			params:  map[string]string{"name": "myapp"},
+			params:  map[string]any{"name": "myapp"},
 			want:    []byte("name: myapp"),
 		},
 		{
 			name:    "yaml-like content",
 			content: []byte("apiVersion: v1\nmetadata:\n  name: {{ .name }}\n  namespace: {{ .namespace }}"),
-			params:  map[string]string{"name": "myapp", "namespace": "production"},
+			params:  map[string]any{"name": "myapp", "namespace": "production"},
 			want:    []byte("apiVersion: v1\nmetadata:\n  name: myapp\n  namespace: production"),
 		},
 		{
 			name:    "empty content",
 			content: []byte(""),
-			params:  map[string]string{"k": "v"},
+			params:  map[string]any{"k": "v"},
 			want:    []byte(""),
 		},
 		{
 			name:    "nil content",
 			content: nil,
-			params:  map[string]string{},
+			params:  map[string]any{},
 			want:    []byte(""),
 		},
 		{
 			name:    "invalid template syntax",
 			content: []byte("{{ .name"),
-			params:  map[string]string{"name": "x"},
+			params:  map[string]any{"name": "x"},
 			wantErr: true,
 		},
 		{
 			name:    "custom funcs available",
 			content: []byte(`{{ .env | upper }}`),
-			params:  map[string]string{"env": "prod"},
+			params:  map[string]any{"env": "prod"},
 			want:    []byte("PROD"),
 		},
 		{
 			name:    "no placeholders",
 			content: []byte("static: content\nkey: value"),
-			params:  map[string]string{},
+			params:  map[string]any{},
 			want:    []byte("static: content\nkey: value"),
 		},
 	}

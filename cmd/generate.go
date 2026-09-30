@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"github.com/rickliujh/loom/pkg/generate"
+	"github.com/rickliujh/loom/pkg/params"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,7 @@ func init() {
 func runGenerate(cmd *cobra.Command, args []string) error {
 	logger := newLogger()
 
-	paramMap, err := parseParams(genParams, "")
+	paramMap, err := params.ParseCLI(genParams)
 	if err != nil {
 		return err
 	}

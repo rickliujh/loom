@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/module"
+	"github.com/rickliujh/loom/pkg/params"
 )
 
 // inspectPrinter renders an inspected module tree as indented text.
@@ -86,10 +88,10 @@ func (p *inspectPrinter) buildBranches(n *module.Inspection) []branch {
 	}
 
 	if len(n.Params) > 0 {
-		params := n.Params
+		table := n.Params
 		bs = append(bs, branch{
 			label: p.style.Bold("params"),
-			body:  func(prefix string) { p.printParams(params, prefix) },
+			body:  func(prefix string) { p.printParams(table, prefix) },
 		})
 	}
 	if n.Target != nil {
@@ -161,13 +163,13 @@ func (p *inspectPrinter) targetLine(t *module.Target) string {
 	return line
 }
 
-func (p *inspectPrinter) printParams(params []module.Param, prefix string) {
+func (p *inspectPrinter) printParams(table []module.Param, prefix string) {
 	nameW, stateW := 0, 0
-	for _, prm := range params {
+	for _, prm := range table {
 		nameW = max(nameW, len(prm.Name))
 		stateW = max(stateW, len(paramStateLabel(prm)))
 	}
-	for _, prm := range params {
+	for _, prm := range table {
 		label := paramStateLabel(prm)
 		// Pad before coloring: escape codes have width on the wire but not on
 		// screen, so padding a colored string would misalign the column.
@@ -204,7 +206,7 @@ func (p *inspectPrinter) paramDetail(prm module.Param) string {
 	case module.ParamMissing:
 		b.WriteString(p.style.Error("must be supplied"))
 	case module.ParamProvided, module.ParamDefault:
-		b.WriteString(fmt.Sprintf("= %q", prm.Value))
+		b.WriteString("= " + compactValue(prm.Value))
 	case module.ParamDynamic:
 		b.WriteString(p.style.Muted("$ " + prm.Command))
 		if prm.Default != "" {
@@ -213,12 +215,16 @@ func (p *inspectPrinter) paramDetail(prm module.Param) string {
 	case module.ParamUnresolved:
 		b.WriteString(p.style.Muted("resolved at run time"))
 	case module.ParamUnset:
-		b.WriteString(p.style.Muted(`= ""`))
+		b.WriteString(p.style.Muted("= " + compactValue(params.Zero(prm.Type))))
 	}
 	// Where a parent-supplied value came from, so a templated hand-off stays
 	// traceable back to the expression that produced it.
-	if prm.From != "" {
-		b.WriteString(p.style.Muted(" ← " + prm.From))
+	if prm.From != nil {
+		from, ok := prm.From.(string)
+		if !ok {
+			from = compactJSON(prm.From)
+		}
+		b.WriteString(p.style.Muted(" ← " + from))
 	}
 	return b.String()
 }
@@ -305,4 +311,48 @@ func pad(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-len(s))
+}
+
+// maxCompact bounds how much of a structured value one tree line shows. The
+// JSON output carries the whole value; the tree only has to identify it.
+const maxCompact = 60
+
+// compactValue renders a param value on one line: a string quoted, as it
+// always was, and a list or map as its size followed by compact JSON, cut
+// short when long. An empty one is just [] or {}.
+func compactValue(v any) string {
+	switch v := v.(type) {
+	case []any:
+		if len(v) == 0 {
+			return "[]"
+		}
+		return fmt.Sprintf("[%d %s] %s", len(v), plural(len(v), "item"), compactJSON(v))
+	case map[string]any:
+		if len(v) == 0 {
+			return "{}"
+		}
+		return fmt.Sprintf("{%d %s} %s", len(v), plural(len(v), "key"), compactJSON(v))
+	case string:
+		return fmt.Sprintf("%q", v)
+	}
+	return fmt.Sprint(v)
+}
+
+func compactJSON(v any) string {
+	out, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Sprint(v)
+	}
+	r := []rune(string(out))
+	if len(r) > maxCompact {
+		return string(r[:maxCompact]) + "…"
+	}
+	return string(r)
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }

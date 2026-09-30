@@ -11,7 +11,7 @@
 | `<module>` | Required. Path or git URL of the child module (same source forms as `loom run`). |
 | `-o, --output` | Output directory for the generated wrapper. Defaults to `.`. |
 | `-n, --name` | Wrapper module name. Defaults to `bulk-<childModuleName>`. |
-| `--items` | Optional. YAML file containing a list of `map[string]string` param sets to seed the `items` list. |
+| `--items` | Optional. YAML file containing a list of param sets (param name → string, list, or map) to seed the `items` list. |
 | `--name-param` | Optional. Child param whose value becomes the child entry name suffix. Defaults to the item index. |
 
 ## Behaviors
@@ -24,13 +24,13 @@ The child module's config is loaded (`loom.yaml` or `loom.jsonnet`) and validate
 |---|---|---|
 | `required: true` | `'CHANGEME'` | `// required` comment |
 | has `default` | the default value | none |
-| neither | `''` | none |
+| neither | `''` (`[]` / `{}` for a `list` / `map` param) | none |
 
 Dynamic params are **not** included — they resolve inside the child at run time.
 
 ### B2: Items from file
 
-With `--items <file.yaml>`, the file must contain a YAML list of `map[string]string`. Each map becomes one item, replacing the placeholder. Validation before emission:
+With `--items <file.yaml>`, the file must contain a YAML list of param sets, each mapping param names to values — strings, or lists and maps for `list`/`map` params (structured-params SP16). Each map becomes one item, replacing the placeholder. Validation before emission:
 
 - Every key must be a declared param (static or dynamic) of the child — mirrors run-time P3.
 - Every `required` static param without a default must be present in every item.
@@ -94,7 +94,8 @@ If the child module declares `spec.target`, each generated entry runs with its o
 |-----------|-------|
 | Child module cannot be loaded/validated | propagated load/validate error |
 | Output config already exists | `refusing to overwrite existing <file>` |
-| `--items` file unreadable or not a list of string maps | `reading items file: ...` / `parsing items file: ...` |
+| `--items` file unreadable or not a list of param sets | `reading items file: ...` / `parsing items file: ...` |
+| Item value does not have the child's declared param type | `item <N>: param "<name>" is declared <type>, but received ...` |
 | Item key not declared in child | `item <N>: undeclared parameter "<name>"` |
 | Item missing a required param (no default) | `item <N>: required parameter "<name>" not provided` |
 | `--name-param` not a declared param | `--name-param "<name>" is not a declared parameter` |

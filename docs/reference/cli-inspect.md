@@ -167,7 +167,7 @@ declares about it is known: its name, source, and `if` condition. It has no
 | `default` | Nothing supplied it, so the declared `default` applies. |
 | `dynamic` | Comes from a `dynamicParams` command at run time. The command is shown; inspect never runs it. |
 | `required` | Required, with no default and nothing supplying it. **A run would fail.** |
-| `optional` | Optional, with no default and nothing supplying it. Renders as the empty string. |
+| `optional` | Optional, with no default and nothing supplying it. Renders as its type's empty value: `""`, `[]` or `{}`. |
 | `unresolved` | Supplied by the parent through an expression that depends on a run-time value, typically a dynamic param. |
 
 A value the parent passed is shown with the expression that produced it after a
@@ -178,7 +178,26 @@ namespace  provided  = "prod-apps" ← {{ .env }}-apps
 ```
 
 Templates that inspect cannot resolve are printed as authored rather than as a
-placeholder. `{{ .service }}` in an operation stays `{{ .service }}`.
+placeholder. <code v-pre>{{ .service }}</code> in an operation stays
+<code v-pre>{{ .service }}</code> — and so does
+<code v-pre>{{ default "main" .commitHash }}</code> or
+<code v-pre>{{ if .commitHash }}a{{ else }}b{{ end }}</code>: a guard does not make a
+run-time value known.
+
+### List and map parameters
+
+A `list` or `map` param is shown on one line — its size, then compact JSON, cut
+short when long. `-o json` carries the whole value:
+
+```
+sources    provided  = [2 items] [{"chart":"guestbook","repoURL":"https://charts.example.com"…
+labels     default   = {1 key} {"team":"platform"}
+extra      optional  = []
+```
+
+A value supplied with `-p` or `--params-file` is shown typed as a run would type
+it, so <code v-pre>-p sources='[...]'</code> appears as the list it becomes. One the
+declared type rejects is shown as given, with a warning that a run would fail.
 
 ## Parameter Requirements
 
@@ -220,6 +239,18 @@ loom inspect ./platform-rollout --full -p env=prod -o json | jq '.missingParams'
 | `missingParams` | Unsatisfied required parameters, with the breadcrumb of the module declaring each. Spans every described module, deduplicated. |
 | `problems` | Modules that could not be described. |
 | `unexpanded` | Breadcrumbs of the modules listed but not read. While this is non-empty, `missingParams` covers part of the tree, not all of it. |
+
+Each entry of a node's `params` carries `name`, `type` (`string`, `list` or `map`), `state`, and — where they apply — `required`, `value`, `default`, `command` and `from`. For a `list` or `map` param, `value`, `default` and `from` are real JSON arrays and objects:
+
+```json
+{ "name": "appName", "type": "string", "state": "default", "value": "guestbook", "default": "guestbook" }
+{ "name": "sources", "type": "list", "state": "provided", "required": true,
+  "value": [{ "chart": "guestbook", "repoURL": "https://charts.example.com", "targetRevision": 1.10 }] }
+{ "name": "labels", "type": "map", "state": "default", "value": { "team": "platform" }, "default": { "team": "platform" } }
+{ "name": "extra", "type": "list", "state": "unset" }
+```
+
+A number is written with the text it was given — `1.10`, not `1.1`. A JSON parser that reads numbers as floats will still drop the trailing zero, so treat version-like numbers as text if their spelling matters to you.
 
 A CI check that a module is fully parameterized should assert on `--full`, and
 treat a non-empty `unexpanded` as a reason not to trust `missingParams`:

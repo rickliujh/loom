@@ -62,7 +62,7 @@ spec:
 
 // inspectTreeOutput renders a fully-expanded inspection, the view the tests
 // that care about content want; depth is exercised separately.
-func inspectTreeOutput(t *testing.T, dir string, params map[string]string) string {
+func inspectTreeOutput(t *testing.T, dir string, params map[string]any) string {
 	t.Helper()
 	tree := inspectAll(t, dir, params)
 	var buf bytes.Buffer
@@ -76,7 +76,7 @@ func rootSubject(tree *module.Inspection) []subject {
 	return []subject{{Path: []string{tree.Instance}, Module: tree}}
 }
 
-func inspectAll(t *testing.T, dir string, params map[string]string) *module.Inspection {
+func inspectAll(t *testing.T, dir string, params map[string]any) *module.Inspection {
 	t.Helper()
 	tree, err := module.Inspect(dir, module.InspectOptions{Params: params, Logger: newLogger()})
 	if err != nil {
@@ -88,7 +88,7 @@ func inspectAll(t *testing.T, dir string, params map[string]string) *module.Insp
 // The tree output carries the hierarchy, each module's operations, and the
 // parameter requirements — the three things inspect exists to show.
 func TestInspectTree_ShowsHierarchyOperationsAndParams(t *testing.T) {
-	out := inspectTreeOutput(t, inspectFixture(t), map[string]string{"env": "prod"})
+	out := inspectTreeOutput(t, inspectFixture(t), map[string]any{"env": "prod"})
 
 	for _, want := range []string{
 		"rollout",         // the root module
@@ -114,7 +114,7 @@ func TestInspectTree_ShowsHierarchyOperationsAndParams(t *testing.T) {
 func TestInspectTree_IN9_SummaryListsMissingParams(t *testing.T) {
 	dir := inspectFixture(t)
 
-	out := inspectTreeOutput(t, dir, map[string]string{"env": "prod"})
+	out := inspectTreeOutput(t, dir, map[string]any{"env": "prod"})
 	if !strings.Contains(out, "region") || !strings.Contains(out, "rollout › api-prod") {
 		t.Errorf("summary should locate the missing param at the child:\n%s", out)
 	}
@@ -122,7 +122,7 @@ func TestInspectTree_IN9_SummaryListsMissingParams(t *testing.T) {
 	// Supplied params reach the root only, so the child's requirement is
 	// satisfied by inspecting that module directly with both values.
 	child := filepath.Join(filepath.Dir(dir), "child")
-	out = inspectTreeOutput(t, child, map[string]string{"service": "api", "region": "eu"})
+	out = inspectTreeOutput(t, child, map[string]any{"service": "api", "region": "eu"})
 	if !strings.Contains(out, "every required parameter is satisfied") {
 		t.Errorf("a fully parameterized tree should say so:\n%s", out)
 	}
@@ -136,7 +136,7 @@ func TestInspectTree_IN9_SummaryListsMissingParams(t *testing.T) {
 func TestInspectTree_IN16_DefaultListsSubmodules(t *testing.T) {
 	dir := inspectFixture(t)
 	tree, err := module.Inspect(dir, module.InspectOptions{
-		Params:   map[string]string{"env": "prod"},
+		Params:   map[string]any{"env": "prod"},
 		MaxDepth: 1,
 		Logger:   newLogger(),
 	})
@@ -169,7 +169,7 @@ func TestInspectTree_IN16_DefaultListsSubmodules(t *testing.T) {
 // IN17: A focused module is headed by its breadcrumb, so its position in the
 // tree is never in doubt, and the hint offered names a module that resolves.
 func TestInspectTree_IN17_FocusedModuleShowsBreadcrumb(t *testing.T) {
-	tree := inspectAll(t, inspectFixture(t), map[string]string{"env": "prod"})
+	tree := inspectAll(t, inspectFixture(t), map[string]any{"env": "prod"})
 
 	focused, path, err := tree.FindModule("api-prod")
 	if err != nil {
@@ -251,7 +251,7 @@ spec:
 // Without a terminal to write to, the tree carries no escape codes, so piped
 // and captured output stays plain text.
 func TestInspectTree_PlainWhenNotATerminal(t *testing.T) {
-	out := inspectTreeOutput(t, inspectFixture(t), map[string]string{"env": "prod"})
+	out := inspectTreeOutput(t, inspectFixture(t), map[string]any{"env": "prod"})
 	if strings.Contains(out, "\033[") {
 		t.Errorf("output to a non-terminal should carry no escape codes:\n%q", out)
 	}
@@ -260,7 +260,7 @@ func TestInspectTree_PlainWhenNotATerminal(t *testing.T) {
 // The JSON document carries the tree plus the roll-ups the tree view prints as
 // footers, so a caller need not walk the tree to find them.
 func TestInspectJSON_ReportShape(t *testing.T) {
-	tree := inspectAll(t, inspectFixture(t), map[string]string{"env": "prod"})
+	tree := inspectAll(t, inspectFixture(t), map[string]any{"env": "prod"})
 	var buf bytes.Buffer
 	if err := printInspectJSON(&buf, rootSubject(tree)); err != nil {
 		t.Fatal(err)
@@ -459,4 +459,116 @@ func runInspectFor(t *testing.T, dir string, args ...string) error {
 	rootCmd.SetOut(devnull)
 	rootCmd.SetErr(devnull)
 	return rootCmd.Execute()
+}
+
+// typedFixture is a module declaring one param of each type, plus a dynamic
+// one that a template guards with default.
+func typedFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: argocd-app
+spec:
+  params:
+    - name: appName
+      default: guestbook
+    - name: sources
+      type: list
+      required: true
+    - name: labels
+      type: map
+      default: {team: platform, tier: 1.10}
+    - name: extra
+      type: list
+  dynamicParams:
+    - name: commitHash
+      command: git rev-parse HEAD
+  target:
+    url: "https://git.example.com/{{ .appName }}.git"
+    featureBranch: "loom/{{ default \"main\" .commitHash }}"
+`)
+	return dir
+}
+
+// SP15: JSON carries each param's type and structured values as real JSON.
+func TestInspectJSON_SP15_TypedParams(t *testing.T) {
+	tree := inspectAll(t, typedFixture(t), map[string]any{
+		"sources": "[{repoURL: https://charts.example.com, chart: guestbook, targetRevision: 1.10}]",
+	})
+	var buf bytes.Buffer
+	if err := printInspectJSON(&buf, rootSubject(tree)); err != nil {
+		t.Fatal(err)
+	}
+	doc := compactJSONDoc(t, buf.Bytes())
+	for _, want := range []string{
+		`{"name":"appName","type":"string","state":"default","value":"guestbook","default":"guestbook"}`,
+		// The -p string became the list it is at run time; 1.10 is kept.
+		`{"name":"sources","type":"list","state":"provided","required":true,"value":[{"chart":"guestbook","repoURL":"https://charts.example.com","targetRevision":1.10}]}`,
+		`{"name":"labels","type":"map","state":"default","value":{"team":"platform","tier":1.10},"default":{"team":"platform","tier":1.10}}`,
+		`{"name":"extra","type":"list","state":"unset"}`,
+		`{"name":"commitHash","type":"string","state":"dynamic","command":"git rev-parse HEAD"}`,
+	} {
+		if !strings.Contains(doc, want) {
+			t.Errorf("JSON missing %s\nin %s", want, doc)
+		}
+	}
+}
+
+// compactJSONDoc strips the indentation of an encoded document so a fragment
+// can be matched regardless of layout.
+func compactJSONDoc(t *testing.T, doc []byte) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, doc); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// SP15: the tree shows a structured value on one line; string params read as
+// they always did.
+func TestInspectTree_SP15_TypedParams(t *testing.T) {
+	out := inspectTreeOutput(t, typedFixture(t), map[string]any{
+		"sources": "[{repoURL: https://charts.example.com, chart: guestbook}]",
+	})
+	for _, want := range []string{
+		`appName     default   = "guestbook"`,
+		// Long values are cut short; the JSON output carries them whole.
+		`sources     provided  = [1 item] [{"chart":"guestbook","repoURL":"https://charts.example.com"…`,
+		`labels      default   = {2 keys} {"team":"platform","tier":1.10}`,
+		`extra       optional  = []`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("tree missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A value only known at run time stays unresolved even behind default, which
+// would otherwise accept the missing key as empty and claim its fallback.
+func TestInspect_SP15_DefaultOverRunTimeValueStaysUnresolved(t *testing.T) {
+	tree := inspectAll(t, typedFixture(t), map[string]any{"sources": "[]"})
+	if got := tree.Target.FeatureBranch; got != `loom/{{ default "main" .commitHash }}` {
+		t.Errorf("featureBranch = %q, want the template text kept", got)
+	}
+	if got := tree.Target.URL; got != "https://git.example.com/guestbook.git" {
+		t.Errorf("url = %q, want it rendered", got)
+	}
+}
+
+// A supplied value that the declared type rejects is shown with a warning:
+// a run would fail on it.
+func TestInspect_SP15_CoercionFailureWarns(t *testing.T) {
+	tree := inspectAll(t, typedFixture(t), map[string]any{"sources": "{repoURL: x}"})
+	found := false
+	for _, w := range tree.Warnings {
+		if strings.Contains(w, `param "sources" is declared list`) && strings.Contains(w, "a run would fail") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings = %v, want the coercion failure", tree.Warnings)
+	}
 }

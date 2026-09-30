@@ -1,23 +1,19 @@
 package module
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/config"
+	"github.com/rickliujh/loom/pkg/params"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
-
-// noValue is what text/template substitutes for a key absent from the param
-// map. Inspect renders with a deliberately partial map — params whose values
-// only exist at run time (dynamic ones, unsupplied required ones) are simply
-// not there — so this marker is how a template that could not be fully
-// resolved is recognized, rather than an error.
-const noValue = "<no value>"
 
 // ParamState says where an inspected parameter's value comes from, or why the
 // module does not have one yet.
@@ -47,19 +43,39 @@ const (
 // Param is one parameter a module declares, together with what inspect could
 // work out about its value without executing anything.
 type Param struct {
-	Name     string     `json:"name"`
-	State    ParamState `json:"state"`
-	Required bool       `json:"required,omitempty"`
-	// Value is the known value, empty unless State is provided or default.
-	Value string `json:"value,omitempty"`
-	// Default is the declared fallback, if any.
-	Default string `json:"default,omitempty"`
+	Name string `json:"name"`
+	// Type is the declared type, "string" when the definition omits it.
+	Type     config.ParamType `json:"type"`
+	State    ParamState       `json:"state"`
+	Required bool             `json:"required,omitempty"`
+	// Value is the known value, nil unless State is provided or default: a
+	// string, or for a list or map param a []any or map[string]any.
+	Value any `json:"value,omitempty"`
+	// Default is the declared fallback, if any: a string, or the structured
+	// default of a list or map param. A dynamic param's default is always the
+	// template text it is written as.
+	Default any `json:"default,omitempty"`
 	// Command is the shell command of a dynamic param, as authored.
 	Command string `json:"command,omitempty"`
 	// From is the parent's expression supplying this param, kept as authored so
 	// a templated hand-off ("{{ .env }}-ns") stays visible next to its result.
-	// Empty at the root and when the parent passed a literal.
-	From string `json:"from,omitempty"`
+	// For a structured value it is the value as the parent wrote it, templates
+	// and all. Nil at the root and when the parent passed a plain literal.
+	From any `json:"from,omitempty"`
+}
+
+// MarshalJSON leaves out an empty string value, as the plain string field this
+// used to be did. The value itself stays "" in memory: templates inspect renders
+// must still see a param supplied as empty.
+func (p Param) MarshalJSON() ([]byte, error) {
+	type plain Param
+	out := plain(p)
+	for _, v := range []*any{&out.Value, &out.Default, &out.From} {
+		if s, ok := (*v).(string); ok && s == "" {
+			*v = nil
+		}
+	}
+	return json.Marshal(out)
 }
 
 // OpSummary is one operation, reduced to what a reader needs to see the shape
@@ -139,7 +155,7 @@ type Inspection struct {
 // InspectOptions controls how far and how eagerly Inspect walks.
 type InspectOptions struct {
 	// Params are the values supplied for the root module, as `loom run -p` would.
-	Params map[string]string
+	Params map[string]any
 	// MaxDepth limits how many levels of module are read: 1 is the root alone,
 	// 2 adds its direct children, and zero or less means unlimited. Modules past
 	// the limit are still listed by name — see Inspection.Listed — since knowing
@@ -171,7 +187,7 @@ func Inspect(dir string, opts InspectOptions) (*Inspection, error) {
 
 	node := &Inspection{Dir: dir}
 	w := &inspector{opts: opts, cleanups: &cleanups}
-	w.describe(node, dir, opts.Params, []string{localIdentity(dir)})
+	w.describe(node, dir, opts.Params, nil, []string{localIdentity(dir)})
 	if node.Error != "" {
 		return nil, fmt.Errorf("inspecting %s: %s", dir, node.Error)
 	}
@@ -190,7 +206,10 @@ type inspector struct {
 // including this module. It serves twice over: comparing a child against it is
 // what stops a module that (transitively) composes itself from recursing
 // forever, and its length is the module's depth.
-func (w *inspector) describe(node *Inspection, dir string, provided map[string]string, ancestry []string) {
+//
+// pending names the provided values that are still template text, because the
+// parent could not render them (see describeParams).
+func (w *inspector) describe(node *Inspection, dir string, provided map[string]any, pending map[string]bool, ancestry []string) {
 	cfg, err := config.Load(dir)
 	if err != nil {
 		node.Error = err.Error()
@@ -210,11 +229,11 @@ func (w *inspector) describe(node *Inspection, dir string, provided map[string]s
 	node.Excludes = cfg.Spec.Excludes
 	node.Includes = cfg.Spec.Includes
 
-	// known holds only the params whose values inspect can actually compute.
-	// Templates referencing anything else render to noValue and are reported as
-	// unresolved rather than as a wrong value.
-	node.Params, node.Warnings = describeParams(cfg.Spec, provided)
-	known := knownValues(node.Params)
+	// known holds the values inspect can actually compute and names the params
+	// whose values exist only at run time. A template referencing one of those
+	// is reported as unresolved rather than as a wrong value.
+	node.Params, node.Warnings = describeParams(cfg.Spec, provided, pending)
+	known := knownScope(node.Params)
 
 	// The filesystem half of the run path's validation — a newFiles source or
 	// patch file that is not there. Structural validation has already passed, so
@@ -241,18 +260,18 @@ func (w *inspector) describe(node *Inspection, dir string, provided map[string]s
 // walkChildren describes each module the parent composes, in declaration order
 // — the order a run dispatches them in. When expand is false the children are
 // recorded from what the parent declares and left unread.
-func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, parentDir string, known map[string]string, ancestry []string, expand bool) {
+func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, parentDir string, known scope, ancestry []string, expand bool) {
 	for _, ref := range refs {
 		child := &Inspection{}
 		parent.Children = append(parent.Children, child)
 
-		child.Instance, _ = render(ref.Name, known)
+		child.Instance, _ = known.render(ref.Name)
 		if child.Instance == "" {
 			child.Instance = ref.Name
 		}
 		child.If = ref.If
 
-		source, sourceOK := render(ref.Source, known)
+		source, sourceOK := known.render(ref.Source)
 		if !sourceOK {
 			// Show the expression rather than the "<no value>" it rendered to:
 			// the reader can act on the former.
@@ -275,10 +294,10 @@ func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, pa
 		// Hand the child's params down as the parent's run would: each value
 		// rendered through the parent's params. One that cannot be rendered is
 		// still listed — as unresolved — instead of being passed on wrong.
-		childParams := make(map[string]string, len(ref.Params))
+		childParams := make(map[string]any, len(ref.Params))
 		unresolved := make(map[string]bool)
 		for k, v := range ref.Params {
-			rendered, ok := render(v, known)
+			rendered, ok := known.renderValue(v)
 			if !ok {
 				unresolved[k] = true
 			}
@@ -316,7 +335,7 @@ func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, pa
 		// ancestry, and a shared backing array would let one overwrite another's
 		// last element.
 		childAncestry := append(append([]string(nil), ancestry...), identity)
-		w.describe(child, childDir, childParams, childAncestry)
+		w.describe(child, childDir, childParams, unresolved, childAncestry)
 		markFrom(child, ref.Params, unresolved)
 	}
 }
@@ -325,63 +344,84 @@ func (w *inspector) walkChildren(parent *Inspection, refs []config.ModuleRef, pa
 // what is supplying each value, and what a run would be missing. Warnings cover
 // params supplied to the module that it never declares — the case run rejects
 // outright (P3).
-func describeParams(spec config.Spec, provided map[string]string) ([]Param, []string) {
-	params := make([]Param, 0, len(spec.Params)+len(spec.DynamicParams))
+//
+// A supplied value is coerced to the param's declared type as a run would
+// (SP10), so -p sources='[...]' shows as the list it becomes. One that cannot
+// be coerced is shown as supplied, with a warning: a run would fail on it.
+// Values in pending are still template text — the parent could not render
+// them — so they are unresolved from the start, with no value: nothing this
+// module renders may treat that text as a value (markFrom adds the
+// expression afterwards).
+func describeParams(spec config.Spec, provided map[string]any, pending map[string]bool) ([]Param, []string) {
+	table := make([]Param, 0, len(spec.Params)+len(spec.DynamicParams))
 	declared := make(map[string]bool, len(spec.Params)+len(spec.DynamicParams))
+	var warnings []string
+	supplied := func(name string, t config.ParamType) any {
+		coerced, err := params.Coerce(name, t, provided[name])
+		if err != nil {
+			warnings = append(warnings, err.Error()+"; a run would fail")
+			return provided[name]
+		}
+		return coerced
+	}
 
 	for _, p := range spec.Params {
 		declared[p.Name] = true
-		out := Param{Name: p.Name, Required: p.Required, Default: p.Default}
+		out := Param{Name: p.Name, Type: p.Type.Effective(), Required: p.Required, Default: p.Default}
 		switch {
+		case pending[p.Name]:
+			out.State = ParamUnresolved
 		case hasValue(provided, p.Name):
-			out.State, out.Value = ParamProvided, provided[p.Name]
-		case p.Default != "":
+			out.State, out.Value = ParamProvided, supplied(p.Name, p.Type)
+		case p.HasDefault():
 			out.State, out.Value = ParamDefault, p.Default
 		case p.Required:
 			out.State = ParamMissing
 		default:
 			out.State = ParamUnset
 		}
-		params = append(params, out)
+		table = append(table, out)
 	}
 
 	// Dynamic params resolve last at run time, but a supplied value overrides
 	// the command entirely (P6) — so a provided one is reported as provided.
 	for _, dp := range spec.DynamicParams {
 		declared[dp.Name] = true
-		out := Param{Name: dp.Name, Command: dp.Command, Default: dp.Default}
-		if hasValue(provided, dp.Name) {
-			out.State, out.Value = ParamProvided, provided[dp.Name]
+		out := Param{Name: dp.Name, Type: dp.Type.Effective(), Command: dp.Command, Default: dp.Default}
+		if pending[dp.Name] {
+			out.State = ParamUnresolved
+		} else if hasValue(provided, dp.Name) {
+			out.State, out.Value = ParamProvided, supplied(dp.Name, dp.Type)
 		} else {
 			out.State = ParamDynamic
 		}
-		params = append(params, out)
+		table = append(table, out)
 	}
 
-	var warnings []string
 	for _, name := range sortedKeys(provided) {
 		if !declared[name] {
 			warnings = append(warnings, fmt.Sprintf("parameter %q is supplied but not declared by this module; a run would reject it", name))
 		}
 	}
-	return params, warnings
+	return table, warnings
 }
 
 // markFrom records, on each param the parent supplied, the expression it came
 // from — and demotes a param whose expression could not be rendered from
 // "provided" to "unresolved", so a placeholder is never mistaken for a value.
-func markFrom(child *Inspection, refParams map[string]string, unresolved map[string]bool) {
+func markFrom(child *Inspection, refParams config.ParamValues, unresolved map[string]bool) {
 	for i := range child.Params {
 		p := &child.Params[i]
 		expr, ok := refParams[p.Name]
 		if !ok {
 			continue
 		}
-		if expr != p.Value {
+		// DeepEqual, not ==: a structured value is not comparable.
+		if !reflect.DeepEqual(expr, p.Value) {
 			p.From = expr
 		}
 		if unresolved[p.Name] {
-			p.State, p.Value = ParamUnresolved, ""
+			p.State, p.Value = ParamUnresolved, nil
 			p.From = expr
 		}
 	}
@@ -390,14 +430,14 @@ func markFrom(child *Inspection, refParams map[string]string, unresolved map[str
 // describeTarget renders a target spec with the params inspect knows. A field
 // that depends on a run-time value keeps its template text, so the reader sees
 // the expression rather than a "<no value>" placeholder.
-func describeTarget(spec *config.TargetSpec, known map[string]string) *Target {
+func describeTarget(spec *config.TargetSpec, known scope) *Target {
 	if spec == nil {
 		return nil
 	}
 	return &Target{
-		URL:           renderOrKeep(spec.URL, known),
-		Branch:        renderOrKeep(spec.Branch, known),
-		FeatureBranch: renderOrKeep(spec.FeatureBranch, known),
+		URL:           known.renderOrKeep(spec.URL),
+		Branch:        known.renderOrKeep(spec.Branch),
+		FeatureBranch: known.renderOrKeep(spec.FeatureBranch),
 	}
 }
 
@@ -598,45 +638,83 @@ func (i *Inspection) walk(prefix []string, fn func(path []string, node *Inspecti
 	}
 }
 
-// render templates s with the params known so far. The bool reports whether
-// every referenced key was available: on a parse/execute error or a
-// "<no value>" substitution it is false, and the caller decides whether to show
-// the expression, warn, or stop.
-func render(s string, params map[string]string) (string, bool) {
+// scope is what inspect knows when it renders one module's templates: the
+// values it can compute, and the params whose values exist only at run time.
+type scope struct {
+	values  map[string]any
+	unknown map[string]bool
+}
+
+// knownScope reduces a param table to what templates may use. Provided and
+// defaulted params have their values, and an unset one its type's empty value,
+// which is exactly what a run gives it (SP6). A missing, dynamic, or
+// unresolved param is unknown.
+func knownScope(table []Param) scope {
+	sc := scope{values: make(map[string]any, len(table)), unknown: make(map[string]bool)}
+	for _, p := range table {
+		switch p.State {
+		case ParamProvided, ParamDefault:
+			sc.values[p.Name] = p.Value
+		case ParamUnset:
+			sc.values[p.Name] = params.Zero(p.Type)
+		default:
+			sc.unknown[p.Name] = true
+		}
+	}
+	return sc
+}
+
+// render templates s with the values known so far. The bool reports whether
+// the result is the value a run would produce: it is false on a parse or
+// execute error, and — decided before rendering, from the template's
+// references — whenever the template refers to an unknown param at all, or
+// reaches the param map in a way whose keys cannot be read while some param
+// is unknown. Deciding from references rather than from the output is what
+// keeps a run-time value from looking known behind if, with, not, eq,
+// default, or a branch not taken. The caller decides whether to show the
+// expression, warn, or stop.
+func (sc scope) render(s string) (string, bool) {
 	if s == "" || !strings.Contains(s, "{{") {
 		return s, true
 	}
-	out, err := tmpl.RenderString(s, params)
+	if len(sc.unknown) > 0 {
+		refs, ok, err := config.TemplateRefs(s)
+		if err != nil || !ok {
+			return s, false
+		}
+		for _, r := range refs {
+			if sc.unknown[r] {
+				return s, false
+			}
+		}
+	}
+	out, err := tmpl.RenderString(s, sc.values)
 	if err != nil {
 		return s, false
-	}
-	if strings.Contains(out, noValue) {
-		return out, false
 	}
 	return out, true
 }
 
-// renderOrKeep renders s, falling back to the template text when it references
-// a value inspect does not have.
-func renderOrKeep(s string, params map[string]string) string {
-	if out, ok := render(s, params); ok {
+// renderValue is render applied to every string leaf of a param value, as a
+// run hands structured values to a child. The bool is false when any leaf
+// could not be rendered.
+func (sc scope) renderValue(v any) (any, bool) {
+	allOK := true
+	out, _ := tmpl.MapStrings(v, "", func(_, s string) (string, error) {
+		r, ok := sc.render(s)
+		allOK = allOK && ok
+		return r, nil
+	})
+	return out, allOK
+}
+
+// renderOrKeep renders s, falling back to the template text when it depends
+// on a value inspect does not have.
+func (sc scope) renderOrKeep(s string) string {
+	if out, ok := sc.render(s); ok {
 		return out
 	}
 	return s
-}
-
-// knownValues reduces a param table to the values templates may safely use.
-// A missing, unset, unresolved, or dynamic param is deliberately absent rather
-// than empty, so a template touching it renders to noValue and is caught.
-func knownValues(params []Param) map[string]string {
-	known := make(map[string]string, len(params))
-	for _, p := range params {
-		switch p.State {
-		case ParamProvided, ParamDefault:
-			known[p.Name] = p.Value
-		}
-	}
-	return known
 }
 
 // sourceIdentity is what a module is compared against for cycle detection: the
@@ -671,7 +749,7 @@ func isLocalSource(source string) bool {
 	return strings.HasPrefix(source, ".") || strings.HasPrefix(source, "/")
 }
 
-func hasValue(m map[string]string, k string) bool {
+func hasValue(m map[string]any, k string) bool {
 	_, ok := m[k]
 	return ok
 }
@@ -687,7 +765,7 @@ func contains(haystack []string, needle string) bool {
 
 // sortedKeys keeps map-derived output (undeclared-param warnings) stable across
 // runs, since Go map iteration order is not.
-func sortedKeys(m map[string]string) []string {
+func sortedKeys(m map[string]any) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

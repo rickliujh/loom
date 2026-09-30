@@ -48,6 +48,7 @@ export default defineConfig({
           items: [
             { text: 'How It Works', link: '/guide/how-it-works' },
             { text: 'Templates', link: '/guide/templates' },
+            { text: 'Structured Parameters', link: '/guide/structured-params' },
             { text: 'Module Composition', link: '/guide/module-composition' },
             { text: 'Bulk Runs', link: '/guide/bulk-runs' },
             { text: 'Using Loom with AI Agents', link: '/guide/ai-agents' },

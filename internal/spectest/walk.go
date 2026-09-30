@@ -37,14 +37,16 @@ type Step struct {
 }
 
 // CollectStringPaths records the path of every string reachable from v:
-// nested structs, pointers, slice elements, and map[string]string values.
+// nested structs, pointers, interfaces, slice elements, and the values of
+// string-keyed maps — including the []any and map[string]any trees a
+// structured param value is made of.
 func CollectStringPaths(v reflect.Value, prefix []Step, out *[][]Step) {
 	switch v.Kind() {
 	case reflect.String:
 		cp := make([]Step, len(prefix))
 		copy(cp, prefix)
 		*out = append(*out, cp)
-	case reflect.Pointer:
+	case reflect.Pointer, reflect.Interface:
 		if !v.IsNil() {
 			CollectStringPaths(v.Elem(), prefix, out)
 		}
@@ -61,7 +63,7 @@ func CollectStringPaths(v reflect.Value, prefix []Step, out *[][]Step) {
 			CollectStringPaths(v.Index(i), append(prefix, Step{kind: stepIndex, index: i, name: fmt.Sprintf("[%d]", i)}), out)
 		}
 	case reflect.Map:
-		if v.Type().Key().Kind() != reflect.String || v.Type().Elem().Kind() != reflect.String {
+		if v.Type().Key().Kind() != reflect.String {
 			return
 		}
 		keys := make([]string, 0, v.Len())
@@ -70,34 +72,55 @@ func CollectStringPaths(v reflect.Value, prefix []Step, out *[][]Step) {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			CollectStringPaths(v.MapIndex(reflect.ValueOf(k)), append(prefix, Step{kind: stepMapKey, key: k, name: fmt.Sprintf("[%s]", k)}), out)
+			CollectStringPaths(v.MapIndex(reflect.ValueOf(k).Convert(v.Type().Key())), append(prefix, Step{kind: stepMapKey, key: k, name: fmt.Sprintf("[%s]", k)}), out)
 		}
 	}
 }
 
 // SetByPath sets the string at path (as recorded by CollectStringPaths) to val.
 func SetByPath(root reflect.Value, path []Step, val string) {
-	v := root
-	for i, s := range path {
-		for v.Kind() == reflect.Pointer {
-			v = v.Elem()
-		}
-		switch s.kind {
-		case stepField:
-			v = v.Field(s.index)
-		case stepIndex:
-			v = v.Index(s.index)
-		case stepMapKey:
-			// Map values are not addressable, so a map key is always terminal
-			// (only map[string]string is walked).
-			if i != len(path)-1 {
-				panic("spectest: map step must be terminal")
-			}
-			v.SetMapIndex(reflect.ValueOf(s.key), reflect.ValueOf(val))
-			return
-		}
+	for root.Kind() == reflect.Pointer {
+		root = root.Elem()
 	}
-	v.SetString(val)
+	root.Set(with(root, path, val))
+}
+
+// with returns v with the string at path replaced by val. Map values and
+// interface contents are not addressable, so rather than setting in place it
+// rebuilds the value along the path and each level stores the rebuilt child
+// back — which reaches strings nested any depth inside map[string]any.
+func with(v reflect.Value, path []Step, val string) reflect.Value {
+	switch v.Kind() {
+	case reflect.Pointer:
+		v.Elem().Set(with(v.Elem(), path, val))
+		return v
+	case reflect.Interface:
+		nv := reflect.New(v.Type()).Elem()
+		nv.Set(with(v.Elem(), path, val))
+		return nv
+	}
+	if len(path) == 0 {
+		nv := reflect.New(v.Type()).Elem()
+		nv.SetString(val)
+		return nv
+	}
+	s, rest := path[0], path[1:]
+	switch s.kind {
+	case stepField:
+		nv := reflect.New(v.Type()).Elem()
+		nv.Set(v)
+		nv.Field(s.index).Set(with(nv.Field(s.index), rest, val))
+		return nv
+	case stepIndex:
+		// Slice elements are addressable and shared with the caller's slice.
+		v.Index(s.index).Set(with(v.Index(s.index), rest, val))
+		return v
+	case stepMapKey:
+		key := reflect.ValueOf(s.key).Convert(v.Type().Key())
+		v.SetMapIndex(key, with(v.MapIndex(key), rest, val))
+		return v
+	}
+	panic("spectest: unknown step")
 }
 
 // PathName renders a path as a dotted field trail, e.g. "ProviderConfig.TokenEnv".

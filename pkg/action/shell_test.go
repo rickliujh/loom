@@ -41,7 +41,7 @@ func TestShellAction_Templated(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"greeting": "hello-world"}
+	execCtx.Params = map[string]any{"greeting": "hello-world"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestShellAction_TemplatedTimeout(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"dur": "not-a-duration"}
+	execCtx.Params = map[string]any{"dur": "not-a-duration"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err == nil {

@@ -34,7 +34,7 @@ func TestLLMAction_L1_ModeTemplated(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"m": "generate"}
+	execCtx.Params = map[string]any{"m": "generate"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err == nil {
@@ -60,7 +60,7 @@ func TestLLMAction_L1_RetryDelayTemplated(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"delay": "bad-duration"}
+	execCtx.Params = map[string]any{"delay": "bad-duration"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err == nil {
@@ -91,7 +91,7 @@ func TestLLMAction_L1_TokenEnvTemplated(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"envVar": "MY_CUSTOM_TOKEN"}
+	execCtx.Params = map[string]any{"envVar": "MY_CUSTOM_TOKEN"}
 
 	err := action.Execute(context.Background(), execCtx)
 	// Should fail at LLM client creation (no real API), not at template rendering.
@@ -119,7 +119,7 @@ func TestLLMAction_L1_TargetTemplated(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"svc": "payments"}
+	execCtx.Params = map[string]any{"svc": "payments"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err == nil {
@@ -147,7 +147,7 @@ func TestLLMAction_L1_ProviderConfigTemplated(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"proj": "my-project", "loc": "europe-west1"}
+	execCtx.Params = map[string]any{"proj": "my-project", "loc": "europe-west1"}
 
 	err := action.Execute(context.Background(), execCtx)
 	// Will fail at vertex client creation (no ADC), not at template rendering.
@@ -437,7 +437,7 @@ func TestLLMAction_Prompt_GenerateMode(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"svc": "payments", "env": "prod"}
+	execCtx.Params = map[string]any{"svc": "payments", "env": "prod"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatal(err)
@@ -470,7 +470,7 @@ func TestLLMAction_Prompt_ModifyModePrepend(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"svc": "payments"}
+	execCtx.Params = map[string]any{"svc": "payments"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatal(err)
@@ -511,7 +511,7 @@ func TestLLMAction_Prompt_SystemPromptRendered(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"format": "YAML"}
+	execCtx.Params = map[string]any{"format": "YAML"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatal(err)
@@ -578,7 +578,7 @@ func TestLLMAction_Prompt_AllFieldsRendered(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{
+	execCtx.Params = map[string]any{
 		"provider": "openai",
 		"model":    "gpt-4o",
 		"svc":      "auth",
@@ -679,7 +679,7 @@ func TestLLMAction_Prompt_OutputWrittenToTarget(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, t.TempDir(), targetDir)
-	execCtx.Params = map[string]string{"name": "output"}
+	execCtx.Params = map[string]any{"name": "output"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatal(err)

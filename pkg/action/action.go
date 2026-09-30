@@ -244,7 +244,7 @@ type ExecutionContext struct {
 	// they stay legible out of the surrounding log context. May be empty.
 	TargetLabel string
 	// Params are the resolved template parameters.
-	Params map[string]string
+	Params map[string]any
 	// Excludes are glob patterns for files/dirs to exclude from template walking.
 	Excludes []string
 	// Includes are glob patterns that override excludes (including implicit ones).

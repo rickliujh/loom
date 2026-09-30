@@ -5,19 +5,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
 	"github.com/rickliujh/loom/pkg/module"
+	"github.com/rickliujh/loom/pkg/params"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 )
 
 var (
-	params      []string
+	runParams   []string
 	paramsFile  string
 	targetPath  string
 	gitAuthor   string
@@ -34,7 +33,7 @@ var runCmd = &cobra.Command{
 }
 
 func init() {
-	runCmd.Flags().StringArrayVarP(&params, "param", "p", nil, "Parameter in key=value format (can be repeated)")
+	runCmd.Flags().StringArrayVarP(&runParams, "param", "p", nil, "Parameter in key=value format (can be repeated)")
 	runCmd.Flags().StringVar(&paramsFile, "params-file", "", "YAML file with parameters")
 	runCmd.Flags().StringVar(&targetPath, "target-path", "", "Directory for target files: with --local-run, target repos are cloned into numbered subdirectories here; modules without a target spec use it directly")
 	runCmd.Flags().StringVar(&gitAuthor, "author", "", "Default git author name for commitPush operations")
@@ -61,7 +60,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse parameters.
-	paramMap, err := parseParams(params, paramsFile)
+	paramMap, err := params.Parse(runParams, paramsFile)
 	if err != nil {
 		return err
 	}
@@ -136,7 +135,7 @@ func runModule(cmd *cobra.Command, args []string) error {
 // cloneTarget clones the module's target repo. In --local-run mode, it clones into
 // a numbered subdirectory of TargetPath (no cleanup). Otherwise, it clones into
 // a temp directory and returns a cleanup function.
-func cloneTarget(ctx context.Context, mod *module.Module, params map[string]string, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
+func cloneTarget(ctx context.Context, mod *module.Module, paramMap map[string]any, opts *module.RunOptions, logger *slog.Logger) (string, func(), error) {
 	target := mod.Config.Spec.Target
 
 	// Determine clone destination.
@@ -159,14 +158,14 @@ func cloneTarget(ctx context.Context, mod *module.Module, params map[string]stri
 		cleanup = func() { os.RemoveAll(tmpDir) }
 	}
 
-	targetURL, err := tmpl.RenderString(target.URL, params)
+	targetURL, err := tmpl.RenderString(target.URL, paramMap)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
 		}
 		return "", nil, fmt.Errorf("rendering target URL: %w", err)
 	}
-	targetBranch, err := tmpl.RenderString(target.Branch, params)
+	targetBranch, err := tmpl.RenderString(target.Branch, paramMap)
 	if err != nil {
 		if cleanup != nil {
 			cleanup()
@@ -183,7 +182,7 @@ func cloneTarget(ctx context.Context, mod *module.Module, params map[string]stri
 	}
 
 	if target.FeatureBranch != "" {
-		branchName, err := tmpl.RenderString(target.FeatureBranch, params)
+		branchName, err := tmpl.RenderString(target.FeatureBranch, paramMap)
 		if err != nil {
 			if cleanup != nil {
 				cleanup()
@@ -200,36 +199,4 @@ func cloneTarget(ctx context.Context, mod *module.Module, params map[string]stri
 	}
 
 	return cloneDir, cleanup, nil
-}
-
-// parseParams merges CLI params and params file into a map.
-func parseParams(cliParams []string, paramsFile string) (map[string]string, error) {
-	result := make(map[string]string)
-
-	// Load from file first (CLI params override).
-	if paramsFile != "" {
-		data, err := os.ReadFile(paramsFile)
-		if err != nil {
-			return nil, fmt.Errorf("reading params file: %w", err)
-		}
-
-		var fileParams map[string]string
-		if err := yaml.Unmarshal(data, &fileParams); err != nil {
-			return nil, fmt.Errorf("parsing params file: %w", err)
-		}
-		for k, v := range fileParams {
-			result[k] = v
-		}
-	}
-
-	// Parse CLI params.
-	for _, p := range cliParams {
-		parts := strings.SplitN(p, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid param format %q, expected key=value", p)
-		}
-		result[parts[0]] = parts[1]
-	}
-
-	return result, nil
 }

@@ -1073,7 +1073,7 @@ func TestBuildModule_ParamDefs_AllRequired(t *testing.T) {
 		if !p.Required {
 			t.Errorf("param %q should be required", p.Name)
 		}
-		if p.Default != "" {
+		if p.HasDefault() {
 			t.Errorf("param %q should have no default, got %q", p.Name, p.Default)
 		}
 	}

@@ -9,6 +9,7 @@ import (
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/git"
+	"github.com/rickliujh/loom/pkg/params"
 	tmpl "github.com/rickliujh/loom/pkg/template"
 )
 
@@ -149,10 +150,11 @@ func Execute(ctx context.Context, mod *Module, targetDir string, opts RunOptions
 			defer sourceCleanup()
 		}
 
-		// Render child params through parent's template context.
-		childParams := make(map[string]string)
+		// Render child params through parent's template context: every
+		// string leaf, at any depth, of a string, list or map value.
+		childParams := make(map[string]any, len(childRef.Params))
 		for k, v := range childRef.Params {
-			rendered, err := tmpl.RenderString(v, mod.Params)
+			rendered, err := params.RenderLeaves(v, mod.Params)
 			if err != nil {
 				return fmt.Errorf("rendering param %q for child %q: %w", k, childName, err)
 			}

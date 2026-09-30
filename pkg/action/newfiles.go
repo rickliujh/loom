@@ -47,7 +47,9 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 
 		rendered, err := tmpl.RenderFile(content, execCtx.Params)
 		if err != nil {
-			return actionError("newFiles", err)
+			// Name the file: a module renders many, and a missing-value or
+			// required failure is only actionable once you know which.
+			return actionError("newFiles", fmt.Errorf("rendering template file %q: %w", relPath, err))
 		}
 
 		// Convert filesystem-friendly __param__ placeholders, then render.

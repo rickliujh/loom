@@ -167,10 +167,13 @@ Parameters are the inputs to your module. They're injected into every template �
 | Field | Description |
 |-------|-------------|
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `type` | `string` (default), `list`, or `map` |
 | `required` | If `true`, the run fails when this param is not provided |
-| `default` | Fallback value when the param is not provided |
+| `default` | Fallback value when the param is not provided — YAML of the param's shape |
 
 Resolution priority: **provided (`-p`) → default → required error**.
+
+Params can be structured. A `list` or `map` param holds real YAML — say, the `sources` of a multi-source Argo CD `Application` — which a params file gives as nested YAML, `-p` as a YAML string (`-p sources='[{repoURL: https://x, chart: y}]'`), and a parent module as a literal list. Templates `range` over it or write it back with `toYaml`, and numbers keep the text they were written with (`1.10` stays `1.10`). See [Structured Parameters](docs/guide/structured-params.md).
 
 ### `spec.dynamicParams`
 
@@ -276,7 +279,7 @@ Child modules to execute before this module's operations. This is how you compos
 |-------|-------------|
 | `name` | Identifier for the child module |
 | `source` | Path to the child module — local (`./sub-module`) or a Git URL |
-| `params` | Parameters to pass down, rendered through the parent's context |
+| `params` | Parameters to pass down — strings, lists or maps — every string rendered through the parent's context |
 
 Child modules execute first, in order. Then the parent's operations run. This lets you build layered workflows: a base module that creates the namespace, a service module that creates the ArgoCD app, a policy module that adds the Gatekeeper constraint — all composed from a single root module.
 
@@ -603,8 +606,11 @@ Available functions:
 |----------|---------|--------|
 | Parameter access | `{{ .serviceName }}` | `payments` |
 | Default value | `{{ default "prod" .env }}` | `prod` if `.env` is empty |
+| Required value | `{{ required "repoURL is required" .repoURL }}` | the value, or the run fails with the message |
 | Uppercase | `{{ upper .serviceName }}` | `PAYMENTS` |
 | Lowercase | `{{ lower .serviceName }}` | `payments` |
+
+More — `toYaml`, `toJson`, `fromYaml`, `split`, `join`, `hasKey`, `indent`, `nindent`, `quote` — in the [templates guide](docs/guide/templates.md). A template that prints a missing value fails the run rather than writing `<no value>` into your repo.
 
 Templates work in:
 - File contents (newFiles)

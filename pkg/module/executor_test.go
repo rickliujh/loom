@@ -124,7 +124,7 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"env": "staging"},
+		Params: map[string]any{"env": "staging"},
 	}
 
 	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
@@ -154,7 +154,7 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"repoPath": bare},
+		Params: map[string]any{"repoPath": bare},
 	}
 
 	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
@@ -197,7 +197,7 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"env": "prod"},
+		Params: map[string]any{"env": "prod"},
 	}
 
 	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
@@ -246,7 +246,7 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"repoPath": bare, "env": "staging"},
+		Params: map[string]any{"repoPath": bare, "env": "staging"},
 	}
 
 	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil)
@@ -282,7 +282,7 @@ func TestResolveChildTarget_UsesModuleResolvedParams(t *testing.T) {
 		},
 		Logger: testLogger(),
 		// Params simulates the output of Load(): both static and dynamic resolved.
-		Params: map[string]string{
+		Params: map[string]any{
 			"env":  "staging",
 			"hash": "abc123", // would come from a dynamicParam
 		},
@@ -477,7 +477,7 @@ spec:
         command: touch output.txt
 `)
 
-	mod, err := Load(dir, map[string]string{"enabled": "no"}, testLogger())
+	mod, err := Load(dir, map[string]any{"enabled": "no"}, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,7 +536,7 @@ func TestExecute_OperationConditionTemplateError(t *testing.T) {
 				},
 			},
 		},
-		Params: map[string]string{},
+		Params: map[string]any{},
 		Logger: testLogger(),
 	}
 
@@ -1172,7 +1172,7 @@ spec:
 func TestNewExecutionContext_SetsLocalRun(t *testing.T) {
 	mod := &Module{
 		Config: &config.LoomFile{Spec: config.Spec{}},
-		Params: map[string]string{"key": "val"},
+		Params: map[string]any{"key": "val"},
 		Logger: testLogger(),
 	}
 
@@ -1207,7 +1207,7 @@ func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
 			Metadata: config.Metadata{Name: "my-module"},
 			Spec:     config.Spec{},
 		},
-		Params: map[string]string{},
+		Params: map[string]any{},
 		Logger: testLogger(),
 	}
 
@@ -1224,7 +1224,7 @@ func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
 func TestNewExecutionContext_PropagatesModulePath(t *testing.T) {
 	mod := &Module{
 		Config: &config.LoomFile{Metadata: config.Metadata{Name: "leaf"}, Spec: config.Spec{}},
-		Params: map[string]string{},
+		Params: map[string]any{},
 		Logger: testLogger(),
 	}
 

@@ -66,7 +66,7 @@ func TestConvertPathTemplate(t *testing.T) {
 }
 
 func TestConvertPathTemplate_RenderIntegration(t *testing.T) {
-	params := map[string]string{
+	params := map[string]any{
 		"serviceName": "payments",
 		"env":         "prod",
 	}

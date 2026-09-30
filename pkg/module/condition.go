@@ -21,7 +21,7 @@ import (
 // because it is control flow: skipping it would misrepresent which steps a run
 // would actually perform. Like dynamicParams commands, an if predicate is
 // expected to be a side-effect-free check (test, grep, file existence).
-func evalCondition(raw string, params map[string]string, workDir string) (bool, error) {
+func evalCondition(raw string, params map[string]any, workDir string) (bool, error) {
 	if strings.TrimSpace(raw) == "" {
 		return true, nil
 	}

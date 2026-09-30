@@ -278,3 +278,98 @@ spec:
 		t.Errorf("unexpected entry name %q", lf.Spec.Modules[0].Name)
 	}
 }
+
+const typedParams = `
+    - name: sources
+      type: list
+    - name: labels
+      type: map
+      default: {team: platform}
+`
+
+// writeTypedChildModule is writeChildModule plus a list and a map param.
+func writeTypedChildModule(t *testing.T, dir string) {
+	t.Helper()
+	writeChildModule(t, dir, "")
+	raw, err := os.ReadFile(filepath.Join(dir, "loom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Replace(string(raw), `      default: "default"
+`, `      default: "default"
+`+typedParams, 1)
+	if err := os.WriteFile(filepath.Join(dir, "loom.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRun_SP16_StructuredItemsBecomeJsonnetValues(t *testing.T) {
+	tmp := t.TempDir()
+	child := filepath.Join(tmp, "onboard-service")
+	writeTypedChildModule(t, child)
+	itemsFile := filepath.Join(tmp, "items.yaml")
+	items := `
+- serviceName: payments
+  sources:
+    - repoURL: https://charts.example.com
+      chart: payments
+      targetRevision: 1.10
+      weight: 3
+      enabled: true
+  labels: {team: fintech}
+`
+	if err := os.WriteFile(itemsFile, []byte(items), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, lf := generate(t, Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bulk"), ItemsFile: itemsFile})
+
+	for _, want := range []string{
+		"    sources: [\n      {\n        chart: 'payments',\n        enabled: true,\n        repoURL: 'https://charts.example.com',\n",
+		// A number kept as its written text goes in as a string: as a jsonnet
+		// number, 1.10 would evaluate to 1.1.
+		"        targetRevision: '1.10',\n        weight: 3,\n      },\n    ],\n",
+		"    labels: {\n      team: 'fintech',\n    },\n",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("generated jsonnet missing %q:\n%s", want, raw)
+		}
+	}
+	sources, ok := lf.Spec.Modules[0].Params["sources"].([]any)
+	if !ok || len(sources) != 1 {
+		t.Fatalf("sources = %#v, want a real list in the evaluated wrapper", lf.Spec.Modules[0].Params["sources"])
+	}
+	if src := sources[0].(map[string]any); src["targetRevision"] != "1.10" || src["weight"] != 3 {
+		t.Errorf("source = %#v", src)
+	}
+}
+
+func TestRun_SP16_PlaceholderUsesTypedEmptyValues(t *testing.T) {
+	tmp := t.TempDir()
+	child := filepath.Join(tmp, "onboard-service")
+	writeTypedChildModule(t, child)
+	raw, _ := generate(t, Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bulk")})
+	for _, want := range []string{"    sources: [],\n", "    labels: {\n      team: 'platform',\n    },\n"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("placeholder missing %q:\n%s", want, raw)
+		}
+	}
+}
+
+func TestRun_SP16_ItemTypeMismatchFailsEarly(t *testing.T) {
+	tmp := t.TempDir()
+	child := filepath.Join(tmp, "onboard-service")
+	writeTypedChildModule(t, child)
+	itemsFile := filepath.Join(tmp, "items.yaml")
+	if err := os.WriteFile(itemsFile, []byte("- serviceName: [a, b]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := Run(Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bulk"), ItemsFile: itemsFile}, testLogger())
+	if err == nil || !strings.Contains(err.Error(), `item 0: param "serviceName" is declared string, but received a list`) {
+		t.Errorf("err = %v, want the type mismatch reported for the item", err)
+	}
+
+	err = Run(Options{ModuleRef: child, OutputDir: filepath.Join(tmp, "bulk2"), NameParam: "sources"}, testLogger())
+	if err == nil || !strings.Contains(err.Error(), `--name-param "sources" is a list parameter; it must be a string`) {
+		t.Errorf("err = %v, want --name-param on a list rejected", err)
+	}
+}

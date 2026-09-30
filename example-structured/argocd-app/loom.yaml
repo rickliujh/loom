@@ -1,0 +1,31 @@
+# One Argo CD multi-source Application per run. See docs/guide/structured-params.md.
+#
+#   loom run ./example-structured/argocd-app --params-file ./example-structured/guestbook.yaml --dry-run
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: argocd-app
+spec:
+  params:
+    - name: appName
+      required: true
+    - name: namespace
+      default: default
+    # A list of Argo CD sources: nested YAML in a params file, a YAML string
+    # with -p, or a list handed down by a parent module.
+    - name: sources
+      type: list
+      required: true
+  target:
+    url: "https://github.com/myorg/gitops-repo.git"
+    branch: main
+    featureBranch: "loom/app-{{ .appName }}"
+  operations:
+    - name: render
+      newFiles:
+        source: templates
+    - name: commit
+      commitPush:
+        message: "feat: add Argo CD application {{ .appName }}"
+        author: loom-bot
+        email: loom@example.com

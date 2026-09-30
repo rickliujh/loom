@@ -1,0 +1,31 @@
+# Composes argocd-app twice: once with a literal list, once forwarding a list
+# this module was given.
+#
+#   loom run ./example-structured/platform --params-file ./example-structured/platform/redis.yaml --dry-run
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: platform
+spec:
+  params:
+    - name: chartRepo
+      default: https://charts.example.com
+    - name: redisSources
+      type: list
+      required: true
+  modules:
+    - name: guestbook
+      source: ../argocd-app
+      params:
+        appName: guestbook
+        sources:
+          - repoURL: "{{ .chartRepo }}"
+            chart: guestbook
+            targetRevision: 1.10
+          - repoURL: https://git.example.com/guestbook-values.git
+            ref: values
+    - name: redis
+      source: ../argocd-app
+      params:
+        appName: redis
+        sources: "{{ .redisSources | toYaml }}"

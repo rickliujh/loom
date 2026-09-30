@@ -9,6 +9,7 @@ import (
 
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/module"
+	"github.com/rickliujh/loom/pkg/params"
 	"github.com/spf13/cobra"
 )
 
@@ -95,7 +96,7 @@ func runInspect(cmd *cobra.Command, args []string) error {
 		defer cleanup()
 	}
 
-	paramMap, err := parseParams(inspectParams, inspectParamsFile)
+	paramMap, err := params.Parse(inspectParams, inspectParamsFile)
 	if err != nil {
 		return err
 	}

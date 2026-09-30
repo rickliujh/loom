@@ -47,7 +47,7 @@ func resetFlags() {
 	dryRun = false
 	localRun = false
 	targetPath = ""
-	params = nil
+	runParams = nil
 	paramsFile = ""
 	verbose = false
 	logLevel = "info"
@@ -296,5 +296,60 @@ spec:
 	}
 	if string(content) != "from subdir" {
 		t.Errorf("expected 'from subdir', got %q", string(content))
+	}
+}
+
+// A params file may carry real lists; -p still overrides it, and a list param
+// parses a -p string as YAML.
+func TestRun_SP11_NestedParamsFileAndCLIOverride(t *testing.T) {
+	resetFlags()
+
+	moduleDir := t.TempDir()
+	targetDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "templates")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplBody := "{{ range .sources }}- {{ .repoURL }}@{{ default \"HEAD\" .targetRevision }}\n{{ end }}env={{ .env }}\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "out.txt"), []byte(tmplBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeLoomYAML(t, moduleDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: nested
+spec:
+  params:
+    - name: env
+    - name: sources
+      type: list
+  operations:
+    - name: write
+      newFiles:
+        source: templates
+`)
+	paramsPath := filepath.Join(t.TempDir(), "params.yaml")
+	if err := os.WriteFile(paramsPath, []byte("env: prod\nsources:\n  - repoURL: a\n    targetRevision: 1.10\n  - repoURL: b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd.SetArgs([]string{"run", moduleDir, "--target-path", targetDir, "--params-file", paramsPath, "-p", "env=staging"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(targetDir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "- a@1.10\n- b@HEAD\nenv=staging\n"; string(got) != want {
+		t.Errorf("rendered %q, want %q", got, want)
+	}
+
+	resetFlags()
+	rootCmd.SetArgs([]string{"run", moduleDir, "--target-path", t.TempDir(), "-p", "sources={repoURL: a}"})
+	err = rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `param "sources" is declared list, but received a string that parses as a map, not a list`) {
+		t.Errorf("err = %v, want a clear type error", err)
 	}
 }

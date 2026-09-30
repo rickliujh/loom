@@ -14,6 +14,7 @@ import (
 	prettylog "github.com/rickliujh/loom/internal/log"
 	"github.com/rickliujh/loom/pkg/action"
 	"github.com/rickliujh/loom/pkg/module"
+	"github.com/rickliujh/loom/pkg/params"
 	"github.com/spf13/cobra"
 )
 
@@ -63,7 +64,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 		source = args[0]
 	}
 
-	paramMap, err := parseParams(diffParams, diffParamsFile)
+	paramMap, err := params.Parse(diffParams, diffParamsFile)
 	if err != nil {
 		return err
 	}
@@ -76,7 +77,7 @@ func runDiff(cmd *cobra.Command, args []string) error {
 
 // runDiffQuick simulates the run and prints in-memory unified diffs for
 // newFiles/patch operations, executing nothing (the old `run --diff`).
-func runDiffQuick(ctx context.Context, source string, paramMap map[string]string, logger *slog.Logger) error {
+func runDiffQuick(ctx context.Context, source string, paramMap map[string]any, logger *slog.Logger) error {
 	diffs := &action.DiffCollector{}
 	opts := module.RunOptions{
 		DryRun:     true,
@@ -104,7 +105,7 @@ func runDiffQuick(ctx context.Context, source string, paramMap map[string]string
 
 // runDiffFull runs the module in local mode into a workspace, then prints a git
 // diff of every cloned target against its base branch.
-func runDiffFull(ctx context.Context, source string, paramMap map[string]string, logger *slog.Logger) error {
+func runDiffFull(ctx context.Context, source string, paramMap map[string]any, logger *slog.Logger) error {
 	if _, err := exec.LookPath("git"); err != nil {
 		return fmt.Errorf("loom diff needs the git CLI to compute diffs; install git or use --quick for a dry-run preview")
 	}
@@ -327,7 +328,7 @@ func isTerminalWriter(w io.Writer) bool {
 // resolveModuleAndTarget loads the module at source and resolves the target
 // directory to run against per opts, returning a cleanup that tears down any
 // temporary clones or sources it created.
-func resolveModuleAndTarget(ctx context.Context, source string, paramMap map[string]string, opts *module.RunOptions, logger *slog.Logger) (*module.Module, string, func(), error) {
+func resolveModuleAndTarget(ctx context.Context, source string, paramMap map[string]any, opts *module.RunOptions, logger *slog.Logger) (*module.Module, string, func(), error) {
 	var cleanups []func()
 	runCleanups := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {

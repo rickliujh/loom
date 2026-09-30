@@ -144,4 +144,5 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 | `both loom.yaml and loom.jsonnet found` | Keep exactly one config file |
 | `--local-run requires --target-path` | Add `--target-path ./preview` |
 | Patch error `reading target file` | `patch.target` is relative to the **target** dir and must exist |
-| Literal `<no value>` in rendered output | Unresolved param renders silently (no error) — check the param name and that it resolved; catch it with `loom diff` before a real run |
+| `template printed a missing value: "<no value>" appears on output line N` | A template printed a field or param that is not there — check the name, or guard an optional field with `default`, `required`, `if` or `with` |
+| `param "x" is declared list, but received ...` | Give a list param a YAML list: nested YAML in the params file, or `-p x='[a, b]'` |

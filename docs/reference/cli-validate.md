@@ -54,9 +54,10 @@ is templated.
 
 The files a run renders are templates too: the bodies `newFiles` walks, their
 path names (including `__param__` placeholders), and patch file bodies. A
-reference to something that is not a declared param is not an error at run
-time — params are a plain string map, so it renders as the literal
-`<no value>` straight into the target:
+reference to something that is not a declared param is a missing value at run
+time: the run fails only once it renders that file (it refuses to write
+`<no value>` into the target), and a guarded reference — `default`, `if`,
+`with` — hides the typo altogether. Validate reports it up front:
 
 ```yaml
 # loom.yaml declares serviceName
@@ -86,14 +87,37 @@ to a child counts as using it — but only forwarding does. A param a child
 module references under its *own* declaration is not a use of the parent's, and
 gets reported.
 
-`range`, `with` and `{{ index . "my-param" }}` are all read correctly: params
-are a flat string map, so a `range` body can only name elements, never params,
-and an `index` key is a literal. The check stands down only when a template
-reaches dot unknowably (a computed index key, or dot passed to a function) or a
-file cannot be read. A `newFiles.source` or `patch.path` resolved at run time
-does not disable it — the fixed part of the path
-(`__functions/patches/{{ .kind }}.yaml` → `__functions/patches`) is scanned for
-references instead.
+`range`, `with`, <code v-pre>{{ index . "my-param" }}</code> and
+<code v-pre>{{ $.name }}</code> are all read correctly: inside a `range` or
+`with` body dot is the current item, so a field there names part of the item,
+never a param — while `$` is the param map everywhere, so
+<code v-pre>{{ $.env }}</code> in a body is checked like any reference.
+<code v-pre>{{ .values.image.tag }}</code> and
+<code v-pre>{{ index .labels "team" }}</code> count as references to `values`
+and `labels`, and every string inside a structured `spec.modules[].params` value
+is checked as a template. The check stands down only when a template reaches
+the param map unknowably (a computed index key, or dot or `$` passed whole to a
+function) or a file cannot be read. A `newFiles.source` or `patch.path`
+resolved at run time does not disable it — the fixed part of the path
+(<code v-pre>__functions/patches/{{ .kind }}.yaml</code> → `__functions/patches`)
+is scanned for references instead.
+
+A `list` or `map` param printed bare — <code v-pre>{{ .sources }}</code> — is a
+**warning**: the run does what the template says, but Go's own formatting
+(`[map[chart:nginx]]`) is never the YAML you meant. Render it with `toYaml`,
+`toJson`, `join` or `range`:
+
+```
+⚠ operation "render": template file "app.yaml": prints list param "sources" directly, which writes Go's formatting (like [map[k:v]]); render it with toYaml, toJson, join or range
+```
+
+The same goes for handing one to a function that takes text —
+<code v-pre>{{ .cfg | nindent 2 }}</code>, <code v-pre>{{ quote .sources }}</code>,
+`printf` — which fails the render (or, for the print builtins, writes Go's
+formatting) if the run reaches it.
+
+A param's `type` must be `string`, `list` or `map`, and a `default` must have
+that shape; either mistake is a violation.
 
 ## File filtering
 

@@ -103,6 +103,25 @@ modules:
 
 Each child module resolves its own `spec.params` independently -- only the values passed in `params` are available. There is no implicit inheritance of parent parameters.
 
+A value can be a list or a map as well as a string, for a child param declared `type: list` or `type: map`. Every string inside it is rendered with the parent's params; a string handed to a list or map param is parsed as YAML, which is how a parent forwards one of its own:
+
+```yaml
+modules:
+  - name: guestbook
+    source: "./argocd-app"
+    params:
+      sources:
+        - repoURL: "{{ .chartRepo }}"
+          chart: guestbook
+          targetRevision: 1.10
+  - name: redis
+    source: "./argocd-app"
+    params:
+      sources: "{{ .redisSources | toYaml }}"
+```
+
+See [Structured Parameters](/guide/structured-params).
+
 Because of that, a deeply composed tree can require a value you never see at the top level. [`loom inspect`](/reference/cli-inspect) reports every parameter a module declares, where its value comes from, and which required ones nothing supplies -- without running anything. Add `--full` to walk the whole tree, or `--module <name>` to look at one submodule with the values its parents actually hand it.
 
 ## Conditional Modules

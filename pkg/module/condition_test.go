@@ -46,7 +46,7 @@ func TestEvalCondition_IF3_ExitCodeSemantics(t *testing.T) {
 }
 
 func TestEvalCondition_IF2_Templated(t *testing.T) {
-	params := map[string]string{"env": "prod"}
+	params := map[string]any{"env": "prod"}
 	// Rendered to `[ prod = prod ]`, which succeeds.
 	run, err := evalCondition(`[ {{ .env }} = prod ]`, params, t.TempDir())
 	if err != nil {

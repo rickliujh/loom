@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .appName }}
+  namespace: argocd
+spec:
+  project: default
+  {{- /* Shaped: each source is checked and normalized. To pass the sources
+         through exactly as given instead, replace the block below with
+           sources: {{- .sources | toYaml | nindent 4 }} */}}
+  sources:
+  {{- range $i, $s := .sources }}
+    - repoURL: {{ required (printf "sources[%d].repoURL is required" $i) $s.repoURL }}
+      targetRevision: {{ default "HEAD" $s.targetRevision }}
+      {{- with $s.chart }}
+      chart: {{ . }}
+      {{- end }}
+      {{- with $s.path }}
+      path: {{ . }}
+      {{- end }}
+      {{- with $s.ref }}
+      ref: {{ . }}
+      {{- end }}
+      {{- with $s.helm }}
+      helm: {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- end }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .namespace }}

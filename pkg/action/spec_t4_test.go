@@ -36,7 +36,7 @@ func dryRunCtx(t *testing.T) *ExecutionContext {
 	return &ExecutionContext{
 		ModuleDir: t.TempDir(),
 		TargetDir: t.TempDir(),
-		Params:    map[string]string{},
+		Params:    map[string]any{},
 		DryRun:    true,
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 	}

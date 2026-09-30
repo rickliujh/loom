@@ -929,6 +929,24 @@ loom validate [path]
 
 Validates: `apiVersion`, `kind`, required metadata, unique parameter names, unique operation names, and that each operation has exactly one action type.
 
+### `loom skill`
+
+```bash
+loom skill                        # the guide for AI agents, then the list of topics
+loom skill list                   # the topics alone
+loom skill reference/op-patch     # one topic ("op-patch" works too)
+```
+
+Prints Loom's guide for AI agents, straight from the binary. Nothing is installed and nothing is fetched: the documentation is embedded in `loom` itself, so an agent always reads the text that matches the version it is about to run.
+
+To point an agent at it, add one line to your `AGENTS.md`, rules file, or skill:
+
+```markdown
+Before working with Loom modules, run `loom skill` and follow what it prints.
+```
+
+Every guide page, reference page and behavioral spec is available as a topic.
+
 ### `loom version`
 
 Print the version.

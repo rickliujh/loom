@@ -1,8 +1,10 @@
 # Using Loom with AI Agents
 
-This page is written for AI coding agents (and the humans configuring them) that author, validate, and run Loom modules. It is tool-neutral: point any agent at this page — Claude Code, Codex, Cursor, Gemini CLI — via your repo's agent config (`AGENTS.md`, rules file, or a skill that references this URL).
+This page is written for AI coding agents (and the humans configuring them) that author, validate, and run Loom modules. It is tool-neutral: it works with any agent — Claude Code, Codex, Cursor, Gemini CLI.
 
-Authoritative sources in the Loom repository: `specs/module.md` (behavior spec), `specs/smp.md` (patch merge semantics), and the [reference docs](/reference/loom-yaml).
+The guide ships inside the binary. An agent reads it by running `loom skill`, with nothing to install, and gets the text that matches the version of Loom it is about to run. To point an agent at it, add one line to your repo's agent config (`AGENTS.md`, a rules file, or a skill): *before working with Loom modules, run `loom skill` and follow it.* See [loom skill](/reference/cli-skill).
+
+Authoritative sources: the [module spec](https://github.com/rickliujh/loom/blob/main/specs/module.md) (`loom skill spec/module`), the [patch merge spec](https://github.com/rickliujh/loom/blob/main/specs/smp.md) (`loom skill spec/smp`), and the [reference docs](/reference/loom-yaml).
 
 ## Golden Workflow
 
@@ -65,7 +67,7 @@ spec:
 - Every param passed via `-p`/`--params-file` must be declared in `spec.params` or `spec.dynamicParams` — undeclared params are a hard error.
 - Priority: CLI `-p` overrides `--params-file` overrides `default`; a missing `required` param fails the run.
 - `dynamicParams` run shell commands after static params resolve, in declaration order (later ones can template earlier ones). A CLI override skips the command.
-- `spec.params` definitions are the **only** non-templatable strings in the file. Everything else — paths, commands, commit messages, PR fields, child params, file contents — is a Go template over the resolved params. Available template functions: `default`, `upper`, `lower` — nothing else (no sprig).
+- `spec.params` definitions are the **only** non-templatable strings in the file. Everything else — paths, commands, commit messages, PR fields, child params, file contents — is a Go template over the resolved params. Available template functions: `default`, `upper`, `lower`, `indent`, `nindent`, `quote`, `toYaml`, `fromYaml`, `split` — nothing else (no sprig). See [Templates](/guide/templates).
 
 ### Files and newFiles
 
@@ -128,8 +130,11 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 
 ## Other Commands
 
-- `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--exclude-git-ops`.
+- `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--token-env`.
 - `loom bulk <module> [-o dir] [--items file.yaml] [--name-param param]` — scaffold a jsonnet bulk wrapper from a module's declared params; prefer this over hand-writing wrappers. It refuses to overwrite existing configs and self-verifies the output.
+- `loom inspect <module> [--full] [-m child] [-o json]` — describe a module without running it: its params and where each value comes from, its target, its operations in order, and the submodules it composes. Reach for it before a first run of an unfamiliar module, to learn what it needs. See [loom inspect](/reference/cli-inspect).
+- `loom validate <module> [-r]` — check the config; `-r` also validates the modules it composes. See [loom validate](/reference/cli-validate).
+- `loom skill [topic]` — print this guide, or another topic from the docs, from the binary.
 - `loom diff <module> [--quick]` — show the changes a run would produce; full mode runs locally and diffs each target, `--quick` is a fast no-execution preview. See [loom diff](/reference/cli-diff).
 - Global flags on all commands: `--dry-run`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
 

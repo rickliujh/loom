@@ -96,6 +96,7 @@ export default defineConfig({
             { text: 'loom generate', link: '/reference/cli-generate' },
             { text: 'loom bulk', link: '/reference/cli-bulk' },
             { text: 'loom validate', link: '/reference/cli-validate' },
+            { text: 'loom skill', link: '/reference/cli-skill' },
           ],
         },
       ],

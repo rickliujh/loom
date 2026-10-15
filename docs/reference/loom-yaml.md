@@ -15,6 +15,12 @@ spec:
       required: true
     - name: namespace
       default: "default"
+    - name: sources           # a list param; see Types below
+      type: list
+      default:
+        - repoURL: https://charts.example.com
+          chart: payments
+          targetRevision: 1.10
 
   dynamicParams:
     - name: commitHash
@@ -73,12 +79,12 @@ spec:
 
 Parameters are the inputs to your module. They're injected into every template — file contents, file paths, shell commands, commit messages, PR titles, and module sources.
 
-**What is templatable:** every string field in `loom.yaml` except `spec.params` definitions (names, defaults, required — these are the source of template values). Boolean fields (e.g. `shell.pure`) are not strings and are not templatable. Specifically:
+**What is templatable:** every string field in `loom.yaml` except `spec.params` definitions (names, types, defaults, required — these are the source of template values) and param `type`s. Boolean fields (e.g. `shell.pure`) are not strings and are not templatable. Specifically:
 
 - `spec.excludes[]`, `spec.includes[]`
 - `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values — every string at any depth of a list or map value
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
 - `shell.command`, `shell.timeout`
@@ -90,12 +96,50 @@ Parameters are the inputs to your module. They're injected into every template �
 | Field | Description |
 |-------|-------------|
 | `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
+| `type` | `string` (default), `list`, or `map`. A literal, never templated. See [Types](#types) |
 | `required` | If `true`, the run fails when this param is not provided |
-| `default` | Fallback value when the param is not provided |
+| `default` | Fallback value when the param is not provided. For a `list` or `map` param, YAML of that shape |
 
-Resolution priority: **provided (`-p`) > default > required error**.
+Resolution priority: **provided (`-p`) > default > required error**. An optional param with no default and no value is its type's empty value — `""`, `[]` or `{}` — so a template reading it prints nothing.
 
 Undeclared parameters (not listed in `params` or `dynamicParams`) are rejected.
+
+### Types
+
+A param is a `string` unless it declares otherwise. A `list` or `map` param holds structured YAML, which templates can `range` over, index into, and re-serialize with `toYaml` — see [Structured Parameters](/guide/structured-params) for a worked example.
+
+| `type` | Holds | Empty value |
+|--------|-------|-------------|
+| `string` | a scalar, used as the text written | `""` |
+| `list` | a YAML sequence of anything | `[]` |
+| `map` | a YAML mapping of anything | `{}` |
+
+```yaml
+params:
+  - name: sources
+    type: list
+    required: true
+  - name: helmValues
+    type: map
+    default:
+      replicaCount: 2
+      image:
+        tag: 1.10          # stays 1.10 — numbers keep the text they are written with
+```
+
+A `default` whose shape does not match the `type` — a list default on a string param, a string on a list param — is a validation error.
+
+**How a value becomes typed.** Wherever a value arrives — `--params-file`, `-p`, a parent's `spec.modules[].params`, a dynamic param's output — the declared type decides what happens to it:
+
+| Declared | Received | Result |
+|----------|----------|--------|
+| `list` / `map` | a list / map | used as is |
+| `list` / `map` | a string | parsed as YAML (flow or block); must give that kind, otherwise the run fails naming the param |
+| `list` / `map` | nothing / empty string | `[]` / `{}` |
+| `string` | a scalar | its text, exactly as written (`1.10`, `010`, `true`) |
+| `string` | a list / map | error |
+
+So a list can be given as a real list in a params file, as <code v-pre>-p sources='[{repoURL: https://x}]'</code> on the command line, or forwarded by a parent as a string it rendered with `toYaml`. A `string` param never parses its value.
 
 ## `spec.dynamicParams`
 
@@ -105,6 +149,7 @@ Dynamic parameters are evaluated via shell commands **after** all regular `param
 |-------|-------------|
 | `name` | Parameter name, referenced as <code v-pre>{{ .name }}</code> in templates |
 | `command` | Shell command (`sh -c`) whose stdout becomes the value. Supports Go template syntax. |
+| `type` | `string` (default), `list`, or `map`. For `list` / `map`, the command's stdout — or the rendered `default` — is parsed as YAML of that shape |
 | `default` | Fallback value used only if the command exits non-zero. Supports Go template syntax (rendered with already-resolved params). A successful command with empty output yields an empty value, not the default. |
 
 ```yaml
@@ -131,6 +176,16 @@ dynamicParams:
 ```
 
 If a value is explicitly passed via `-p` or `--params-file`, the command is skipped entirely and a warning is logged. This means you can always override a dynamic parameter from the CLI.
+
+A typed dynamic param prints YAML:
+
+```yaml
+dynamicParams:
+  - name: regions
+    type: list
+    command: "yq '.regions' clusters.yaml"   # stdout must be a YAML list
+    default: "[us-east-1]"
+```
 
 ## `spec.excludes` and `spec.includes`
 
@@ -203,8 +258,25 @@ Child modules to execute before this module's operations. See [Module Compositio
 |-------|-------------|
 | `name` | Identifier for the child module. Templatable. |
 | `source` | Path to the child module. Accepts local paths, git URLs, or git URLs with `//subdir` separator. Templatable — rendered before source resolution. |
-| `params` | Parameters to pass down, rendered through the parent's context |
+| `params` | Parameters to pass down. A value may be a string, a list, or a map; every string in it, at any depth, is rendered through the parent's params, and the result is typed against the child's declaration (see [Types](#types)) |
 | `if` | Optional shell predicate gating the child. Templatable (parent's params). Runs via `sh -c` in the child's resolved target dir — exit `0` runs the child, non-zero skips it. See [`if`](#conditional-execution-if). |
+
+```yaml
+modules:
+  - name: payments-app
+    source: ./argocd-app
+    params:
+      appName: payments
+      sources:                               # a literal list
+        - repoURL: "{{ .chartRepo }}"        # rendered with the parent's params
+          chart: payments
+          targetRevision: 1.10
+  - name: platform-app
+    source: ./argocd-app
+    params:
+      appName: platform
+      sources: "{{ .sources | toYaml }}"     # forward the parent's own list param
+```
 
 Source formats:
 

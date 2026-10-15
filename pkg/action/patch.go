@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/rickliujh/loom/internal/util"
 	"github.com/rickliujh/loom/pkg/config"
@@ -57,7 +56,10 @@ func (a *PatchAction) Execute(ctx context.Context, execCtx *ExecutionContext) er
 	}
 
 	patchPath := util.ExpandPath(execCtx.ModuleDir, path)
-	targetPath := filepath.Join(execCtx.TargetDir, target)
+	targetPath, err := resolveTargetPath(execCtx.TargetDir, "patch target", target)
+	if err != nil {
+		return actionError("patch", err)
+	}
 
 	// Log the config-relative paths; the joined absolute paths are noise.
 	if execCtx.DryRun {

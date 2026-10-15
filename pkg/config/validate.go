@@ -69,6 +69,10 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 	// Without the module directory the rendered files cannot be read at all,
 	// so an in-memory Validate never has a complete record.
 	usageComplete := moduleDir != ""
+	// structured holds the list and map params. Printing one bare is valid —
+	// the run does exactly what the template says — but is never what was
+	// meant, so it is reported as a warning.
+	structured := make(map[string]ParamType)
 	// checkTmplRefs reports references to undeclared params and folds the rest
 	// into usedParams. Templates whose references cannot be resolved statically
 	// are skipped, and mark the usage record incomplete.
@@ -101,6 +105,15 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 			return
 		}
 		checkTmplRefs(field, t.Tree.Root)
+		for _, u := range printedStructured(t.Tree.Root, structured) {
+			if u.fn == "" {
+				warn("%s: prints %s param %q directly, which writes Go's formatting (like [map[k:v]]); render it with toYaml, toJson, join or range",
+					field, structured[u.name], u.name)
+				continue
+			}
+			warn("%s: passes %s param %q to %s, which takes text; render it with toYaml, toJson, join or range",
+				field, structured[u.name], u.name, u.fn)
+		}
 	}
 
 	if lf.APIVersion != ExpectedAPIVersion {
@@ -122,6 +135,16 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 			fail("duplicate param name %q", p.Name)
 		}
 		paramNames[p.Name] = true
+		if p.Type == ParamList || p.Type == ParamMap {
+			structured[p.Name] = p.Type
+		}
+		if !p.Type.Valid() {
+			fail("param %q: unknown type %q (supported: string, list, map)", p.Name, p.Type)
+		} else if p.Default != nil {
+			if shape := ShapeOf(p.Default); shape != string(p.Type.Effective()) {
+				fail("param %q: default is a %s, but the param's type is %s", p.Name, shape, p.Type.Effective())
+			}
+		}
 	}
 
 	for _, dp := range lf.Spec.DynamicParams {
@@ -135,12 +158,18 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 		if dp.Command == "" {
 			fail("dynamicParam %q: command is required", dp.Name)
 		}
+		if !dp.Type.Valid() {
+			fail("dynamicParam %q: unknown type %q (supported: string, list, map)", dp.Name, dp.Type)
+		}
 		// Checked before the name is registered: dynamic params are evaluated
 		// in declaration order, so a command may only reference static params
 		// and earlier dynamic params, never itself or later ones.
 		checkTmpl(fmt.Sprintf("dynamicParam %q command", dp.Name), dp.Command)
 		checkTmpl(fmt.Sprintf("dynamicParam %q default", dp.Name), dp.Default)
 		paramNames[dp.Name] = true
+		if dp.Type == ParamList || dp.Type == ParamMap {
+			structured[dp.Name] = dp.Type
+		}
 	}
 
 	for i, e := range lf.Spec.Excludes {
@@ -185,7 +214,11 @@ func validate(lf *LoomFile, moduleDir string) ([]string, error) {
 		}
 		sort.Strings(paramKeys)
 		for _, k := range paramKeys {
-			checkTmpl(fmt.Sprintf("module %q param %q", m.Name, k), m.Params[k])
+			// Every string leaf of a structured value is a template (T4).
+			_, _ = tmpl.MapStrings(m.Params[k], k, func(path, v string) (string, error) {
+				checkTmpl(fmt.Sprintf("module %q param %q", m.Name, path), v)
+				return v, nil
+			})
 		}
 	}
 
@@ -586,86 +619,230 @@ func isTemplated(s string) bool {
 	return strings.Contains(s, "{{")
 }
 
-// templateParamRefs collects the names referenced as top-level fields
-// ({{ .name }}, {{ .name.sub }} → "name") in a parsed template.
-//
-// Params are a flat map[string]string, which makes most of the template
-// language statically readable: a range or with body rebinds dot to a *string*,
-// so a field reference inside it can never be a param — only the pipeline being
-// ranged over is one. Likewise {{ index . "name" }}, the one way to reach a
-// name that is not a valid template identifier, names its key literally.
-//
-// ok is false only when dot is passed somewhere its keys genuinely cannot be
-// known: a computed index key, or dot handed whole to a function. Reference
-// checking is skipped for such templates.
-func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
-	ok = true
-	var walkNode func(n ttparse.Node)
-	// walkCmd reads one command's arguments. `index . "key"` is recognised
-	// before the arguments are walked, so its dot does not read as opaque.
-	walkCmd := func(c *ttparse.CommandNode, walk func(ttparse.Node)) {
-		if len(c.Args) == 3 {
-			if id, isID := c.Args[0].(*ttparse.IdentifierNode); isID && id.Ident == "index" {
-				if _, isDot := c.Args[1].(*ttparse.DotNode); isDot {
-					if key, isStr := c.Args[2].(*ttparse.StringNode); isStr {
-						refs = append(refs, key.Text)
-						return
-					}
-				}
-			}
-		}
-		for _, arg := range c.Args {
-			walk(arg)
+// textFuncs take text. Handed a list or map, the loom ones fail the render
+// and the print builtins write Go's own formatting.
+var textFuncs = map[string]bool{
+	"upper": true, "lower": true, "quote": true, "indent": true, "nindent": true, "split": true,
+	"print": true, "printf": true, "println": true,
+}
+
+// structuredUse is one place a template treats a list or map param as text.
+type structuredUse struct {
+	name string
+	fn   string // the text function it reaches; empty when printed bare
+}
+
+// printedStructured finds the list and map params a template treats as text:
+// printed bare — {{ .sources }} or {{ $.sources }} as a whole action — or
+// handed to a function that takes text, as an argument ({{ nindent 2 .cfg }})
+// or through a pipe ({{ .cfg | nindent 2 }}). Each param and function pair is
+// reported once.
+func printedStructured(root *ttparse.ListNode, structured map[string]ParamType) []structuredUse {
+	var uses []structuredUse
+	seen := make(map[structuredUse]bool)
+	report := func(u structuredUse) {
+		if _, ok := structured[u.name]; ok && !seen[u] {
+			seen[u] = true
+			uses = append(uses, u)
 		}
 	}
-	walkPipe := func(p *ttparse.PipeNode) {
+	// paramOf names the param an argument reads whole, if any.
+	paramOf := func(a ttparse.Node, top bool) string {
+		switch a := a.(type) {
+		case *ttparse.FieldNode:
+			if top && len(a.Ident) == 1 {
+				return a.Ident[0]
+			}
+		case *ttparse.VariableNode:
+			if len(a.Ident) == 2 && a.Ident[0] == "$" {
+				return a.Ident[1]
+			}
+		}
+		return ""
+	}
+	var checkPipe func(p *ttparse.PipeNode, top bool)
+	checkPipe = func(p *ttparse.PipeNode, top bool) {
+		if p == nil {
+			return
+		}
+		carried := "" // the param flowing into the next command of the pipe
+		for _, c := range p.Cmds {
+			if id, ok := c.Args[0].(*ttparse.IdentifierNode); ok && textFuncs[id.Ident] {
+				for _, a := range c.Args[1:] {
+					if name := paramOf(a, top); name != "" {
+						report(structuredUse{name, id.Ident})
+					}
+				}
+				if carried != "" {
+					report(structuredUse{carried, id.Ident})
+				}
+			}
+			for _, a := range c.Args {
+				if sub, ok := a.(*ttparse.PipeNode); ok {
+					checkPipe(sub, top)
+				}
+			}
+			carried = ""
+			if len(c.Args) == 1 {
+				carried = paramOf(c.Args[0], top)
+			}
+		}
+	}
+	var walk func(n ttparse.Node, top bool)
+	walk = func(n ttparse.Node, top bool) {
+		switch n := n.(type) {
+		case *ttparse.ListNode:
+			if n == nil {
+				return
+			}
+			for _, item := range n.Nodes {
+				walk(item, top)
+			}
+		case *ttparse.ActionNode:
+			p := n.Pipe
+			if len(p.Decl) == 0 && len(p.Cmds) == 1 && len(p.Cmds[0].Args) == 1 {
+				if name := paramOf(p.Cmds[0].Args[0], top); name != "" {
+					report(structuredUse{name: name})
+				}
+			}
+			checkPipe(p, top)
+		case *ttparse.IfNode:
+			walk(n.List, top)
+			walk(n.ElseList, top)
+		case *ttparse.RangeNode:
+			walk(n.List, false)
+			walk(n.ElseList, top)
+		case *ttparse.WithNode:
+			walk(n.List, false)
+			walk(n.ElseList, top)
+		}
+	}
+	walk(root, true)
+	return uses
+}
+
+// TemplateRefs parses src with the loom function map and returns the params
+// it references, read exactly as reference checking reads them (see
+// templateParamRefs). ok is false when the template reaches the param map in a
+// way whose keys cannot be known — a computed index key, or dot or $ handed
+// whole to a function — and refs is then incomplete.
+func TemplateRefs(src string) (refs []string, ok bool, err error) {
+	t, err := template.New("").Funcs(tmpl.FuncMap()).Parse(src)
+	if err != nil {
+		return nil, false, err
+	}
+	refs, ok = templateParamRefs(t.Tree.Root)
+	return refs, ok, nil
+}
+
+// templateParamRefs collects the params a parsed template references:
+// {{ .name }}, {{ .name.sub }} and {{ index .name "k" }} all name "name", as
+// does {{ $.name }} anywhere in the template.
+//
+// Params hold strings, lists and maps, and dot is the param map only at a
+// template's top level and in the else branch of a range or with. Inside a
+// range or with body dot is rebound to the item — a list element, a nested
+// map, a string — so a field reference there reads the item, never a param;
+// only the pipeline being ranged over names one. $ is the exception: it is
+// the param map everywhere, so {{ $.env }} inside a range body is a reference
+// to env and is read as one. {{ index . "name" }} (or $ in place of dot), the
+// one way to reach a name that is not a valid template identifier, states its
+// key literally and is read as a reference to it.
+//
+// ok is false only when the param map is reached in a way whose keys cannot
+// be known: a computed index key, or dot or $ handed whole to a function.
+// Reference checking is skipped for such templates.
+func templateParamRefs(root *ttparse.ListNode) (refs []string, ok bool) {
+	ok = true
+	// isParamMap reports whether n evaluates to the param map itself: dot
+	// where dot has not been rebound, or a bare $.
+	isParamMap := func(n ttparse.Node, top bool) bool {
+		switch n := n.(type) {
+		case *ttparse.DotNode:
+			return top
+		case *ttparse.VariableNode:
+			return len(n.Ident) == 1 && n.Ident[0] == "$"
+		}
+		return false
+	}
+	var walkNode func(n ttparse.Node, top bool)
+	walkPipe := func(p *ttparse.PipeNode, top bool) {
 		if p == nil {
 			return
 		}
 		for _, c := range p.Cmds {
-			walkCmd(c, walkNode)
+			// `index <param map> "key"` is recognised before the arguments are
+			// walked, so its dot (or $) does not read as opaque.
+			if len(c.Args) == 3 {
+				if id, isID := c.Args[0].(*ttparse.IdentifierNode); isID && id.Ident == "index" && isParamMap(c.Args[1], top) {
+					if key, isStr := c.Args[2].(*ttparse.StringNode); isStr {
+						refs = append(refs, key.Text)
+						continue
+					}
+				}
+			}
+			for _, arg := range c.Args {
+				walkNode(arg, top)
+			}
 		}
 	}
-	walkNode = func(n ttparse.Node) {
+	walkNode = func(n ttparse.Node, top bool) {
 		if n == nil || !ok {
 			return
 		}
 		switch n := n.(type) {
 		case *ttparse.ListNode:
+			if n == nil {
+				return
+			}
 			for _, item := range n.Nodes {
-				walkNode(item)
+				walkNode(item, top)
 			}
 		case *ttparse.ActionNode:
-			walkPipe(n.Pipe)
+			walkPipe(n.Pipe, top)
 		case *ttparse.IfNode:
-			walkPipe(n.Pipe)
-			if n.List != nil {
-				walkNode(n.List)
-			}
-			if n.ElseList != nil {
-				walkNode(n.ElseList)
-			}
+			walkPipe(n.Pipe, top)
+			walkNode(n.List, top)
+			walkNode(n.ElseList, top)
 		case *ttparse.RangeNode:
-			// Only the ranged-over pipeline can name a param; inside the body
-			// dot is an element of it, never the param map.
-			walkPipe(n.Pipe)
+			// The body sees an element as dot; the else branch runs when
+			// there are none, with dot unchanged.
+			walkPipe(n.Pipe, top)
+			walkNode(n.List, false)
+			walkNode(n.ElseList, top)
 		case *ttparse.WithNode:
-			walkPipe(n.Pipe)
+			walkPipe(n.Pipe, top)
+			walkNode(n.List, false)
+			walkNode(n.ElseList, top)
 		case *ttparse.DotNode:
-			// Dot reaching here is the whole param map used opaquely — a
-			// computed index key, or dot passed to a function. Which names it
-			// reads is not visible.
+			// Dot reaching here as the param map is used opaquely — a
+			// computed index key, or dot passed to a function. Which names
+			// it reads is not visible.
+			if top {
+				ok = false
+			}
+		case *ttparse.VariableNode:
+			if n.Ident[0] != "$" {
+				return
+			}
+			if len(n.Ident) > 1 {
+				refs = append(refs, n.Ident[1])
+				return
+			}
+			// A bare $ is the whole param map, used opaquely.
 			ok = false
 		case *ttparse.TemplateNode:
-			walkPipe(n.Pipe)
+			walkPipe(n.Pipe, top)
 		case *ttparse.PipeNode:
-			walkPipe(n)
+			walkPipe(n, top)
 		case *ttparse.FieldNode:
-			refs = append(refs, n.Ident[0])
+			if top {
+				refs = append(refs, n.Ident[0])
+			}
 		case *ttparse.ChainNode:
-			walkNode(n.Node)
+			walkNode(n.Node, top)
 		}
 	}
-	walkNode(root)
+	walkNode(root, true)
 	return refs, ok
 }

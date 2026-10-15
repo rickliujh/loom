@@ -18,7 +18,7 @@ func diffExecCtx(t *testing.T, moduleDir, targetDir string) (*ExecutionContext, 
 	return &ExecutionContext{
 		ModuleDir: moduleDir,
 		TargetDir: targetDir,
-		Params:    map[string]string{},
+		Params:    map[string]any{},
 		DryRun:    true,
 		ShowDiff:  true,
 		Diffs:     diffs,
@@ -78,7 +78,7 @@ func TestNewFilesAction_DiffShowsTemplatedContent(t *testing.T) {
 	}
 
 	execCtx, diffs := diffExecCtx(t, moduleDir, targetDir)
-	execCtx.Params = map[string]string{"name": "World"}
+	execCtx.Params = map[string]any{"name": "World"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {

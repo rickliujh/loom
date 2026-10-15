@@ -3,13 +3,18 @@ package git
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
+
+	"github.com/rickliujh/loom/internal/proc"
 )
 
 // CLI fallback implementations for git operations.
 // These rely on the system git binary and its configured credential helpers,
 // SSH agent, etc. — making loom work naturally on a DevOps laptop.
+//
+// Every helper takes a context and starts git through proc.Command, so a
+// cancelled run stops the subprocess and, under `loom serve`, the whole
+// process tree git spawned (ssh, credential helpers).
 
 func cliClone(ctx context.Context, url, dir, branch string) error {
 	args := []string{"clone"}
@@ -18,7 +23,7 @@ func cliClone(ctx context.Context, url, dir, branch string) error {
 	}
 	args = append(args, url, dir)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := proc.Command(ctx, "git", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone: %w\n%s", err, output)
@@ -26,8 +31,8 @@ func cliClone(ctx context.Context, url, dir, branch string) error {
 	return nil
 }
 
-func cliCreateBranch(dir, name string) error {
-	cmd := exec.Command("git", "checkout", "-b", name)
+func cliCreateBranch(ctx context.Context, dir, name string) error {
+	cmd := proc.Command(ctx, "git", "checkout", "-b", name)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -36,8 +41,8 @@ func cliCreateBranch(dir, name string) error {
 	return nil
 }
 
-func cliAddAll(dir string) error {
-	cmd := exec.Command("git", "add", "-A")
+func cliAddAll(ctx context.Context, dir string) error {
+	cmd := proc.Command(ctx, "git", "add", "-A")
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -46,7 +51,7 @@ func cliAddAll(dir string) error {
 	return nil
 }
 
-func cliCommit(dir, message, author, email string) error {
+func cliCommit(ctx context.Context, dir, message, author, email string) error {
 	args := []string{}
 	if author != "" {
 		args = append(args, "-c", "user.name="+author)
@@ -56,7 +61,7 @@ func cliCommit(dir, message, author, email string) error {
 	}
 	args = append(args, "commit", "-m", message)
 
-	cmd := exec.Command("git", args...)
+	cmd := proc.Command(ctx, "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -73,7 +78,7 @@ func cliPush(ctx context.Context, dir, branch string) error {
 		args = append(args, "HEAD")
 	}
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := proc.Command(ctx, "git", args...)
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -82,8 +87,8 @@ func cliPush(ctx context.Context, dir, branch string) error {
 	return nil
 }
 
-func cliCurrentBranch(dir string) (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+func cliCurrentBranch(ctx context.Context, dir string) (string, error) {
+	cmd := proc.Command(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD")
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -92,8 +97,8 @@ func cliCurrentBranch(dir string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func cliRemoteURL(dir string) (string, error) {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
+func cliRemoteURL(ctx context.Context, dir string) (string, error) {
+	cmd := proc.Command(ctx, "git", "remote", "get-url", "origin")
 	cmd.Dir = dir
 	output, err := cmd.CombinedOutput()
 	if err != nil {

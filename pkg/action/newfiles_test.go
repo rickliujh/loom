@@ -21,7 +21,7 @@ func testExecCtx(t *testing.T, moduleDir, targetDir string) *ExecutionContext {
 	return &ExecutionContext{
 		ModuleDir: moduleDir,
 		TargetDir: targetDir,
-		Params:    map[string]string{},
+		Params:    map[string]any{},
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
 }
@@ -181,7 +181,7 @@ func TestNewFilesAction_TemplatedDest(t *testing.T) {
 	for _, tc := range tests {
 		targetDir := t.TempDir()
 		execCtx := testExecCtx(t, moduleDir, targetDir)
-		execCtx.Params = map[string]string{"anthos": tc.anthos}
+		execCtx.Params = map[string]any{"anthos": tc.anthos}
 
 		if err := action.Execute(context.Background(), execCtx); err != nil {
 			t.Fatalf("anthos=%s: unexpected error: %v", tc.anthos, err)
@@ -205,7 +205,7 @@ func TestNewFilesAction_TemplatedSource(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, moduleDir, targetDir)
-	execCtx.Params = map[string]string{"env": "prod"}
+	execCtx.Params = map[string]any{"env": "prod"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -228,7 +228,7 @@ func TestNewFilesAction_WithTemplating(t *testing.T) {
 	}
 
 	execCtx := testExecCtx(t, moduleDir, targetDir)
-	execCtx.Params = map[string]string{"name": "World"}
+	execCtx.Params = map[string]any{"name": "World"}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err != nil {

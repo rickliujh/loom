@@ -22,10 +22,16 @@ type Spec struct {
 	Operations    []Operation       `yaml:"operations,omitempty"`
 }
 
+// ParamDef declares a static param. It decodes itself (see params.go) so a
+// structured default keeps its scalars' written form.
 type ParamDef struct {
-	Name     string `yaml:"name"`
-	Required bool   `yaml:"required,omitempty"`
-	Default  string `yaml:"default,omitempty"`
+	Name     string    `yaml:"name"`
+	Type     ParamType `yaml:"type,omitempty"`
+	Required bool      `yaml:"required,omitempty"`
+	// Default is used when no value is supplied: a string for a string param,
+	// []any for a list, map[string]any for a map. A default whose shape does
+	// not match Type is a validation error.
+	Default any `yaml:"default,omitempty"`
 }
 
 // DynamicParamDef defines a parameter whose value comes from a shell command.
@@ -34,7 +40,10 @@ type ParamDef struct {
 type DynamicParamDef struct {
 	Name    string `yaml:"name"`
 	Command string `yaml:"command"`
-	Default string `yaml:"default,omitempty"` // Fallback if not needed; command takes priority.
+	// Type is the shape the command's output is parsed into. For list and map
+	// the output — or the fallback default — must be YAML of that shape.
+	Type    ParamType `yaml:"type,omitempty"`
+	Default string    `yaml:"default,omitempty"` // Fallback if not needed; command takes priority.
 }
 
 type TargetSpec struct {
@@ -44,9 +53,12 @@ type TargetSpec struct {
 }
 
 type ModuleRef struct {
-	Name   string            `yaml:"name"`
-	Source string            `yaml:"source"`
-	Params map[string]string `yaml:"params,omitempty"`
+	Name   string `yaml:"name"`
+	Source string `yaml:"source"`
+	// Params are the values handed to the child: strings, lists or maps. Every
+	// string in them, at any depth, is a template rendered with the parent's
+	// params before the child sees it.
+	Params ParamValues `yaml:"params,omitempty"`
 	// If is an optional shell predicate gating child execution. Empty means
 	// always run. Templated with the parent's params, then run via sh -c in
 	// the child's resolved target dir: exit 0 runs the child, non-zero skips it.

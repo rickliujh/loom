@@ -1,6 +1,7 @@
 package module
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -75,7 +76,7 @@ func TestInspect_IN1_ExecutesNothing(t *testing.T) {
 	if stamp.State != ParamDynamic {
 		t.Errorf("stamp state = %q, want %q", stamp.State, ParamDynamic)
 	}
-	if stamp.Value != "" {
+	if stamp.Value != nil {
 		t.Errorf("stamp has value %q; inspect must not produce one", stamp.Value)
 	}
 	// The gated operation is still described — inspect shows what could run.
@@ -430,7 +431,7 @@ func TestInspect_IN6_ParamStates(t *testing.T) {
       command: "hostname"
 `)
 
-	tree := inspectDir(t, dir, InspectOptions{Params: map[string]string{
+	tree := inspectDir(t, dir, InspectOptions{Params: map[string]any{
 		"supplied":   "yes",
 		"overridden": "cli-wins",
 	}})
@@ -438,13 +439,13 @@ func TestInspect_IN6_ParamStates(t *testing.T) {
 	cases := []struct {
 		name  string
 		state ParamState
-		value string
+		value any
 	}{
 		{"supplied", ParamProvided, "yes"},
 		{"fromDefault", ParamDefault, "fallback"},
-		{"needed", ParamMissing, ""},
-		{"optional", ParamUnset, ""},
-		{"stamp", ParamDynamic, ""},
+		{"needed", ParamMissing, nil},
+		{"optional", ParamUnset, nil},
+		{"stamp", ParamDynamic, nil},
 		{"overridden", ParamProvided, "cli-wins"},
 	}
 	for _, tc := range cases {
@@ -491,7 +492,7 @@ func TestInspect_IN7_ParamTracedToParentExpression(t *testing.T) {
 		t.Errorf("namespace From = %q, want the authored expression", ns.From)
 	}
 	// A literal hand-off adds nothing to trace, so From stays empty.
-	if lit := findParam(t, child, "literal"); lit.From != "" {
+	if lit := findParam(t, child, "literal"); lit.From != nil {
 		t.Errorf("literal From = %q, want empty for a non-templated value", lit.From)
 	}
 }
@@ -524,10 +525,10 @@ func TestInspect_IN8_UnresolvedTemplatesNeverBecomeValues(t *testing.T) {
 	if stamp.State != ParamUnresolved {
 		t.Errorf("stamp state = %q, want %q", stamp.State, ParamUnresolved)
 	}
-	if stamp.Value != "" {
-		t.Errorf("stamp value = %q, want empty rather than a placeholder", stamp.Value)
+	if stamp.Value != nil {
+		t.Errorf("stamp value = %q, want none rather than a placeholder", stamp.Value)
 	}
-	if strings.Contains(stamp.Value, noValue) {
+	if strings.Contains(fmt.Sprint(stamp.Value), "<no value>") {
 		t.Error("a template placeholder leaked into a parameter value")
 	}
 	if got := tree.Target.FeatureBranch; got != "loom/{{ .commitHash }}" {
@@ -827,4 +828,109 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// SP15: a child param its parent could not render is unresolved in the child
+// too — its template text never stands in for a value in the child's own
+// templates, whether the whole value or a leaf of a structured one failed.
+func TestInspect_SP15_UnrenderedHandOffNeverFeedsChildTemplates(t *testing.T) {
+	root := t.TempDir()
+	writeModule(t, root, "child", `spec:
+  params:
+    - name: stamp
+    - name: tags
+      type: list
+  target:
+    url: "https://example.com/repo.git"
+    featureBranch: "loom/{{ .stamp }}-{{ .tags | join \",\" }}"
+`)
+	dir := writeModule(t, root, "parent", `spec:
+  dynamicParams:
+    - name: commitHash
+      command: "git rev-parse --short HEAD"
+  modules:
+    - name: c
+      source: ../child
+      params:
+        stamp: '{{ if eq .commitHash "x" }}a{{ else }}b{{ end }}'
+        tags: ['{{ printf "%d" .commitHash }}', '{{ len .commitHash }}', literal]
+`)
+	child := inspectDir(t, dir, InspectOptions{}).Children[0]
+	for _, name := range []string{"stamp", "tags"} {
+		if p := findParam(t, child, name); p.State != ParamUnresolved || p.Value != nil {
+			t.Errorf("%s = %s %#v, want unresolved with no value", name, p.State, p.Value)
+		}
+	}
+	if got := child.Target.FeatureBranch; got != `loom/{{ .stamp }}-{{ .tags | join "," }}` {
+		t.Errorf("featureBranch = %q, want the template text kept", got)
+	}
+}
+
+// SP15: whether a run-time-only value is tested (if, with, not, eq), printed
+// with any verb, indexed, or ranged over, the template stays unresolved — even
+// when the branch that would print it is not the one taken.
+func TestInspect_SP15_RunTimeValueUnresolvedInEveryPosition(t *testing.T) {
+	templates := []string{
+		`loom/{{ if .commitHash }}dyn{{ else }}nodyn{{ end }}`,
+		`loom/{{ with .commitHash }}x{{ end }}y`,
+		`loom/{{ if not .commitHash }}x{{ end }}`,
+		`loom/{{ if eq .commitHash "a" }}x{{ end }}`,
+		`loom/{{ printf "%d" .commitHash }}`,
+		`loom/{{ default "main" .commitHash }}`,
+		`loom/{{ range .commitHash }}x{{ end }}`,
+		`loom/{{ index . "commitHash" }}`,
+		`loom/{{ range .list }}{{ $.commitHash }}{{ end }}`,
+		`loom/{{ template "x" . }}`,
+	}
+	for _, tmplText := range templates {
+		root := t.TempDir()
+		dir := writeModule(t, root, "m", `spec:
+  params:
+    - name: list
+      type: list
+      default: [a]
+  dynamicParams:
+    - name: commitHash
+      command: "git rev-parse --short HEAD"
+  target:
+    url: "https://example.com/repo.git"
+    featureBranch: '`+tmplText+`'
+  modules:
+    - name: c
+      source: ../c
+      params:
+        stamp: '`+tmplText+`'
+`)
+		writeModule(t, root, "c", `spec:
+  params:
+    - name: stamp
+`)
+		tree := inspectDir(t, dir, InspectOptions{})
+		if got := tree.Target.FeatureBranch; got != tmplText {
+			t.Errorf("featureBranch %s rendered as %q, want it kept unresolved", tmplText, got)
+		}
+		if p := findParam(t, tree.Children[0], "stamp"); p.State != ParamUnresolved {
+			t.Errorf("child stamp from %s = %s %#v, want unresolved", tmplText, p.State, p.Value)
+		}
+	}
+}
+
+// SP6/SP15: an unset optional param is "" (or [] / {}) at run time, so inspect
+// renders templates that use it instead of calling them unresolved.
+func TestInspect_SP15_UnsetParamRendersAsItsEmptyValue(t *testing.T) {
+	root := t.TempDir()
+	dir := writeModule(t, root, "m", `spec:
+  params:
+    - name: suffix
+    - name: extra
+      type: list
+  target:
+    url: "https://example.com/repo.git"
+    branch: '{{ default "x" .suffix }}'
+    featureBranch: 'loom/{{ len .extra }}{{ .suffix }}'
+`)
+	tree := inspectDir(t, dir, InspectOptions{})
+	if tree.Target.Branch != "x" || tree.Target.FeatureBranch != "loom/0" {
+		t.Errorf("target = %+v, want branch x and featureBranch loom/0", tree.Target)
+	}
 }

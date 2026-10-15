@@ -16,14 +16,25 @@ import (
 
 // Repository is the interface for git operations.
 // All methods try the go-git library first and fall back to the git CLI.
+//
+// The ...Context variants refuse to start once ctx is done and bound the CLI
+// fallback by ctx; go-git's local operations take no context, so a go-git
+// step already under way runs to completion. The context-free methods are
+// the same operations under context.Background(), kept so existing callers
+// compile unchanged.
 type Repository interface {
 	Dir() string
 	CreateBranch(name string) error
+	CreateBranchContext(ctx context.Context, name string) error
 	AddAll() error
+	AddAllContext(ctx context.Context) error
 	Commit(message, author, email string) error
+	CommitContext(ctx context.Context, message, author, email string) error
 	Push(ctx context.Context, token string) error
 	CurrentBranch() (string, error)
+	CurrentBranchContext(ctx context.Context) (string, error)
 	RemoteURL() (string, error)
+	RemoteURLContext(ctx context.Context) (string, error)
 }
 
 // Repo implements Repository using go-git with CLI fallback.
@@ -83,6 +94,13 @@ func (r *Repo) Dir() string { return r.dir }
 // ---------------------------------------------------------------------------
 
 func (r *Repo) CreateBranch(name string) error {
+	return r.CreateBranchContext(context.Background(), name)
+}
+
+func (r *Repo) CreateBranchContext(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.gg != nil {
 		err := r.createBranchLib(name)
 		if err == nil {
@@ -93,7 +111,7 @@ func (r *Repo) CreateBranch(name string) error {
 		}
 		r.logger.Debug("go-git CreateBranch failed, falling back to git CLI", "error", err)
 	}
-	return cliCreateBranch(r.dir, name)
+	return cliCreateBranch(ctx, r.dir, name)
 }
 
 func (r *Repo) createBranchLib(name string) error {
@@ -117,6 +135,13 @@ func (r *Repo) createBranchLib(name string) error {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) AddAll() error {
+	return r.AddAllContext(context.Background())
+}
+
+func (r *Repo) AddAllContext(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.gg != nil {
 		wt, err := r.gg.Worktree()
 		if err == nil {
@@ -129,7 +154,7 @@ func (r *Repo) AddAll() error {
 			}
 		}
 	}
-	return cliAddAll(r.dir)
+	return cliAddAll(ctx, r.dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +162,13 @@ func (r *Repo) AddAll() error {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) Commit(message, author, email string) error {
+	return r.CommitContext(context.Background(), message, author, email)
+}
+
+func (r *Repo) CommitContext(ctx context.Context, message, author, email string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if r.gg != nil && author != "" && email != "" {
 		wt, err := r.gg.Worktree()
 		if err == nil {
@@ -156,7 +188,7 @@ func (r *Repo) Commit(message, author, email string) error {
 			r.logger.Debug("go-git Commit failed, falling back to git CLI", "error", cerr)
 		}
 	}
-	return cliCommit(r.dir, message, author, email)
+	return cliCommit(ctx, r.dir, message, author, email)
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +200,7 @@ func (r *Repo) Push(ctx context.Context, token string) error {
 	// go-git and CLI paths.  This avoids the "src refspec HEAD does not match
 	// any" error that occurs when a feature branch created by one go-git
 	// instance is pushed from another.
-	branch, _ := r.CurrentBranch()
+	branch, _ := r.CurrentBranchContext(ctx)
 
 	if r.gg != nil {
 		opts := &gogit.PushOptions{}
@@ -201,6 +233,13 @@ func (r *Repo) Push(ctx context.Context, token string) error {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) CurrentBranch() (string, error) {
+	return r.CurrentBranchContext(context.Background())
+}
+
+func (r *Repo) CurrentBranchContext(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if r.gg != nil {
 		head, err := r.gg.Head()
 		if err == nil {
@@ -211,7 +250,7 @@ func (r *Repo) CurrentBranch() (string, error) {
 		}
 		r.logger.Debug("go-git CurrentBranch failed, falling back to git CLI", "error", err)
 	}
-	return cliCurrentBranch(r.dir)
+	return cliCurrentBranch(ctx, r.dir)
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +258,13 @@ func (r *Repo) CurrentBranch() (string, error) {
 // ---------------------------------------------------------------------------
 
 func (r *Repo) RemoteURL() (string, error) {
+	return r.RemoteURLContext(context.Background())
+}
+
+func (r *Repo) RemoteURLContext(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
 	if r.gg != nil {
 		remote, err := r.gg.Remote("origin")
 		if err == nil {
@@ -232,7 +278,7 @@ func (r *Repo) RemoteURL() (string, error) {
 		}
 		r.logger.Debug("go-git RemoteURL failed, falling back to git CLI", "error", err)
 	}
-	return cliRemoteURL(r.dir)
+	return cliRemoteURL(ctx, r.dir)
 }
 
 // hasBinary reports whether a binary is available on PATH.

@@ -5,7 +5,17 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
+
+// cmdWithContext stands in for the command a RunE receives when a test calls
+// it directly, carrying a context as Execute would.
+func cmdWithContext(t *testing.T) *cobra.Command {
+	c := &cobra.Command{}
+	c.SetContext(t.Context())
+	return c
+}
 
 // writeTree builds a parent module referencing ./child, where the child renders
 // a template file. childTmpl is the body of that file, so a test can plant a
@@ -55,7 +65,7 @@ func TestValidate_DefaultSkipsReferencedModules(t *testing.T) {
 	resetFlags()
 	root := writeTree(t, "name: {{ .typo }}\n")
 
-	if err := validateModule(nil, []string{root}); err != nil {
+	if err := validateModule(cmdWithContext(t), []string{root}); err != nil {
 		t.Fatalf("child violations must not fail a non-recursive validate: %v", err)
 	}
 }
@@ -65,7 +75,7 @@ func TestValidate_RecursiveReportsReferencedModules(t *testing.T) {
 	validateRecursive = true
 	root := writeTree(t, "name: {{ .typo }}\n")
 
-	err := validateModule(nil, []string{root})
+	err := validateModule(cmdWithContext(t), []string{root})
 	if err == nil {
 		t.Fatal("expected the child's violation to fail a recursive validate")
 	}
@@ -82,7 +92,7 @@ func TestValidate_RecursiveAcceptsCleanTree(t *testing.T) {
 	validateRecursive = true
 	root := writeTree(t, "name: {{ .svc }}\n")
 
-	if err := validateModule(nil, []string{root}); err != nil {
+	if err := validateModule(cmdWithContext(t), []string{root}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -108,7 +118,7 @@ spec:
   operations: []
 `)
 
-	if err := validateModule(nil, []string{root}); err != nil {
+	if err := validateModule(cmdWithContext(t), []string{root}); err != nil {
 		t.Fatalf("templated source must be skipped, not fail: %v", err)
 	}
 }
@@ -132,7 +142,7 @@ spec:
         command: "true"
 `)
 
-	if err := validateModule(nil, []string{root}); err != nil {
+	if err := validateModule(cmdWithContext(t), []string{root}); err != nil {
 		t.Fatalf("unused param must not fail validate: %v", err)
 	}
 }

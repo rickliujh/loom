@@ -2,6 +2,7 @@ package module
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ func TestResolveParams_ProvidedOverridesDefault(t *testing.T) {
 	declared := []config.ParamDef{
 		{Name: "foo", Default: "default-value"},
 	}
-	provided := map[string]string{"foo": "provided-value"}
+	provided := map[string]any{"foo": "provided-value"}
 
 	result, err := resolveParams(declared, nil, provided, testLogger())
 	if err != nil {
@@ -68,7 +69,7 @@ func TestResolveParams_UndeclaredParamRejected(t *testing.T) {
 	declared := []config.ParamDef{
 		{Name: "foo", Default: "x"},
 	}
-	provided := map[string]string{"foo": "x", "bar": "y"}
+	provided := map[string]any{"foo": "x", "bar": "y"}
 
 	_, err := resolveParams(declared, nil, provided, testLogger())
 	if err == nil {
@@ -87,7 +88,7 @@ func TestResolveParams_DynamicParamNotRejected(t *testing.T) {
 	dynamic := []config.DynamicParamDef{
 		{Name: "bar", Command: "echo y"},
 	}
-	provided := map[string]string{"foo": "x", "bar": "override"}
+	provided := map[string]any{"foo": "x", "bar": "override"}
 
 	_, err := resolveParams(declared, dynamic, provided, testLogger())
 	if err != nil {
@@ -102,9 +103,9 @@ func TestResolveDynamicParams_CommandEvaluated(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "echo hello-dynamic"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,9 +119,9 @@ func TestResolveDynamicParams_CommandTrimsTrailingNewlines(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "printf 'value\\n\\n'"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,13 +135,13 @@ func TestResolveDynamicParams_CLIOverrideSkipsCommandWithWarning(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "echo should-not-run"},
 	}
-	resolved := make(map[string]string)
-	provided := map[string]string{"foo": "cli-value"}
+	resolved := make(map[string]any)
+	provided := map[string]any{"foo": "cli-value"}
 
 	var buf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
-	err := resolveDynamicParams(declared, resolved, provided, ".", logger)
+	err := resolveDynamicParams(context.Background(), declared, resolved, provided, ".", logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,9 +160,9 @@ func TestResolveDynamicParams_CommandFailsNoDefault(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err == nil {
 		t.Fatal("expected error for failed command")
 	}
@@ -172,9 +173,9 @@ func TestResolveDynamicParams_CommandFailsFallsBackToDefault(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1", Default: "fallback"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,9 +189,9 @@ func TestResolveDynamicParams_DefaultTemplatedWithParams(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1", Default: "{{ .env }}-unknown"},
 	}
-	resolved := map[string]string{"env": "prod"}
+	resolved := map[string]any{"env": "prod"}
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,9 +205,9 @@ func TestResolveDynamicParams_DefaultTemplateError(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "foo", Command: "exit 1", Default: "{{ .env"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err == nil {
 		t.Fatal("expected error for unrenderable default")
 	}
@@ -220,9 +221,9 @@ func TestResolveDynamicParams_CommandTemplatedWithParams(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "greeting", Command: "echo hello-{{ .name }}"},
 	}
-	resolved := map[string]string{"name": "world"}
+	resolved := map[string]any{"name": "world"}
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +246,7 @@ func TestResolveDynamicParams_EvaluatedAfterStaticParams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = resolveDynamicParams(dynamicParams, resolved, nil, ".", testLogger())
+	err = resolveDynamicParams(context.Background(), dynamicParams, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,9 +262,9 @@ func TestResolveDynamicParams_ChainedDynamic(t *testing.T) {
 		{Name: "first", Command: "echo alpha"},
 		{Name: "second", Command: "echo {{ .first }}-beta"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, ".", testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, ".", testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,9 +283,9 @@ func TestResolveDynamicParams_CommandRunsInModuleDir(t *testing.T) {
 	declared := []config.DynamicParamDef{
 		{Name: "cwd", Command: "pwd"},
 	}
-	resolved := make(map[string]string)
+	resolved := make(map[string]any)
 
-	err := resolveDynamicParams(declared, resolved, nil, dir, testLogger())
+	err := resolveDynamicParams(context.Background(), declared, resolved, nil, dir, testLogger())
 	if err != nil {
 		t.Fatal(err)
 	}

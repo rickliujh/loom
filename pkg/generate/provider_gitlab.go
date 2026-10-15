@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"os/exec"
 	"strconv"
 	"strings"
 
 	gogitlab "gitlab.com/gitlab-org/api/client-go"
+
+	"github.com/rickliujh/loom/internal/proc"
 )
 
 // GitLabDiffProvider fetches MR diffs from GitLab.
@@ -55,7 +56,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 	}
 
 	logger.Debug("fetching MR metadata", "project", projectPath, "mrIID", mrIID)
-	mr, resp, err := client.MergeRequests.GetMergeRequest(projectPath, mrIID, nil)
+	mr, resp, err := client.MergeRequests.GetMergeRequest(projectPath, mrIID, nil, gogitlab.WithContext(ctx))
 	if err != nil {
 		status := 0
 		if resp != nil {
@@ -91,7 +92,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 
 	// Fetch MR diffs via /diffs endpoint (GitLab 15.7+).
 	logger.Debug("listing MR diffs via API")
-	diffs, resp, err := client.MergeRequests.ListMergeRequestDiffs(projectPath, mrIID, nil)
+	diffs, resp, err := client.MergeRequests.ListMergeRequestDiffs(projectPath, mrIID, nil, gogitlab.WithContext(ctx))
 	if err != nil {
 		status := 0
 		if resp != nil {
@@ -122,7 +123,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 			logger.Debug("fetching file content at head ref", "file", fc.Path, "ref", headRef)
 			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, fc.Path, &gogitlab.GetRawFileOptions{
 				Ref: gogitlab.Ptr(headRef),
-			})
+			}, gogitlab.WithContext(ctx))
 			if err != nil {
 				logger.Warn("failed to fetch file content", "file", fc.Path, "error", err)
 				continue
@@ -141,7 +142,7 @@ func (p *GitLabDiffProvider) fetchAPI(ctx context.Context, baseURL, projectPath 
 			logger.Debug("fetching file content at base ref", "file", oldPath, "ref", baseRef)
 			content, _, err := client.RepositoryFiles.GetRawFile(projectPath, oldPath, &gogitlab.GetRawFileOptions{
 				Ref: gogitlab.Ptr(baseRef),
-			})
+			}, gogitlab.WithContext(ctx))
 			if err != nil {
 				logger.Warn("failed to fetch base content", "file", oldPath, "error", err)
 			} else {
@@ -316,7 +317,7 @@ func glabAPI(ctx context.Context, path, hostname string, logger *slog.Logger) ([
 	args = append(args, path)
 
 	logger.Debug("executing glab", "args", args)
-	cmd := exec.CommandContext(ctx, "glab", args...)
+	cmd := proc.Command(ctx, "glab", args...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

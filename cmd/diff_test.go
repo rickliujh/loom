@@ -330,7 +330,10 @@ spec:
   operations: []
 `)
 
-	// No --target-path: the temp workspace must not survive the run.
+	// No --target-path: the temp workspace must not survive the run. The
+	// count is taken in a private temp dir: other packages' tests create
+	// loom-diff-* workspaces in the shared one at the same time.
+	t.Setenv("TMPDIR", t.TempDir())
 	before, _ := filepath.Glob(filepath.Join(os.TempDir(), "loom-diff-*"))
 	captureStdout(t, func() {
 		rootCmd.SetArgs([]string{"diff", moduleDir})
@@ -354,5 +357,50 @@ spec:
 	})
 	if _, err := os.Stat(filepath.Join(keep, "00-cleanup-demo")); err != nil {
 		t.Errorf("expected clone kept at %s/00-cleanup-demo: %v", keep, err)
+	}
+}
+
+// DF2: a quick diff names each file by its path from the target's root — for
+// newFiles, dest joined with the file's path under source — so it reads the
+// same as the full-mode git diff of the same run.
+func TestDiff_DF2_QuickPathsFromTargetRoot(t *testing.T) {
+	upstream := t.TempDir()
+	initGitRepoBranch(t, upstream, "main", map[string]string{"README.md": "readme\n"})
+
+	moduleDir := t.TempDir()
+	srcDir := filepath.Join(moduleDir, "templates", "sub")
+	os.MkdirAll(srcDir, 0o755)
+	os.WriteFile(filepath.Join(srcDir, "app.yaml"), []byte("name: {{ .app }}\n"), 0o644)
+	writeLoomYAML(t, moduleDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: paths
+spec:
+  params:
+    - name: app
+      default: web
+  target:
+    url: "file://`+upstream+`"
+    branch: main
+  operations:
+    - name: render
+      newFiles:
+        source: templates
+        dest: "apps/{{ .app }}"
+`)
+
+	const want = "apps/web/sub/app.yaml"
+	for _, args := range [][]string{{"--quick"}, {}} {
+		resetFlags()
+		out := captureStdout(t, func() {
+			rootCmd.SetArgs(append([]string{"diff", moduleDir}, args...))
+			if err := rootCmd.Execute(); err != nil {
+				t.Fatalf("diff %v: %v", args, err)
+			}
+		})
+		if !strings.Contains(out, "+++ "+want+"\n") && !strings.Contains(out, "+++ b/"+want+"\n") {
+			t.Errorf("diff %v should name %s from the target's root, got:\n%s", args, want, out)
+		}
 	}
 }

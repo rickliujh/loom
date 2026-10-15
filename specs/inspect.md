@@ -11,7 +11,7 @@ Modules inspected conform to the module specification defined in [`specs/module.
 | Input | Description |
 |-------|-------------|
 | `source` | Optional. Module path or git URL, resolved exactly as `run` resolves it (including the `//subdir` form). Defaults to `.` (current directory). |
-| `params` | Optional. `map[string]string` supplied for the root module, as `run` accepts them. |
+| `params` | Optional. Values supplied for the root module, as `run` accepts them (`-p`, `--params-file`); typed against the declared param types (structured-params SP10, SP15). |
 | `maxDepth` | Optional. Levels of module to describe. `1` is the subject alone; `0` or less means all of them. Defaults to `1`. |
 | `module` | Optional. Instance name, or `/`-separated path of instance names, selecting which module is described. Defaults to the root. |
 | `noFetch` | Optional. When set, modules whose source is a git URL are listed but not cloned. Defaults to false. |
@@ -96,7 +96,7 @@ For each module, both `spec.params` and `spec.dynamicParams` are reported, each 
 | `default` | Nothing was supplied, so the declared `default` applies. |
 | `dynamic` | The value comes from a `dynamicParams` command at run time. Inspect reports the command, not a value. |
 | `missing` | Required, with no default and nothing supplying it. |
-| `unset` | Optional, with no default and nothing supplying it; it renders as the empty string. |
+| `unset` | Optional, with no default and nothing supplying it; it renders as its type's empty value (`""`, `[]`, `{}`). |
 | `unresolved` | Supplied by the parent, but through an expression the parent cannot resolve statically. |
 
 Resolution mirrors the module spec: a supplied value wins over a default (P1), and a supplied value also wins over a `dynamicParams` command (P6), so a dynamic parameter that was supplied is reported as `provided`.
@@ -107,7 +107,7 @@ A parameter a parent supplies through `modules[].params` is reported with that e
 
 #### IN8: Templates that need run-time values are reported as unresolved, never as a value
 
-Inspect renders templates against only the parameters whose values it actually knows — those in state `provided` or `default`. A template referencing anything else (a dynamic parameter, a missing one) cannot be resolved:
+Inspect renders templates against only the parameters whose values it actually knows — those in state `provided` or `default`, and `unset` ones as their type's empty value. A template referencing anything else (a dynamic parameter, a missing one, an unresolved one) cannot be resolved, whichever way it uses the value — the decision is made from the template's references, not its output (structured-params SP15):
 
 - A `modules[].params` value that fails to resolve makes that child parameter `unresolved`, with no value. A placeholder is never passed down as if it were a real value.
 - A `modules[].source` that fails to resolve is an error on that child, and the walk does not descend into it — the module it names is not knowable.

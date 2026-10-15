@@ -167,10 +167,13 @@ Parameters are the inputs to your module. They're injected into every template �
 | Field | Description |
 |-------|-------------|
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `type` | `string` (default), `list`, or `map` |
 | `required` | If `true`, the run fails when this param is not provided |
-| `default` | Fallback value when the param is not provided |
+| `default` | Fallback value when the param is not provided — YAML of the param's shape |
 
 Resolution priority: **provided (`-p`) → default → required error**.
+
+Params can be structured. A `list` or `map` param holds real YAML — say, the `sources` of a multi-source Argo CD `Application` — which a params file gives as nested YAML, `-p` as a YAML string (`-p sources='[{repoURL: https://x, chart: y}]'`), and a parent module as a literal list. Templates `range` over it or write it back with `toYaml`, and numbers keep the text they were written with (`1.10` stays `1.10`). See [Structured Parameters](docs/guide/structured-params.md).
 
 ### `spec.dynamicParams`
 
@@ -276,7 +279,7 @@ Child modules to execute before this module's operations. This is how you compos
 |-------|-------------|
 | `name` | Identifier for the child module |
 | `source` | Path to the child module — local (`./sub-module`) or a Git URL |
-| `params` | Parameters to pass down, rendered through the parent's context |
+| `params` | Parameters to pass down — strings, lists or maps — every string rendered through the parent's context |
 
 Child modules execute first, in order. Then the parent's operations run. This lets you build layered workflows: a base module that creates the namespace, a service module that creates the ArgoCD app, a policy module that adds the Gatekeeper constraint — all composed from a single root module.
 
@@ -603,8 +606,11 @@ Available functions:
 |----------|---------|--------|
 | Parameter access | `{{ .serviceName }}` | `payments` |
 | Default value | `{{ default "prod" .env }}` | `prod` if `.env` is empty |
+| Required value | `{{ required "repoURL is required" .repoURL }}` | the value, or the run fails with the message |
 | Uppercase | `{{ upper .serviceName }}` | `PAYMENTS` |
 | Lowercase | `{{ lower .serviceName }}` | `payments` |
+
+More — `toYaml`, `toJson`, `fromYaml`, `split`, `join`, `hasKey`, `indent`, `nindent`, `quote` — in the [templates guide](docs/guide/templates.md). A template that prints a missing value fails the run rather than writing `<no value>` into your repo.
 
 Templates work in:
 - File contents (newFiles)
@@ -928,6 +934,35 @@ loom validate [path]
 ```
 
 Validates: `apiVersion`, `kind`, required metadata, unique parameter names, unique operation names, and that each operation has exactly one action type.
+
+### `loom skill`
+
+```bash
+loom skill                        # the guide for AI agents, then the list of topics
+loom skill list                   # the topics alone
+loom skill reference/op-patch     # one topic ("op-patch" works too)
+```
+
+Prints Loom's guide for AI agents, straight from the binary. Nothing is installed and nothing is fetched: the documentation is embedded in `loom` itself, so an agent always reads the text that matches the version it is about to run.
+
+To point an agent at it, add one line to your `AGENTS.md`, rules file, or skill:
+
+```markdown
+Before working with Loom modules, run `loom skill` and follow what it prints.
+```
+
+Every guide page, reference page and behavioral spec is available as a topic.
+
+### `loom serve`
+
+```bash
+loom serve                          # the modules under the current directory
+loom serve --root ~/gitops --open   # another root, and open the browser
+```
+
+Starts a web UI on `127.0.0.1:7788` for browsing, editing, inspecting, diffing and running the modules under `--root`. It prints one URL whose fragment carries a per-process token; opening it signs the browser in. Every run, diff, `generate` and `bulk` started from the UI goes through the same code as the command, streams its logs and changes live, is kept in a job history, and shows the `loom` command line that repeats it.
+
+The server listens on loopback only unless you pass `--allow-remote` (prefer an SSH tunnel), requires the token on every API call, and reads and writes only inside the roots. Browsing, inspecting and validating never execute a module's commands. See [`loom serve`](docs/reference/cli-serve.md) and the [API reference](docs/reference/serve-api.md).
 
 ### `loom version`
 

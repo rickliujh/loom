@@ -81,11 +81,24 @@ loom bulk ./onboard-service -o ./bulk-onboard --items items.yaml --name-param se
 
 `--name-param serviceName` names each child entry after its service (`onboard-service-payments`, …) instead of an index, which makes run logs and `--local-run` directories identifiable.
 
-Items are validated against the module's declared params before anything is written: undeclared keys and missing required params fail immediately, mirroring what `loom run` would reject later.
+Items are validated against the module's declared params before anything is written: undeclared keys, missing required params, and values that do not fit a param's `type` fail immediately, mirroring what `loom run` would reject later.
+
+An item may give a `list` or `map` param real nested YAML; it is written into the wrapper as a Jsonnet array or object:
+
+```yaml
+# items.yaml
+- serviceName: payments
+  sources:
+    - repoURL: https://charts.example.com
+      chart: payments
+      targetRevision: 1.10
+```
+
+A version-like number such as `1.10` is written as the Jsonnet string `'1.10'`, because as a Jsonnet number it would evaluate to `1.1`.
 
 ## Behavior notes
 
 - **Never overwrites**: if the output directory already contains a `loom.yaml` or `loom.jsonnet`, the command fails.
 - **Self-verifying**: the generated wrapper is loaded back through the standard Jsonnet loader and validator before the command reports success.
-- **Placeholder values**: required params become `'CHANGEME'` (annotated), defaulted params carry their default, dynamic params are omitted (they resolve inside the child at run time).
+- **Placeholder values**: required params become `'CHANGEME'` (annotated), defaulted params carry their default, optional `list`/`map` params start as `[]`/`{}`, dynamic params are omitted (they resolve inside the child at run time).
 - **PR topology**: if the child module declares its own `spec.target`, every item produces its own branch and PR; the generated file carries a note explaining how to restructure for a single batch PR. `loom bulk` never modifies the child module. See [Bulk Runs](/guide/bulk-runs).

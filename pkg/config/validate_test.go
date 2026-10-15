@@ -401,7 +401,7 @@ func TestValidate_ModuleValid(t *testing.T) {
 	lf := validLoomFile()
 	lf.Spec.Params = []ParamDef{{Name: "svc"}}
 	lf.Spec.Modules = []ModuleRef{
-		{Name: "onboard-{{ .svc }}", Source: "../child", Params: map[string]string{"svc": "{{ .svc }}"}},
+		{Name: "onboard-{{ .svc }}", Source: "../child", Params: map[string]any{"svc": "{{ .svc }}"}},
 	}
 
 	if err := Validate(lf); err != nil {
@@ -1633,7 +1633,7 @@ func TestValidateInDir_ParamUsedOnlyByChildModule(t *testing.T) {
 	lf := validLoomFile()
 	lf.Spec.Params = []ParamDef{{Name: "svc"}}
 	lf.Spec.Modules = []ModuleRef{
-		{Name: "child", Source: "./child", Params: map[string]string{"name": "{{ .svc }}"}},
+		{Name: "child", Source: "./child", Params: map[string]any{"name": "{{ .svc }}"}},
 	}
 
 	if w := warnOnly(t, lf, dir); len(w) != 0 {
@@ -1713,9 +1713,10 @@ func TestStaticPrefixDir(t *testing.T) {
 	}
 }
 
-// A range body rebinds dot to a string element of a flat map, so nothing in it
-// can name a param — only the ranged-over pipeline can. The analysis therefore
-// stays on, and still reports the params the template really does not touch.
+// A range body rebinds dot to an element of the ranged value, so a field
+// reference in it reads the element and can never name a param — only the
+// ranged-over pipeline (and $) can. The analysis therefore stays on, and still
+// reports the params the template really does not touch.
 func TestValidateInDir_RangeDoesNotDisableUnusedCheck(t *testing.T) {
 	lf, dir := tmplModule(t, map[string]string{"app.yaml": "{{ range .list }}x{{ end }}\n"}, "list", "svc")
 

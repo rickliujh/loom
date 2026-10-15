@@ -32,7 +32,7 @@ func TestDiffHeader_SubmoduleGetsRootFreeHandoff(t *testing.T) {
 	// root and item, then a "▸ item › submodule" hand-off with no root chip.
 	got := DiffHeader([]string{"bulk-deploy-k8s", "deploy-k8s-2", "autocert"}, "acme/cluster-2 (main)", false)
 	want := "\n[≡ bulk-deploy-k8s ≡] deploy-k8s-2\n" +
-		"▸ deploy-k8s-2 › autocert\n" +
+		"▸ deploy-k8s-2 › [autocert]\n" +
 		"acme/cluster-2 (main)\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -44,8 +44,8 @@ func TestDiffHeader_ColorTurnBannerAndHandoff(t *testing.T) {
 	want := "\n" +
 		diffColorInvert + diffColorRoot + diffColorBold + " ≡ deps-bump ≡ " + diffColorReset +
 		" " + diffColorBold + "service-a" + diffColorReset + "\n" +
-		diffColorWorker + "▸ service-a › " + diffColorReset +
-		diffColorBold + "autocert" + diffColorReset + "\n" +
+		diffColorMuted + "▸ service-a › " + diffColorReset +
+		diffColorInvert + diffColorSub + " autocert " + diffColorReset + "\n" +
 		diffColorMuted + "acme/service-a" + diffColorReset + "\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
@@ -106,7 +106,7 @@ func TestDiffCollector_BannerOncePerTurnHandoffPerSubmodule(t *testing.T) {
 		t.Errorf("expected deploy-1 named 3 times, got %d:\n%s", n, out)
 	}
 	for _, want := range []string{
-		"▸ deploy-1 › autocert", "▸ deploy-1 › ingress", "▸ deploy-2 › autocert",
+		"▸ deploy-1 › [autocert]", "▸ deploy-1 › [ingress]", "▸ deploy-2 › [autocert]",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected hand-off %q, got:\n%s", want, out)
@@ -114,7 +114,7 @@ func TestDiffCollector_BannerOncePerTurnHandoffPerSubmodule(t *testing.T) {
 	}
 	// Every header block is set off from the diff above it by a blank line, so a
 	// breadcrumb between two diffs stays visible — the within-turn submodule too.
-	if !strings.Contains(out, "\n\n▸ deploy-1 › ingress") {
+	if !strings.Contains(out, "\n\n▸ deploy-1 › [ingress]") {
 		t.Errorf("expected a blank line before the within-turn submodule header, got:\n%s", out)
 	}
 }

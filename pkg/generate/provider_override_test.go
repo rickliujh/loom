@@ -12,16 +12,16 @@ import (
 
 type stubProvider struct{ ref string }
 
-func (s *stubProvider) FetchDiff(_ context.Context, ref, _ string, _ *slog.Logger) (*PRInfo, error) {
+func (s *stubProvider) Fetch(_ context.Context, ref, _ string, _ *slog.Logger) (*ChangeSet, error) {
 	s.ref = ref
-	return &PRInfo{Title: "Add app", Files: []FileChange{{Type: ChangeAdded, Path: "app.yaml", NewContent: []byte("a: 1\n")}}}, nil
+	return &ChangeSet{Title: "Add app", Files: []FileChange{{Type: ChangeAdded, Path: "app.yaml", NewContent: []byte("a: 1\n")}}}, nil
 }
 
 // Options.Provider fetches in place of the provider the ref names.
 func TestRun_ProviderOverride(t *testing.T) {
 	out := t.TempDir()
 	stub := &stubProvider{}
-	if err := Run(context.Background(), Options{Ref: "github:o/r#5", OutputDir: out, Provider: stub}, testLogger()); err != nil {
+	if err := Run(context.Background(), Options{Refs: []string{"github:o/r#5"}, OutputDir: out, Provider: stub}, testLogger()); err != nil {
 		t.Fatal(err)
 	}
 	if stub.ref != "github:o/r#5" {

@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// Regression: the glab CLI fallback used to build PRInfo without RepoURL,
+// Regression: the glab CLI fallback used to build ChangeSet without RepoURL,
 // leaving the generated module's target.url empty. Both fetch paths must
 // derive the same clone URL.
 func TestGitlabRepoURL(t *testing.T) {
@@ -82,7 +82,7 @@ func TestGitLabFetchAPI_HonoursContext(t *testing.T) {
 			defer cancel()
 			logger := slog.New(cancelOn{msg: tt.cancelOn, cancel: cancel})
 
-			p := &GitLabDiffProvider{}
+			p := &GitLabSource{}
 			_, _ = p.fetchAPI(ctx, srv.URL, "group/project", 1, "glpat-test", logger)
 			if ctx.Err() == nil {
 				t.Fatalf("fetchAPI never logged %q; the test no longer matches its log sequence", tt.cancelOn)

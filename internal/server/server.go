@@ -103,7 +103,7 @@ type Server struct {
 	caps     map[string]bool
 
 	// generateProvider replaces PR/MR fetching in tests.
-	generateProvider generate.DiffProvider
+	generateProvider generate.ChangeSource
 
 	// pingEvery overrides pingInterval in tests.
 	pingEvery time.Duration

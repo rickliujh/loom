@@ -3,6 +3,8 @@ package server
 import (
 	"encoding/json"
 	"os"
+
+	"github.com/rickliujh/loom/pkg/generate"
 )
 
 // Run modes.
@@ -176,10 +178,21 @@ func (s *Server) prepareGenerate(p *preparedJob) error {
 		return errInvalid("refs", "refs is required: the PR or MR to generate from")
 	case 1:
 	default:
-		return errInvalid("refs", "multi-source generate is not available in this version of loom: give exactly one ref")
+		return errInvalid("refs", "multi-source generate is not available through the server yet: give exactly one ref")
 	}
 	if p.req.Refs[0] == "" {
 		return errInvalid("refs", "refs[0] is empty")
+	}
+	// The CLI also generates from commits (which clone any URL the caller
+	// names) and from snapshots (which read the server's disk). Neither is
+	// gated by the server's root and remote-module policies yet, so only a
+	// PR/MR ref is accepted here.
+	src, err := generate.ParseSourceRef(p.req.Refs[0], generate.SnapshotOptions{}, s.logger)
+	if err != nil {
+		return errInvalid("refs", "%v", err)
+	}
+	if src.Kind != generate.KindPR {
+		return errInvalid("refs", "only a PR or MR reference is accepted by the server; %s sources are CLI-only for now", src.Kind)
 	}
 	out, err := s.resolveOutput(p.req.Output, "output")
 	if err != nil {

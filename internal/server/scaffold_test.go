@@ -17,8 +17,8 @@ import (
 // fakePR serves a fixed PR in place of GitHub.
 type fakePR struct{}
 
-func (fakePR) FetchDiff(context.Context, string, string, *slog.Logger) (*generate.PRInfo, error) {
-	return &generate.PRInfo{
+func (fakePR) Fetch(context.Context, string, string, *slog.Logger) (*generate.ChangeSet, error) {
+	return &generate.ChangeSet{
 		Title:      "Onboard payments",
 		BaseBranch: "main",
 		RepoURL:    "https://github.com/o/r",

@@ -17,10 +17,10 @@ import (
 	"github.com/rickliujh/loom/internal/proc"
 )
 
-// GitHubDiffProvider fetches PR diffs from GitHub.
-type GitHubDiffProvider struct{}
+// GitHubSource fetches PR diffs from GitHub.
+type GitHubSource struct{}
 
-func (p *GitHubDiffProvider) FetchDiff(ctx context.Context, ref, token string, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitHubSource) Fetch(ctx context.Context, ref, token string, logger *slog.Logger) (*ChangeSet, error) {
 	owner, repo, number, err := parseGitHubPRRef(ref)
 	if err != nil {
 		return nil, err
@@ -60,7 +60,7 @@ func githubRepoURL(ref, owner, repo string) string {
 	return fmt.Sprintf("https://github.com/%s/%s.git", owner, repo)
 }
 
-func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, number int, repoURL, token string, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitHubSource) fetchAPI(ctx context.Context, owner, repo string, number int, repoURL, token string, logger *slog.Logger) (*ChangeSet, error) {
 	logger.Debug("creating GitHub API client", "owner", owner, "repo", repo)
 	ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 	tc := oauth2.NewClient(ctx, ts)
@@ -73,7 +73,7 @@ func (p *GitHubDiffProvider) fetchAPI(ctx context.Context, owner, repo string, n
 	}
 	logger.Debug("PR metadata fetched", "title", pr.GetTitle(), "head", pr.GetHead().GetRef(), "base", pr.GetBase().GetRef())
 
-	info := &PRInfo{
+	info := &ChangeSet{
 		Title:      pr.GetTitle(),
 		Body:       pr.GetBody(),
 		BaseBranch: pr.GetBase().GetRef(),
@@ -186,7 +186,7 @@ func fetchFileAtRef(ctx context.Context, client *github.Client, owner, repo, pat
 	return []byte(content), nil
 }
 
-func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, number int, repoURL string, logger *slog.Logger) (*PRInfo, error) {
+func (p *GitHubSource) fetchCLI(ctx context.Context, owner, repo string, number int, repoURL string, logger *slog.Logger) (*ChangeSet, error) {
 	nwo := owner + "/" + repo
 
 	// Fetch PR metadata including commit SHAs for resilience against branch deletion.
@@ -221,7 +221,7 @@ func (p *GitHubDiffProvider) fetchCLI(ctx context.Context, owner, repo string, n
 	}
 	logger.Debug("using refs for file content (gh CLI)", "headRef", headRef, "baseRef", baseRef)
 
-	info := &PRInfo{
+	info := &ChangeSet{
 		Title:      prMeta.Title,
 		Body:       prMeta.Body,
 		BaseBranch: prMeta.BaseRefName,

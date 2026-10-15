@@ -34,8 +34,8 @@ type FileChange struct {
 	OldContent []byte // full file content before the change (for modified)
 }
 
-// PRInfo holds metadata about a PR/MR.
-type PRInfo struct {
+// ChangeSet holds metadata about a PR/MR.
+type ChangeSet struct {
 	Title      string
 	Body       string
 	BaseBranch string

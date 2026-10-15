@@ -82,7 +82,7 @@ func testFiles(t *testing.T, root string) map[string]string {
 		}
 		if d.IsDir() {
 			name := d.Name()
-			if name == ".git" || name == "spectrace" || name == "node_modules" {
+			if strings.HasPrefix(name, ".") || name == "spectrace" || name == "node_modules" {
 				return filepath.SkipDir
 			}
 			return nil

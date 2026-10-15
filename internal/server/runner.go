@@ -186,7 +186,7 @@ func (m *jobManager) executeGenerate(ctx context.Context, p *preparedJob, logger
 		}
 	}
 	return generate.Run(ctx, generate.Options{
-		Ref:        p.req.Refs[0],
+		Refs:       p.req.Refs,
 		Params:     p.req.Values,
 		OutputDir:  p.output,
 		ModuleName: p.req.Name,

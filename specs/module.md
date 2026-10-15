@@ -82,10 +82,10 @@ local services = ['payments', 'billing', 'auth'];
 
 | Input | Description |
 |-------|-------------|
-| `spec.params[]` | Static parameter definitions. The only field in `loom.yaml` that is **not** templatable — these are the source of template values. |
-| `spec.dynamicParams[]` | Parameters whose values come from shell commands. |
-| `--param` / `-p` | CLI flag, repeatable. Format: `key=value`. |
-| `--params-file` | Path to a YAML file containing a `map[string]string`. |
+| `spec.params[]` | Static parameter definitions: `name`, optional `type` (`string` default, `list`, `map`), `required`, `default`. The only field in `loom.yaml` that is **not** templatable — these are the source of template values. See [`specs/structured-params.md`](structured-params.md) for types. |
+| `spec.dynamicParams[]` | Parameters whose values come from shell commands. Take an optional `type` like static params. |
+| `--param` / `-p` | CLI flag, repeatable. Format: `key=value`. A `list` or `map` param parses the value as YAML (structured-params SP10, SP12). |
+| `--params-file` | Path to a YAML file mapping param names to values: strings, or nested lists and maps (structured-params SP11). |
 
 ### Behaviors
 
@@ -159,19 +159,20 @@ If a dynamic param's name is provided via CLI, the command is never executed. A 
 | Dynamic param command fails and no default | `dynamic parameter "<name>" command failed: ...` |
 | Dynamic param default fails to render | `templating default for dynamic param "<name>": ...` |
 | Undeclared param provided via CLI | `undeclared parameter "<name>"` |
+| Provided value does not have the param's declared type | `param "<name>" is declared <type>, but received ...` (structured-params SP10) |
 
 ---
 
 ## Templating
 
-Loom uses Go's `text/template`. Params are accessed via dot notation on a `map[string]string`.
+Loom uses Go's `text/template`. Params are accessed via dot notation on the resolved param map, whose values are strings, lists, or maps (see [`specs/structured-params.md`](structured-params.md)).
 
 ### Inputs
 
 | Input | Description |
 |-------|-------------|
 | Template string | Any templatable field in `loom.yaml`, file content, or patch content. |
-| Params | The resolved `map[string]string` from static + dynamic param resolution. |
+| Params | The resolved param map from static + dynamic param resolution: name → string, list, or map. Every declared param is present (SP6). |
 
 ### Behaviors
 
@@ -188,11 +189,23 @@ target:
 
 #### T2: Template functions
 
-| Function  | Signature                    | Description                              |
-|-----------|------------------------------|------------------------------------------|
-| `default` | `default <fallback> <value>` | Returns `value` if non-empty, else `fallback` |
-| `upper`   | `upper <string>`             | Converts to uppercase                    |
-| `lower`   | `lower <string>`             | Converts to lowercase                    |
+| Function   | Signature                    | Description                              |
+|------------|------------------------------|------------------------------------------|
+| `default`  | `default <fallback> <value>` | Returns `value` if non-empty, else `fallback`. Empty is null, `""`, an empty list or an empty map — not `0` or `false` (SP2) |
+| `required` | `required <message> <value>` | Returns `value`, or fails the render with `message` when it is empty (SP3) |
+| `upper`    | `upper <string>`             | Converts to uppercase                    |
+| `lower`    | `lower <string>`             | Converts to lowercase                    |
+| `quote`    | `quote <string>`             | Double-quoted, escaped string            |
+| `indent`   | `indent <n> <string>`        | Prefixes every line with `n` spaces      |
+| `nindent`  | `nindent <n> <string>`       | `indent` with a leading newline          |
+| `split`    | `split <sep> <string>`       | List of the parts around `sep`, empty parts dropped |
+| `join`     | `join <sep> <list>`          | The list's elements joined by `sep` (SP4) |
+| `toYaml`   | `toYaml <value>`             | 2-space-indented YAML, no trailing newline; map keys sorted |
+| `toJson`   | `toJson <value>`             | Compact JSON; map keys sorted (SP4)      |
+| `fromYaml` | `fromYaml <string>`          | Parses YAML text into a value, keeping scalars' written form (SP1) |
+| `hasKey`   | `hasKey <map> <key>`         | Whether the map holds the key (SP4)      |
+
+A render whose output contains `<no value>` — a missing value printed unguarded — fails (SP5).
 
 ```yaml
 # params: env="" (empty)
@@ -223,14 +236,15 @@ app/__serviceName__/deploy.yaml
 
 #### T4: What is templatable
 
-Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, defaults, required — these are the source of template values and cannot reference themselves). Boolean fields (`shell.pure`) are not strings and therefore not templatable.
+Every string field in `loom.yaml` is templatable **except** `spec.params` definitions (names, types, defaults, required — these are the source of template values and cannot reference themselves) and param `type`s. Boolean fields (`shell.pure`) are not strings and therefore not templatable.
 
 Exhaustive list of templatable fields:
 
 - `spec.excludes[]`, `spec.includes[]`
 - `spec.dynamicParams[].command`, `spec.dynamicParams[].default`
 - `spec.target.url`, `spec.target.branch`, `spec.target.featureBranch`
-- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values
+- `spec.modules[].name`, `spec.modules[].source`, `spec.modules[].params` values — every string at any depth of a list or map value
+- `spec.modules[].if`, `operations[].if`
 - `newFiles.source`, `newFiles.dest`
 - `patch.engine`, `patch.path`, `patch.target`
 - `shell.command`, `shell.timeout`
@@ -332,7 +346,8 @@ In `--local-run` mode, the clone target is `<target-path>/NN-<moduleName>/`. It 
 |-------|-------------|
 | `modules[].name` | Required. Unique identifier for the child. |
 | `modules[].source` | Required. Local path or git URL to the child module directory. |
-| `modules[].params` | Optional. `map[string]string` of params to pass to the child. Values are templatable with the parent's params. |
+| `modules[].params` | Optional. Params to pass to the child, by name: each value a string, list, or map. Every string in a value, at any depth, is templatable with the parent's params. |
+| `modules[].if` | Optional. Shell predicate gating the child. Templatable. See [Conditional Execution](#conditional-execution-if). |
 
 ### Behaviors
 
@@ -410,7 +425,7 @@ spec:
 
 #### M4: Param passing through parent template context
 
-Child `params` values are rendered through the parent's resolved params before being passed to the child.
+Child `params` values are rendered through the parent's resolved params before being passed to the child. A value may be a string, list, or map; every string in it, at any depth, is rendered, and the result is typed against the child's declared param type (structured-params SP13).
 
 ```yaml
 # parent params: environment=staging
@@ -426,7 +441,63 @@ modules:
 
 ## Operations (`spec.operations`)
 
-Operations execute sequentially in declaration order. Each operation has exactly **one** action type.
+Operations execute sequentially in declaration order. Each operation has exactly **one** action type. An operation may carry an optional `if` predicate that gates whether it runs — see [Conditional Execution](#conditional-execution-if).
+
+### Write Path Containment
+
+`newFiles`, `patch` and `llm` write into the target directory, at a location taken from a templatable field. These rules apply to all three.
+
+#### WP1: Writes stay inside the target directory
+
+After rendering, the destination is joined to the target directory and must resolve to the target directory itself or a path beneath it. Otherwise the operation fails and nothing is written.
+
+This is the run-time half of the check `validate` performs on values written literally in the config (see [Validation Rules](#validation-rules)): a templated value is unknown until its params resolve, so only the run can check it.
+
+```yaml
+# loom.yaml
+- name: files
+  newFiles:
+    source: "templates"
+    dest: "{{ .dest }}"
+
+# loom run ./module -p dest=../elsewhere
+# result: error — newFiles dest "../elsewhere" escapes the target directory
+```
+
+| Field | Checked path |
+|-------|--------------|
+| `newFiles.dest` | `<targetDir>/<dest>` |
+| `newFiles` rendered file and directory names | `<targetDir>/<dest>/<renderedPath>`, per file |
+| `patch.target` | `<targetDir>/<target>` |
+| `llm.target` | `<targetDir>/<target>` |
+
+A value that begins with `/` is joined beneath the target like any other: `dest: "/etc"` names `<targetDir>/etc`.
+
+#### WP2: Checked in every mode
+
+The check runs before the dry-run branch of each operation, so `--dry-run`, `loom diff --quick` and `--local-run` refuse the same destinations a real run refuses. For `llm`, it runs before the model is invoked.
+
+#### WP3: Symlinks are resolved
+
+A path can stay inside the target by name and still leave it through a symlink that lives in the target. The deepest part of the destination that already exists is resolved, and must lie inside the resolved target directory. A symlink that points elsewhere inside the target is allowed, and so is a target directory that is itself reached through a symlink.
+
+```
+# target repo contains: shared -> /home/user/other-repo
+# newFiles dest: "shared/config"
+# result: error — newFiles dest "shared/config" escapes the target directory through a symlink
+```
+
+#### Error Conditions
+
+| Condition | Error |
+|-----------|-------|
+| Rendered destination resolves outside the target directory | `<field> "<path>" escapes the target directory` |
+| Destination leaves the target directory through a symlink | `<field> "<path>" escapes the target directory through a symlink` |
+| A symlink on the destination path cannot be resolved | `resolving <field> "<path>": ...` |
+
+`<field>` is `newFiles dest`, `newFiles destination` (a rendered file path), `patch target` or `llm target`.
+
+---
 
 ### `newFiles` — Render and Write Template Files
 
@@ -446,7 +517,7 @@ Walks the `source` directory recursively, applying exclude/include filters (see 
 1. Read file content.
 2. Render content through Go templates with params (both `spec.params` and `spec.dynamicParams` after resolution).
 3. Render the file/directory path through Go templates with params. Paths use `{{ }}` syntax by default; double-underscore placeholders (`__paramName__`) are converted to `{{ .paramName }}` as a fallback (see T3).
-4. Write to `<targetDir>/<dest>/<renderedPath>`.
+4. Write to `<targetDir>/<dest>/<renderedPath>`, which must lie inside the target directory (WP1).
 
 ##### NF2: Fails on existing destination
 
@@ -703,6 +774,77 @@ The summary is printed even when a later operation fails — PRs opened before t
 
 ---
 
+## Conditional Execution (`if`)
+
+Operations and child modules may carry an optional `if` predicate that gates
+whether they run. It is a shell expression evaluated with standard shell
+exit-code semantics — a thin, familiar way to say "only run this when …".
+
+### Inputs
+
+| Input | Description |
+|-------|-------------|
+| `operations[].if` | Optional shell predicate gating a single operation. Templatable. |
+| `spec.modules[].if` | Optional shell predicate gating a child module (and therefore all of its operations and sub-modules). Templatable. |
+
+### Behaviors
+
+#### IF1: Optional — default is to run
+
+`if` is optional. When omitted or empty (after trimming whitespace), the step
+always runs. Existing configs without `if` are unaffected.
+
+#### IF2: Templated before evaluation
+
+The predicate string is rendered with the resolved params (the same Go
+templating and functions as every other field) before it is executed. An
+operation's `if` renders with its own module's params; a child module's `if`
+renders with the **parent's** params — it is authored in the parent's
+`loom.yaml`, exactly like `modules[].name`, `modules[].source`, and
+`modules[].params` values (M4).
+
+```yaml
+operations:
+  - name: apply
+    if: "test -f {{ .service }}/config.yaml"   # rendered, then run
+    shell:
+      command: "kubectl apply -f {{ .service }}"
+```
+
+#### IF3: Shell exit-code semantics
+
+The rendered predicate is run via `sh -c`. **Exit 0 → the step runs; any
+non-zero exit → the step is skipped.** A non-zero exit is a decision, not a
+failure: it is never reported as an error. Only a template render error, or an
+inability to launch the shell, fails the run.
+
+#### IF4: Working directory
+
+| Predicate | Runs in |
+|-----------|---------|
+| `operations[].if` | The module's target directory (same as the operation's own working dir). |
+| `spec.modules[].if` | The child module's **resolved** target directory — its own `spec.target` clone if it has one, otherwise the parent target dir it inherits. |
+
+A module's `if` runs after the child target is resolved, so the predicate can
+inspect the very repository the child would operate on. (Consequence: a child
+with its own `spec.target` is cloned before its `if` is evaluated.)
+
+#### IF5: Always evaluated, including dry-run and local mode
+
+The predicate is control flow, so it is evaluated in **all** modes —
+`--dry-run` and `--local-run` included. Skipping it would misrepresent which
+steps a real run would perform. As with `dynamicParams` commands (which also
+run under dry-run), an `if` predicate is expected to be a side-effect-free
+check (`test`, `grep`, file existence). A skipped step performs no action and
+is logged.
+
+> Security: like `shell.command` and `dynamicParams`, param values are
+> templated into the shell string, so untrusted param values (e.g. from `bulk`
+> provider data) are an injection vector. Keep predicates simple and trust your
+> params. Cross-cutting hardening is tracked separately.
+
+---
+
 ## CLI Flags
 
 ### Global Flags (available on all commands)
@@ -712,7 +854,6 @@ The summary is printed even when a later operation fails — PRs opened before t
 | `--verbose`, `-v` | bool | `false` | Enable verbose output (sets log level to debug) |
 | `--dry-run` | bool | `false` | Simulate operations without making changes |
 | `--local-run` | bool | `false` | Run locally: skip push and PR, clone into `--target-path` |
-| `--diff` | bool | `false` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--log-level` | string | `"info"` | Log level: `debug`, `info`, `warn`, `error` |
 | `--log-format` | string | `"pretty"` | Log format: `pretty`, `text`, `json` |
 
@@ -803,15 +944,71 @@ No files are written, no commits are made, no PRs are opened. Each operation log
 | `commitPush` | Logs the commit that would be made. |
 | `pr` | Logs the PR that would be opened. |
 
-#### DR2: `--diff` implies `--dry-run`
+To preview the actual file diffs a run would produce, use the `loom diff`
+command (below), not `run`.
 
-When `--diff` is set, `--dry-run` is automatically enabled.
+---
 
-#### DR3: Diff shows unified diffs
+## Diff Command (`loom diff`)
 
-In addition to dry-run logging:
-- `newFiles`: unified diff of rendered content vs empty (new file).
-- `patch`: unified diff of patched result vs original target file.
+`loom diff [path]` shows the changes a module run would produce. It has two
+fidelity levels.
+
+### `diff` Command Flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--quick` | bool | `false` | Simulate the run (dry-run) and show `newFiles`/`patch` diffs only, without executing anything |
+| `--partial` | bool | `false` | When the run fails, still print the diff of changes made before the error (below a warning) |
+| `--param`, `-p` | string[] | nil | Parameter in `key=value` format (repeatable) |
+| `--params-file` | string | `""` | YAML file with parameters |
+| `--target-path` | string | `""` | Directory for target clones; when set it is kept for inspection instead of a cleaned-up temp dir |
+| `--author` | string | `""` | Default git author name for `commitPush` operations |
+| `--email` | string | `""` | Default git author email for `commitPush` operations |
+
+### Behaviors
+
+#### DF1: Full mode — local run plus `git diff`
+
+By default (no `--quick`), `diff` runs the module in local mode (see Local Mode:
+clone into numbered subdirectories, pure shell runs, `pr` skipped, `commitPush`
+commits locally, no push). It then prints a `git diff` of each cloned target
+against its base branch. Because operations actually execute, this includes
+files rewritten by `shell` commands — the complete change a run would make. A
+git identity is defaulted (`loom-diff`) so `commitPush` can commit even when the
+module and CLI supply none.
+
+#### DF2: Quick mode — simulated diffs
+
+With `--quick`, `diff` simulates the run (dry-run semantics, DR1): it executes
+nothing and writes nothing. It prints unified diffs for the operations that can
+be computed without running — `newFiles` (rendered content vs empty) and `patch`
+(patched result vs original target). It cannot show changes made by `shell`
+commands, which do not run under dry-run.
+
+Each diff names its file by its path from the target's root, as full mode's git
+diff does: a `newFiles` file is named by its `dest` directory joined with its
+path under `source`, not by the latter alone.
+
+#### DF3: Workspace lifecycle
+
+Full mode clones into a workspace: a temporary directory that is removed once the
+diff is printed, unless `--target-path` is supplied, in which case the clones are
+kept there for inspection.
+
+#### DF4: Diffs are headed with module and target
+
+Because diffs print together at the end — away from the per-operation logs —
+each diff is preceded by a header naming the module that produced it and the
+target it applies to (repo URL and branch, or the target directory). Consecutive
+diffs sharing the same module and target reuse a single header.
+
+#### DF5: Failure ordering
+
+When the run fails, `diff` exits non-zero. By default no diff is printed — only
+the error — so the failure is not buried. With `--partial`, the diff of the
+changes made before the failure is printed beneath a warning that marks it as
+incomplete, with the error shown above it (next to the failing module's logs).
 
 ---
 
@@ -821,6 +1018,15 @@ The following constraints are enforced when loading a module. All violations
 are collected and reported together as one joined error (one violation per
 line), not just the first, so a config can be fixed in a single pass.
 
+Validation covers one module: the config being loaded, and the files that
+module renders. A module named in `spec.modules` is a separate config with its
+own params, resolved and validated in its own right when a run reaches it, so
+it is not opened here — fetching it may mean a clone, and it may be perfectly
+valid while being none of this module's business. `loom validate --recursive`
+opts into walking the tree, validating each referenced module on its own terms;
+a module reached twice is checked once, and a templated `source` is reported
+and skipped, since its value is only known at run time.
+
 Every templatable string field (see T4) must also parse as a valid Go
 template with the loom function map; syntax errors are reported as
 `<field>: invalid template: <parse error>`. Fields without `{{` always pass.
@@ -828,14 +1034,63 @@ template with the loom function map; syntax errors are reported as
 Template param references (`{{ .name }}`) must resolve to declared params:
 `<field>: references undeclared param "<name>"`. Dynamic param templates may
 only reference static params and dynamic params declared before them (P4/P5
-evaluation order). Templates that rebind dot (`range`/`with`) are exempt from
-reference checking, since their fields cannot be resolved statically.
+evaluation order).
+
+Dot is the param map only at a template's top level and in the `else` branch
+of a `range` or `with`. A `range` or `with` body rebinds dot to the item — a
+list element, a nested map, a string — so a field reference inside it can
+never name a param; only the pipeline being ranged over can, and that is
+checked. `$` is the param map everywhere, so `{{ $.name }}` inside a body is a
+reference to `name` and is checked. `{{ .name.sub }}` and
+`{{ index .name "k" }}` reference `name`. `{{ index . "name" }}` — the one way
+to reach a name that is not a valid template identifier — states its key
+literally, and is read as a reference to it. Only a template that reaches the
+param map unknowably (a computed index key, or dot or `$` handed whole to a
+function) is exempt from reference checking. See structured-params SP9.
+
+This applies to the files a run renders as well as to `loom.yaml` fields: the
+bodies walked by `newFiles`, their path names after `__param__` conversion
+(T3), and the bodies of patch files. An undeclared name is not an error at
+run time until it is printed — it is a missing key, which is falsy — so
+checking here reports it before a run fails on it (structured-params SP5).
+
+The reverse is reported as a **warning** rather than a violation: a param
+declared in `params` or `dynamicParams` that no template references is dead
+config, but the run is correct — it simply never reads the value, so the config
+stays valid. Nothing else reports it either: a param left behind by a rename
+looks exactly like one that is deliberately optional, and a value the user
+passes on the command line is silently discarded. Warnings do not affect
+validity or exit status, and callers that only need to know whether a config
+loads may ignore them. The warning is emitted only when every reference is
+visible, and is skipped entirely when
+any template could not be accounted for: an in-memory `Validate` (no module
+directory), a source that cannot be walked or a body that cannot be read, or
+any template exempt from reference checking.
+
+A `newFiles.source` or `patch.path` that is only resolved at run time does not
+disable the check. The fixed part of the path stands in for it —
+`__functions/patches/{{ .kind }}.yaml` scans `__functions/patches` — and every
+file under that directory is read for references only. Nothing found there is
+reported as a violation, since which of those files a run renders is unknown.
+
+Params reach submodules only through
+`spec.modules[].params` (children inherit nothing implicitly, P3), so a value
+forwarded to a child counts as used.
 
 When the module directory is known (`loom validate`, `loom run`, `loom bulk`
 — i.e. everywhere except in-memory configs), filesystem checks also apply:
 `newFiles.source` must be an existing directory and `patch.path` an existing
 file, resolved against the module directory exactly as at run time. Templated
 paths are skipped.
+
+Two classes of mistake are rejected because the run itself cannot report them.
+File filtering (F1/F2) matches base names with `filepath.Match` and discards its
+error, so an exclude/include pattern that is malformed or carries a path
+separator silently matches nothing; both are violations. For the same reason, a
+patch file that survives a `newFiles` walk is a violation: it would be rendered
+into the target as module output instead of being applied as a patch (the
+`__functions` footgun in F3). That last check is skipped when any
+exclude/include pattern is templated, since the run-time filter would differ.
 
 | Rule | Error |
 |------|-------|
@@ -845,8 +1100,17 @@ paths are skipped.
 | `metadata.name` required | `metadata.name is required` |
 | Param names non-empty | `param name cannot be empty` |
 | Param names unique across `params` and `dynamicParams` | `duplicate param name "<name>"` |
+| Param `type` is `string`, `list`, or `map` | `param "<name>": unknown type "<type>" (supported: string, list, map)` |
+| Param `default` has the shape of its `type` | `param "<name>": default is a <shape>, but the param's type is <type>` |
+| *(warning)* A list or map param is not printed bare | `<field>: prints <type> param "<name>" directly, ...` |
+| *(warning)* A list or map param is not handed to a text function | `<field>: passes <type> param "<name>" to <fn>, which takes text; ...` |
+| *(warning)* Every declared param is referenced by some template (module dir known; skipped when any template's references are not statically visible) | `param "<name>" is declared but never referenced by any template` |
+| *(warning)* Every declared dynamic param is referenced by some template (same conditions) | `dynamicParam "<name>" is declared but never referenced by any template` |
 | Dynamic param `command` required | `dynamicParam "<name>": command is required` |
 | `spec.target.url` required when `spec.target` present | `spec.target.url is required` |
+| Exclude/include patterns non-empty (skipped when templated) | `spec.excludes[<i>]: pattern cannot be empty` |
+| Exclude/include patterns carry no path separator, since only base names are matched (skipped when templated) | `spec.excludes[<i>]: pattern "<p>" contains a path separator, but patterns match base names only` |
+| Exclude/include patterns compile as globs (skipped when templated) | `spec.includes[<i>]: invalid glob pattern "<p>": <err>` |
 | Module names non-empty | `module name cannot be empty` |
 | Module names unique | `duplicate module name "<name>"` |
 | Module `source` required | `module "<name>": source is required` |
@@ -859,6 +1123,11 @@ paths are skipped.
 | `patch.path` exists and is a file (module dir known, non-templated) | `operation "<name>": patch file "<path>" not found in module directory` |
 | `patch.target` required | `operation "<name>": patch target is required` |
 | Patch engine is `smp` or `json6902` (skipped when templated) | `unknown patch engine "<engine>"` |
+| `patch.target`, `newFiles.dest`, `llm.target` stay inside the target directory (a templated value is checked at run time instead — WP1) | `operation "<name>": patch target "<path>" escapes the target directory` |
+| A patch file is not also rendered into the target by a `newFiles` operation (module dir known, non-templated paths and filters) | `operation "<name>": patch file "<path>" is also rendered into the target by newFiles operation "<name>" — exclude it via spec.excludes` |
+| Rendered file bodies and path names parse as templates and reference only declared params (module dir known, non-templated filters) | `operation "<name>": template file "<rel>": references undeclared param "<name>"` |
+| Patch file bodies parse as templates and reference only declared params (module dir known, non-templated path) | `operation "<name>": patch file "<path>": references undeclared param "<name>"` |
+| `llm.maxTokens` is >= 0 | `operation "<name>": llm maxTokens must be >= 0` |
 | `shell.command` required | `operation "<name>": shell command is required` |
 | `shell.timeout` is a valid duration (skipped when templated) | `operation "<name>": invalid shell timeout "<value>"` |
 | `commitPush.message` required | `operation "<name>": commitPush message is required` |
@@ -891,10 +1160,14 @@ loom run <moduleSource> [flags]
     b. Render child params through parent template context.
     c. Load child module (validate, resolve params).
     d. Resolve child target (same logic as step 6).
-    e. Execute child module recursively (from step 7).
+    e. Evaluate the child's `if` predicate (if any) in the resolved target dir;
+       skip the child when it exits non-zero (IF1–IF4).
+    f. Execute child module recursively (from step 7).
  8. For each operation (in declaration order):
-    a. Create action from operation config.
-    b. Execute action against the resolved target directory.
+    a. Evaluate the operation's `if` predicate (if any) in the target dir; skip
+       the operation when it exits non-zero (IF1–IF4).
+    b. Create action from operation config.
+    c. Execute action against the resolved target directory.
  9. Cleanup:
     - Normal mode: remove temp dirs.
     - Local mode: no cleanup (dirs persist for inspection).

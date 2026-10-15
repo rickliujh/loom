@@ -1,8 +1,10 @@
 # Using Loom with AI Agents
 
-This page is written for AI coding agents (and the humans configuring them) that author, validate, and run Loom modules. It is tool-neutral: point any agent at this page — Claude Code, Codex, Cursor, Gemini CLI — via your repo's agent config (`AGENTS.md`, rules file, or a skill that references this URL).
+This page is written for AI coding agents (and the humans configuring them) that author, validate, and run Loom modules. It is tool-neutral: it works with any agent — Claude Code, Codex, Cursor, Gemini CLI.
 
-Authoritative sources in the Loom repository: `specs/module.md` (behavior spec), `specs/smp.md` (patch merge semantics), and the [reference docs](/reference/loom-yaml).
+The guide ships inside the binary. An agent reads it by running `loom skill`, with nothing to install, and gets the text that matches the version of Loom it is about to run. To point an agent at it, add one line to your repo's agent config (`AGENTS.md`, a rules file, or a skill): *before working with Loom modules, run `loom skill` and follow it.* See [loom skill](/reference/cli-skill).
+
+Authoritative sources: the [module spec](https://github.com/rickliujh/loom/blob/main/specs/module.md) (`loom skill spec/module`), the [patch merge spec](https://github.com/rickliujh/loom/blob/main/specs/smp.md) (`loom skill spec/smp`), and the [reference docs](/reference/loom-yaml).
 
 ## Golden Workflow
 
@@ -10,12 +12,13 @@ Never jump straight to a real run. Always:
 
 ```bash
 loom validate ./my-module                                  # 1. schema + semantic checks
-loom run ./my-module -p key=val --diff                     # 2. dry-run with file diffs
+loom diff ./my-module -p key=val                           # 2. full diff (local run, incl. shell effects)
+loom diff ./my-module -p key=val --quick                   # 2b. fast preview, executes nothing
 loom run ./my-module -p key=val --local-run --target-path ./preview   # 3. real files, local clone, no push/PR
 loom run ./my-module -p key=val                            # 4. real run (only after the user confirms)
 ```
 
-- `--diff` implies `--dry-run`: nothing is written, unified diffs are printed.
+- `loom diff` (full) runs the module in local mode and prints a real `git diff` of each target — including files rewritten by shell ops. `--quick` simulates instead (dry-run): nothing is written or executed, unified diffs for `newFiles`/`patch` are printed.
 - `--local-run` **requires** `--target-path`. Each module with a `spec.target` clones into a numbered subdirectory (`00-<name>/`, `01-<name>/`, execution order, never cleaned up). Commits happen locally; push and PR are skipped; shell ops are skipped unless marked `pure: true`.
 - A real run that includes `commitPush` or `pr` pushes branches and opens pull requests — an agent should treat this as an outward-facing action and confirm with the user first.
 
@@ -64,7 +67,7 @@ spec:
 - Every param passed via `-p`/`--params-file` must be declared in `spec.params` or `spec.dynamicParams` — undeclared params are a hard error.
 - Priority: CLI `-p` overrides `--params-file` overrides `default`; a missing `required` param fails the run.
 - `dynamicParams` run shell commands after static params resolve, in declaration order (later ones can template earlier ones). A CLI override skips the command.
-- `spec.params` definitions are the **only** non-templatable strings in the file. Everything else — paths, commands, commit messages, PR fields, child params, file contents — is a Go template over the resolved params. Available template functions: `default`, `upper`, `lower` — nothing else (no sprig).
+- `spec.params` definitions are the **only** non-templatable strings in the file. Everything else — paths, commands, commit messages, PR fields, child params, file contents — is a Go template over the resolved params. Available template functions: `default`, `upper`, `lower`, `indent`, `nindent`, `quote`, `toYaml`, `fromYaml`, `split` — nothing else (no sprig). See [Templates](/guide/templates).
 
 ### Files and newFiles
 
@@ -78,10 +81,12 @@ spec:
 - `shell.command` runs via `sh -c` in the **target** directory. Mark side-effect-free commands (lint, format) `pure: true` so they still run under `--local-run`.
 - `patch` engines: `smp` (strategic merge, default; scalar lists append-unique, map-lists merge by key) or `json6902` (RFC 6902 op list). Patch file content is templated before applying; the target file must already exist.
 - `llm` generates or modifies a file via LLM inference (`provider`, `model`, `prompt`, `target` required; `mode: generate` fails on an existing target, `mode: modify` prepends existing content). See the [llm reference](/reference/op-llm).
+- Optional `if`: a shell predicate (templated, then `sh -c`) that gates the operation — exit `0` runs it, non-zero skips it. Runs in the target dir; evaluated in every mode including `--dry-run`, so keep it side-effect-free. Omitted = always runs.
 
 ### Composition (spec.modules)
 
 - Children execute **before** parent operations, in declaration order, recursively.
+- A child (like an operation) accepts an `if` shell predicate — rendered with the **parent's** params, run in the child's resolved target dir; a non-zero exit skips the whole child. See the [reference](/reference/loom-yaml#conditional-execution-if).
 - A child **never inherits** the parent's `spec.target`. Child with its own target → own clone/branch/PR. Child without a target → writes into the parent's target directory (this is how you batch into one PR).
 - Child `params` values are rendered with the parent's params before passing down; there is no implicit param inheritance.
 - `source`: `./relative`, `/absolute`, git URL, or git URL with a `//subdir` suffix (Terraform convention; the full repo is cloned, so sibling relative paths work).
@@ -125,9 +130,13 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 
 ## Other Commands
 
-- `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--exclude-git-ops`.
+- `loom generate <pr-url> -p value=…` — reverse-engineer a module from an existing GitHub PR / GitLab MR; every occurrence of a `-p` value becomes a template expression. Flags: `-o` output dir, `-n` name, `--token-env`.
 - `loom bulk <module> [-o dir] [--items file.yaml] [--name-param param]` — scaffold a jsonnet bulk wrapper from a module's declared params; prefer this over hand-writing wrappers. It refuses to overwrite existing configs and self-verifies the output.
-- Global flags on all commands: `--dry-run`, `--diff`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
+- `loom inspect <module> [--full] [-m child] [-o json]` — describe a module without running it: its params and where each value comes from, its target, its operations in order, and the submodules it composes. Reach for it before a first run of an unfamiliar module, to learn what it needs. See [loom inspect](/reference/cli-inspect).
+- `loom validate <module> [-r]` — check the config; `-r` also validates the modules it composes. See [loom validate](/reference/cli-validate).
+- `loom skill [topic]` — print this guide, or another topic from the docs, from the binary.
+- `loom diff <module> [--quick]` — show the changes a run would produce; full mode runs locally and diffs each target, `--quick` is a fast no-execution preview. See [loom diff](/reference/cli-diff).
+- Global flags on all commands: `--dry-run`, `--local-run`, `-v/--verbose`, `--log-level`, `--log-format`. On `loom run`, `--summary` prints the PRs/MRs created during the run as a list at the end — use it whenever the run opens PRs, especially bulk runs.
 
 ## Debugging Quick Map
 
@@ -139,5 +148,7 @@ One PR per item vs one PR for the batch is decided by where `spec.target` lives 
 | `operation "x" must have exactly one action type` | One action key per operation |
 | `both loom.yaml and loom.jsonnet found` | Keep exactly one config file |
 | `--local-run requires --target-path` | Add `--target-path ./preview` |
+| `… escapes the target directory` | A `newFiles.dest`, `patch.target` or `llm.target` resolved outside the target repo, usually from a param containing `..` — keep destinations relative and inside the target |
 | Patch error `reading target file` | `patch.target` is relative to the **target** dir and must exist |
-| Literal `<no value>` in rendered output | Unresolved param renders silently (no error) — check the param name and that it resolved; catch it with `--diff` before a real run |
+| `template printed a missing value: "<no value>" appears on output line N` | A template printed a field or param that is not there — check the name, or guard an optional field with `default`, `required`, `if` or `with` |
+| `param "x" is declared list, but received ...` | Give a list param a YAML list: nested YAML in the params file, or `-p x='[a, b]'` |

@@ -11,22 +11,25 @@ import (
 var (
 	verbose   bool
 	dryRun    bool
-	localRun bool
-	showDiff  bool
+	localRun  bool
 	logLevel  string
 	logFormat string
 )
 
 var rootCmd = &cobra.Command{
-	Use:          "loom",
-	Short:        "Loom automates the last mile of your GitOps",
-	Long:         "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
-	SilenceUsage: true,
+	Use:   "loom",
+	Short: "Loom automates the last mile of your GitOps",
+	Long:  "Loom is a CLI tool that automates GitOps workflows via declarative YAML modules.",
+	// Silence cobra's own usage/error output so the top-level error is printed
+	// once, in our own colored style, rather than as a plain "Error: …" line.
+	SilenceUsage:  true,
+	SilenceErrors: true,
 }
 
 // Execute runs the root command.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
+		prettylog.Failuref(os.Stderr, "%v", err)
 		os.Exit(1)
 	}
 }
@@ -40,7 +43,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Simulate operations without making changes")
 	rootCmd.PersistentFlags().BoolVar(&localRun, "local-run", false, "Run all operations locally but skip remote push and PR creation")
-	rootCmd.PersistentFlags().BoolVar(&showDiff, "diff", false, "Show file diffs during dry-run (implies --dry-run)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
 	rootCmd.PersistentFlags().StringVar(&logFormat, "log-format", "pretty", "Log format (pretty, text, json)")
 }

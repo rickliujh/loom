@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/rickliujh/loom/internal/util"
@@ -69,7 +68,10 @@ func (a *LLMAction) Execute(ctx context.Context, execCtx *ExecutionContext) erro
 		}
 	}
 
-	targetPath := filepath.Join(execCtx.TargetDir, targetRel)
+	targetPath, err := resolveTargetPath(execCtx.TargetDir, "llm target", targetRel)
+	if err != nil {
+		return actionError("llm", err)
+	}
 
 	modeStr, err := render("mode", a.Config.Mode)
 	if err != nil {

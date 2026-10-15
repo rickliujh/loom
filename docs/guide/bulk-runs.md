@@ -150,8 +150,8 @@ All three approaches work with the usual [preview modes](/guide/dry-run):
 
 ```bash
 loom run ./bulk-onboard --dry-run          # log what every entry would do
-loom run ./bulk-onboard --diff             # show rendered file diffs
-loom run ./bulk-onboard --local-run --target-path ./preview   # inspect real clones
+loom diff ./bulk-onboard --quick           # show rendered file diffs (no execution)
+loom diff ./bulk-onboard                    # full diff of every target's real clone
 ```
 
 In `--local-run` mode, each child with its own target clones into a numbered subdirectory (`00-`, `01-`, …) under `--target-path`, in execution order — see [Local Run](/guide/local-run).

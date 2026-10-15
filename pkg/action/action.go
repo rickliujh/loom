@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
+
+	"github.com/rickliujh/loom/pkg/event"
 )
 
 // PRResult records one pull/merge request created during a run.
 type PRResult struct {
+	// Path is the instance breadcrumb of the module whose pr operation
+	// created it — unlike Module, unique per bulk item.
+	Path []string
 	// Module is the name of the module whose pr operation created it.
 	Module string
 	// Title is the rendered PR title.
@@ -26,10 +32,16 @@ type RunSummary struct {
 
 // AddPR records a created PR/MR. Safe to call on a nil summary.
 func (s *RunSummary) AddPR(module, title, url string) {
+	s.AddPRAt(nil, module, title, url)
+}
+
+// AddPRAt records a created PR/MR along with the breadcrumb of the module
+// that created it. Safe to call on a nil summary.
+func (s *RunSummary) AddPRAt(path []string, module, title, url string) {
 	if s == nil {
 		return
 	}
-	s.PRs = append(s.PRs, PRResult{Module: module, Title: title, URL: url})
+	s.PRs = append(s.PRs, PRResult{Path: append([]string(nil), path...), Module: module, Title: title, URL: url})
 }
 
 // Print writes the collected PR/MR list to w. Nothing is written when the
@@ -44,16 +56,242 @@ func (s *RunSummary) Print(w io.Writer) {
 	}
 }
 
+// DiffEntry is one captured file diff plus the context needed to read it once
+// diffs are printed together at the end: the instance breadcrumb of the module
+// that produced it and the target (repo) it applies to.
+type DiffEntry struct {
+	// Breadcrumb runs from the root instance name to the producing instance.
+	Breadcrumb []string
+	// Target is the target's display label: repo URL and branch, or the target
+	// directory when the module has no target spec.
+	Target string
+	// Repo and Branch are the rendered target repo URL and branch; empty for a
+	// module without a target spec.
+	Repo, Branch string
+	// Dir is the target directory the diff applies to.
+	Dir string
+	// Text is the uncolored unified diff as printed, "---"/"+++" lines included.
+	Text string
+	// File is the same diff as data.
+	File event.FileDiff
+}
+
+// DiffCollector accumulates file diffs across a whole run, shared by parent
+// and child module executions. Execution is sequential, so no locking is
+// needed. Diffs are held rather than written inline as each file is merged,
+// so the whole set can be printed once at the very end of the run — after the
+// per-operation logs. Each diff carries a module/target header so it stays
+// legible out of the surrounding log context.
+type DiffCollector struct {
+	entries []DiffEntry
+}
+
+// Add records one file diff along with the instance breadcrumb and target it
+// belongs to. Safe to call on a nil collector.
+func (c *DiffCollector) Add(breadcrumb []string, target, diff string) {
+	c.AddEntry(DiffEntry{Breadcrumb: breadcrumb, Target: target, Text: diff})
+}
+
+// AddEntry records one file diff. The breadcrumb is copied, so later reuse of
+// the caller's slice cannot change a recorded entry. Safe to call on a nil
+// collector.
+func (c *DiffCollector) AddEntry(e DiffEntry) {
+	if c == nil {
+		return
+	}
+	e.Breadcrumb = append([]string(nil), e.Breadcrumb...)
+	c.entries = append(c.entries, e)
+}
+
+// Entries returns the collected diffs in the order they were recorded. The
+// slice is a copy; nil for a nil collector.
+func (c *DiffCollector) Entries() []DiffEntry {
+	if c == nil {
+		return nil
+	}
+	return append([]DiffEntry(nil), c.entries...)
+}
+
+// Print writes all collected diffs to w, colorized when w is a terminal.
+//
+// A fanned-out run (breadcrumb longer than one segment — a bulk item or a nested
+// child) is grouped like the run log announces a dispatch: an inverted root chip
+// banner naming the turn is written once per turn, a "▸ parent › child" hand-off
+// once per submodule path beneath it, and the target line once per repo. So a
+// batch reads as clearly-topped blocks instead of one flat wall, and the root is
+// not repeated inside a turn. A single-module run keeps its plain chip + target
+// header (deduplicated per target), unchanged. Nothing is written when the
+// collector is nil or empty.
+func (c *DiffCollector) Print(w io.Writer) {
+	if c == nil {
+		return
+	}
+	PrintDiffEntries(w, c.entries)
+}
+
+// PrintDiffEntries writes entries to w exactly as DiffCollector.Print does,
+// for a caller that holds the entries rather than the collector.
+func PrintDiffEntries(w io.Writer, entries []DiffEntry) {
+	if len(entries) == 0 {
+		return
+	}
+	color := isTerminalWriter(w)
+	var lastTurn, lastCrumb, lastKey string
+	for i, e := range entries {
+		segs := nonEmptySegs(e.Breadcrumb)
+		crumb := strings.Join(segs, "\x00")
+		key := crumb + "\x00" + e.Target
+
+		if len(segs) > 1 {
+			turn := segs[0] + "\x00" + segs[1]
+			// A blank line sets every header block apart from the diff above it, so
+			// a breadcrumb sitting between two diffs stays visible — not just the
+			// turn banner, but a submodule hand-off or a bare target change too.
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, "\n")
+			}
+			if i == 0 || turn != lastTurn {
+				fmt.Fprint(w, diffTurnBanner(segs[0], segs[1], color))
+			}
+			if i == 0 || crumb != lastCrumb {
+				fmt.Fprint(w, diffHandoffChain(segs, color))
+			}
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, diffTargetLine(e.Target, color))
+			}
+			lastTurn = turn
+		} else {
+			if i == 0 || key != lastKey {
+				fmt.Fprint(w, DiffHeader(segs, e.Target, color))
+			}
+			lastTurn = ""
+		}
+
+		lastCrumb, lastKey = crumb, key
+		fmt.Fprint(w, colorizeDiff(e.Text, color))
+	}
+}
+
+// DiffHeader renders the whole "which module / which repo" banner above a diff.
+// A single-module run (a one-segment breadcrumb) gets a plain inverted chip with
+// the target on its own line beneath — unchanged. A fanned-out run gets the
+// run-log dispatch header: a root-chip turn banner, a "▸ parent › child" hand-off
+// for each submodule step, then the target. Returns just a leading blank line
+// when there is no context to show. DiffCollector.Print composes the same pieces
+// selectively so a shared banner is not repeated across a turn's diffs.
+func DiffHeader(breadcrumb []string, target string, color bool) string {
+	segs := nonEmptySegs(breadcrumb)
+	if len(segs) > 1 {
+		return "\n" + diffTurnBanner(segs[0], segs[1], color) +
+			diffHandoffChain(segs, color) +
+			diffTargetLine(target, color)
+	}
+	if len(segs) == 0 && target == "" {
+		return "\n"
+	}
+
+	var b strings.Builder
+	b.WriteByte('\n')
+	if len(segs) == 1 {
+		if color {
+			b.WriteString(diffColorInvert + " " + segs[0] + " " + diffColorReset)
+		} else {
+			b.WriteString("[" + segs[0] + "]")
+		}
+	}
+	if target != "" {
+		if len(segs) == 1 {
+			b.WriteByte('\n')
+		}
+		if color {
+			b.WriteString(diffColorMuted + target + diffColorReset)
+		} else {
+			b.WriteString(target)
+		}
+	}
+	b.WriteByte('\n')
+	return b.String()
+}
+
+// diffTurnBanner heads one bulk turn: the root module as an inverted "≡ … ≡" chip
+// (mirroring the log's root section header) followed by the turn's instance name
+// in bold. This is the anchor the eye lands on, so turn boundaries stand out in a
+// long batch. Callers put the separating blank line above the whole header block.
+func diffTurnBanner(root, turn string, color bool) string {
+	if color {
+		return diffColorInvert + diffColorRoot + diffColorBold + " ≡ " + root + " ≡ " + diffColorReset +
+			" " + diffColorBold + turn + diffColorReset + "\n"
+	}
+	return "[≡ " + root + " ≡] " + turn + "\n"
+}
+
+// diffHandoffChain renders the submodule hand-off lines beneath a turn banner:
+// one "▸ parent › child" per descent step from the turn down to the leaf, the
+// run log's nested-dispatch form — no root chip, so headers inside a turn read
+// lighter. The marker and parent share the worker teal so the hand-off reads as
+// one legible breadcrumb unit rather than fading into the diff; the child, the
+// step that matters, stays bold. Empty when the breadcrumb stops at the turn.
+func diffHandoffChain(segs []string, color bool) string {
+	var b strings.Builder
+	for i := 1; i+1 < len(segs); i++ {
+		parent, child := segs[i], segs[i+1]
+		if color {
+			b.WriteString(diffColorWorker + "▸ " + parent + " › " + diffColorReset +
+				diffColorBold + child + diffColorReset + "\n")
+		} else {
+			b.WriteString("▸ " + parent + " › " + child + "\n")
+		}
+	}
+	return b.String()
+}
+
+// diffTargetLine renders the target (repo URL and branch) on its own muted line
+// beneath the header, so a long breadcrumb never crowds it. Empty when there is
+// no target to name.
+func diffTargetLine(target string, color bool) string {
+	if target == "" {
+		return ""
+	}
+	if color {
+		return diffColorMuted + target + diffColorReset + "\n"
+	}
+	return target + "\n"
+}
+
+// nonEmptySegs drops empty breadcrumb segments so a defensive blank never
+// produces a stray "› " step or an empty chip.
+func nonEmptySegs(breadcrumb []string) []string {
+	segs := make([]string, 0, len(breadcrumb))
+	for _, s := range breadcrumb {
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	return segs
+}
+
 // ExecutionContext holds runtime state shared across actions.
 type ExecutionContext struct {
 	// ModuleName is the metadata.name of the executing module.
 	ModuleName string
+	// ModulePath is the instance breadcrumb from the run's root down to this
+	// module (root instance name … this instance name). In a bulk run every item
+	// shares one ModuleName, so this is what tells their diffs apart. It heads
+	// each collected diff; may be empty for a directly-constructed context.
+	ModulePath []string
 	// ModuleDir is the path to the module directory containing loom.yaml.
 	ModuleDir string
 	// TargetDir is the path to the target repository working directory.
 	TargetDir string
+	// TargetLabel is a human-readable identity for the target (repo URL and
+	// branch, or the target dir), shown as a header above collected diffs so
+	// they stay legible out of the surrounding log context. May be empty.
+	TargetLabel string
+	// TargetRepo and TargetBranch are the rendered target repo URL and branch
+	// the label is made of; empty when the module has no target spec.
+	TargetRepo, TargetBranch string
 	// Params are the resolved template parameters.
-	Params map[string]string
+	Params map[string]any
 	// Excludes are glob patterns for files/dirs to exclude from template walking.
 	Excludes []string
 	// Includes are glob patterns that override excludes (including implicit ones).
@@ -64,17 +302,33 @@ type ExecutionContext struct {
 	LocalRun bool
 	// ShowDiff displays file diffs during dry-run.
 	ShowDiff bool
-	// DiffWriter is the destination for diff output (bypasses the logger).
-	// When nil, diff output is suppressed.
-	DiffWriter io.Writer
+	// Diffs collects file diffs across the run for printing at the very end,
+	// shared by parent and child executions. When nil, diff output is suppressed.
+	Diffs *DiffCollector
 	// GitAuthor is the default git author name for commitPush when not set in loom.yaml.
 	GitAuthor string
 	// GitEmail is the default git author email for commitPush when not set in loom.yaml.
 	GitEmail string
 	// Summary collects created PRs/MRs across the run. May be nil.
 	Summary *RunSummary
+	// Events receives structured progress (diff.file, pr.created). May be
+	// nil.
+	Events event.Sink
 	// Logger is the structured logger.
 	Logger *slog.Logger
+}
+
+// diffBreadcrumb is the instance breadcrumb heading this context's diffs. It
+// falls back to the bare module name for contexts built directly (e.g. in
+// tests) without a threaded ModulePath.
+func (e *ExecutionContext) diffBreadcrumb() []string {
+	if len(e.ModulePath) > 0 {
+		return e.ModulePath
+	}
+	if e.ModuleName != "" {
+		return []string{e.ModuleName}
+	}
+	return nil
 }
 
 // Action is the interface that all operation types implement.

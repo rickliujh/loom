@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -502,7 +503,7 @@ func TestCliCreateBranch(t *testing.T) {
 	dir := t.TempDir()
 	cliClone(ctx, bare, dir, "")
 
-	if err := cliCreateBranch(dir, "test-cli-branch"); err != nil {
+	if err := cliCreateBranch(ctx, dir, "test-cli-branch"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -525,7 +526,7 @@ func TestCliAddAll(t *testing.T) {
 
 	os.WriteFile(filepath.Join(dir, "new.txt"), []byte("content"), 0o644)
 
-	if err := cliAddAll(dir); err != nil {
+	if err := cliAddAll(ctx, dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,9 +548,9 @@ func TestCliCommit_WithAuthor(t *testing.T) {
 	cliClone(ctx, bare, dir, "")
 
 	os.WriteFile(filepath.Join(dir, "commit.txt"), []byte("data"), 0o644)
-	cliAddAll(dir)
+	cliAddAll(ctx, dir)
 
-	if err := cliCommit(dir, "test message", "Bot", "bot@test.com"); err != nil {
+	if err := cliCommit(ctx, dir, "test message", "Bot", "bot@test.com"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -571,9 +572,9 @@ func TestCliCommit_WithoutAuthor(t *testing.T) {
 	gitCmd(t, dir, "config", "user.name", "Default")
 
 	os.WriteFile(filepath.Join(dir, "noauthor.txt"), []byte("data"), 0o644)
-	cliAddAll(dir)
+	cliAddAll(ctx, dir)
 
-	if err := cliCommit(dir, "no author", "", ""); err != nil {
+	if err := cliCommit(ctx, dir, "no author", "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -593,10 +594,10 @@ func TestCliPush_WithBranch(t *testing.T) {
 
 	dir := t.TempDir()
 	cliClone(ctx, bare, dir, "")
-	cliCreateBranch(dir, "push-test")
+	cliCreateBranch(ctx, dir, "push-test")
 
 	os.WriteFile(filepath.Join(dir, "push.txt"), []byte("data"), 0o644)
-	cliAddAll(dir)
+	cliAddAll(ctx, dir)
 	gitCmd(t, dir, "config", "user.email", "test@test.com")
 	gitCmd(t, dir, "config", "user.name", "Test")
 	gitCmd(t, dir, "commit", "-m", "push test")
@@ -619,7 +620,7 @@ func TestCliPush_EmptyBranch_UsesHEAD(t *testing.T) {
 	cliClone(ctx, bare, dir, "")
 
 	os.WriteFile(filepath.Join(dir, "head.txt"), []byte("data"), 0o644)
-	cliAddAll(dir)
+	cliAddAll(ctx, dir)
 	gitCmd(t, dir, "config", "user.email", "test@test.com")
 	gitCmd(t, dir, "config", "user.name", "Test")
 	gitCmd(t, dir, "commit", "-m", "head push")
@@ -645,7 +646,7 @@ func TestCliCurrentBranch(t *testing.T) {
 	dir := t.TempDir()
 	cliClone(ctx, bare, dir, "")
 
-	branch, err := cliCurrentBranch(dir)
+	branch, err := cliCurrentBranch(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -665,12 +666,111 @@ func TestCliRemoteURL(t *testing.T) {
 	dir := t.TempDir()
 	cliClone(ctx, bare, dir, "")
 
-	url, err := cliRemoteURL(dir)
+	url, err := cliRemoteURL(ctx, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if url != bare {
 		t.Errorf("remote URL = %q, want %q", url, bare)
+	}
+}
+
+// ===========================================================================
+// Context propagation
+// ===========================================================================
+
+// Every CLI helper must hand its context to the git subprocess, so a
+// cancelled run stops git instead of letting it run to completion. An
+// already-cancelled context makes exec refuse to start, which is observable
+// without timing.
+func TestCliHelpers_CancelledContext(t *testing.T) {
+	bare := initBareRepo(t)
+	dir := t.TempDir()
+	if err := cliClone(context.Background(), bare, dir, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	calls := map[string]func() error{
+		"cliClone":        func() error { return cliClone(ctx, bare, t.TempDir(), "") },
+		"cliCreateBranch": func() error { return cliCreateBranch(ctx, dir, "cancelled") },
+		"cliAddAll":       func() error { return cliAddAll(ctx, dir) },
+		"cliCommit":       func() error { return cliCommit(ctx, dir, "msg", "Bot", "bot@test.com") },
+		"cliPush":         func() error { return cliPush(ctx, dir, "") },
+		"cliCurrentBranch": func() error {
+			_, err := cliCurrentBranch(ctx, dir)
+			return err
+		},
+		"cliRemoteURL": func() error {
+			_, err := cliRemoteURL(ctx, dir)
+			return err
+		},
+	}
+	for name, call := range calls {
+		if err := call(); !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: err = %v, want context.Canceled", name, err)
+		}
+	}
+}
+
+// The ...Context methods must reach the CLI fallback with the caller's
+// context, not context.Background().
+func TestRepoContextMethods_CLIFallbackHonoursContext(t *testing.T) {
+	bare := initBareRepo(t)
+	repo := cliCloneRepo(t, bare, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	calls := map[string]func() error{
+		"CreateBranchContext": func() error { return repo.CreateBranchContext(ctx, "cancelled") },
+		"AddAllContext":       func() error { return repo.AddAllContext(ctx) },
+		"CommitContext":       func() error { return repo.CommitContext(ctx, "msg", "Bot", "bot@test.com") },
+		"Push":                func() error { return repo.Push(ctx, "") },
+		"CurrentBranchContext": func() error {
+			_, err := repo.CurrentBranchContext(ctx)
+			return err
+		},
+		"RemoteURLContext": func() error {
+			_, err := repo.RemoteURLContext(ctx)
+			return err
+		},
+	}
+	for name, call := range calls {
+		if err := call(); !errors.Is(err, context.Canceled) {
+			t.Errorf("%s: err = %v, want context.Canceled", name, err)
+		}
+	}
+
+	// The context-free wrappers still work.
+	if _, err := repo.CurrentBranch(); err != nil {
+		t.Errorf("CurrentBranch: %v", err)
+	}
+}
+
+// go-git's local operations cannot be interrupted, so the ...Context methods
+// check ctx before starting one: a cancelled run must not stage or commit.
+func TestRepoContextMethods_GoGitPathRefusesCancelledContext(t *testing.T) {
+	bare := initBareRepo(t)
+	repo, err := Clone(context.Background(), bare, t.TempDir(), "", testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(repo.Dir(), "new.txt"), []byte("content"), 0o644)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := repo.AddAllContext(ctx); !errors.Is(err, context.Canceled) {
+		t.Errorf("AddAllContext: err = %v, want context.Canceled", err)
+	}
+	if err := repo.CommitContext(ctx, "msg", "Bot", "bot@test.com"); !errors.Is(err, context.Canceled) {
+		t.Errorf("CommitContext: err = %v, want context.Canceled", err)
+	}
+	if status := gitCmd(t, repo.Dir(), "status", "--porcelain"); !strings.Contains(status, "?? new.txt") {
+		t.Errorf("expected new.txt to stay untracked, got:\n%s", status)
 	}
 }
 

@@ -30,6 +30,8 @@ When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
 4. Walks through operations in order — rendering templates, running shell commands, committing, pushing, opening a PR
 5. Reports what it did
 
+Child modules and individual operations may carry an [`if`](/reference/loom-yaml#conditional-execution-if) predicate — a shell expression evaluated before the step; a non-zero exit skips it.
+
 ```
 loom run ./module -p key=val
         │

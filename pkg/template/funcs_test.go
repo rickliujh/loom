@@ -38,9 +38,6 @@ func TestFuncMap_Default(t *testing.T) {
 		},
 	}
 
-	fm := FuncMap()
-	defaultFn := fm["default"].(func(string, string) string)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := defaultFn(tt.def, tt.val)
@@ -63,13 +60,10 @@ func TestFuncMap_Upper(t *testing.T) {
 		{name: "empty", in: "", want: ""},
 	}
 
-	fm := FuncMap()
-	upperFn := fm["upper"].(func(string) string)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := upperFn(tt.in)
-			if got != tt.want {
+			got, err := upper(tt.in)
+			if err != nil || got != tt.want {
 				t.Errorf("upper(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
@@ -88,13 +82,10 @@ func TestFuncMap_Lower(t *testing.T) {
 		{name: "empty", in: "", want: ""},
 	}
 
-	fm := FuncMap()
-	lowerFn := fm["lower"].(func(string) string)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := lowerFn(tt.in)
-			if got != tt.want {
+			got, err := lower(tt.in)
+			if err != nil || got != tt.want {
 				t.Errorf("lower(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
@@ -116,8 +107,8 @@ func TestFuncMap_Indent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := indent(tt.n, tt.in)
-			if got != tt.want {
+			got, err := indent(tt.n, tt.in)
+			if err != nil || got != tt.want {
 				t.Errorf("indent(%d, %q) = %q, want %q", tt.n, tt.in, got, tt.want)
 			}
 		})
@@ -125,9 +116,9 @@ func TestFuncMap_Indent(t *testing.T) {
 }
 
 func TestFuncMap_Nindent(t *testing.T) {
-	got := nindent(4, "line1\nline2")
+	got, err := nindent(4, "line1\nline2")
 	want := "\n    line1\n    line2"
-	if got != want {
+	if err != nil || got != want {
 		t.Errorf("nindent(4, ...) = %q, want %q", got, want)
 	}
 }
@@ -144,13 +135,10 @@ func TestFuncMap_Quote(t *testing.T) {
 		{name: "empty", in: "", want: `""`},
 	}
 
-	fm := FuncMap()
-	quoteFn := fm["quote"].(func(string) string)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := quoteFn(tt.in)
-			if got != tt.want {
+			got, err := quote(tt.in)
+			if err != nil || got != tt.want {
 				t.Errorf("quote(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
@@ -236,8 +224,8 @@ func TestFuncMap_Split(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := split(tt.sep, tt.in)
-			if !reflect.DeepEqual(got, tt.want) {
+			got, err := split(tt.sep, tt.in)
+			if err != nil || !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("split(%q, %q) = %#v, want %#v", tt.sep, tt.in, got, tt.want)
 			}
 		})
@@ -245,7 +233,7 @@ func TestFuncMap_Split(t *testing.T) {
 }
 
 func TestRenderString_SplitRange(t *testing.T) {
-	params := map[string]string{"regions": "us-east-1,eu-west-1"}
+	params := map[string]any{"regions": "us-east-1,eu-west-1"}
 	got, err := RenderString(`regions:{{ range .regions | split "," }}{{ printf "\n  - %s" . }}{{ end }}`, params)
 	if err != nil {
 		t.Fatalf("RenderString returned error: %v", err)
@@ -257,7 +245,7 @@ func TestRenderString_SplitRange(t *testing.T) {
 }
 
 func TestRenderString_FromYamlRange(t *testing.T) {
-	params := map[string]string{"regions": "[us-east-1, eu-west-1]"}
+	params := map[string]any{"regions": "[us-east-1, eu-west-1]"}
 	got, err := RenderString("regions:{{ range .regions | fromYaml }}\n  - {{ . }}{{ end }}", params)
 	if err != nil {
 		t.Fatalf("RenderString returned error: %v", err)
@@ -269,7 +257,7 @@ func TestRenderString_FromYamlRange(t *testing.T) {
 }
 
 func TestRenderString_FromYamlToYamlRoundTrip(t *testing.T) {
-	params := map[string]string{"extraEnv": "- name: DB_HOST\n  value: pg.internal"}
+	params := map[string]any{"extraEnv": "- name: DB_HOST\n  value: pg.internal"}
 	got, err := RenderString("env:{{ .extraEnv | fromYaml | toYaml | nindent 2 }}", params)
 	if err != nil {
 		t.Fatalf("RenderString returned error: %v", err)
@@ -281,7 +269,7 @@ func TestRenderString_FromYamlToYamlRoundTrip(t *testing.T) {
 }
 
 func TestRenderString_MultilineIndent(t *testing.T) {
-	params := map[string]string{"config": "key1: val1\nkey2: val2"}
+	params := map[string]any{"config": "key1: val1\nkey2: val2"}
 	got, err := RenderString("data:{{ .config | nindent 2 }}", params)
 	if err != nil {
 		t.Fatalf("RenderString returned error: %v", err)

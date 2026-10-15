@@ -18,23 +18,21 @@ import (
 // It is the companion of pkg/action's TestSpecT4, which covers the operation
 // configs. Like that test, it walks each config struct with reflection,
 // injects a malformed template into every reachable string, and asserts the
-// real execute path (Load, Execute, or resolveChildTarget) returns a template
+// real execute path (Load, Execute, or ResolveTarget) returns a template
 // parse error.
 //
 // T4's one exception — spec.params definitions are the source of template
 // values and are never rendered — is encoded in t4Exempt, along with param
 // names, which are identifiers rather than values.
-//
-// Not covered here: cmd/run.go renders the root module's spec.target with its
-// own copies of these render calls; this harness only reaches the child-module
-// path (resolveChildTarget).
 
 // t4Exempt maps "<case>/<field path>" to the reason the field is allowed to
 // bypass template rendering.
 var t4Exempt = map[string]string{
 	"load/Params.[0].Name":        "T4 exception: static param definitions are the source of template values",
 	"load/Params.[0].Default":     "T4 exception: static param definitions are the source of template values",
+	"load/Params.[0].Type":        "T4 exception: a param's type is part of its definition, a literal enum",
 	"load/DynamicParams.[0].Name": "param names are identifiers, not templatable values",
+	"load/DynamicParams.[0].Type": "a param's type is part of its definition, a literal enum",
 }
 
 // writeLoomSpec marshals a LoomFile around spec and writes it as loom.yaml in dir.
@@ -90,12 +88,24 @@ func TestSpecT4(t *testing.T) {
 			cfg: func(t *testing.T) any {
 				childDir := t.TempDir()
 				writeLoomSpec(t, childDir, config.Spec{
-					Params: []config.ParamDef{{Name: "k", Default: "x"}},
+					Params: []config.ParamDef{
+						{Name: "k", Default: "x"},
+						{Name: "sources", Type: config.ParamList},
+						{Name: "values", Type: config.ParamMap},
+					},
 				})
+				// Structured values: every string leaf at any depth is a
+				// template, so each one gets its own subtest.
 				return &config.ModuleRef{
 					Name:   "child",
 					Source: childDir,
-					Params: map[string]string{"k": "v"},
+					Params: config.ParamValues{
+						"k": "v",
+						"sources": []any{
+							map[string]any{"repoURL": "https://x", "helm": map[string]any{"valueFiles": []any{"a.yaml"}}},
+						},
+						"values": map[string]any{"image": map[string]any{"tag": "1.0"}, "replicas": 3},
+					},
 				}
 			},
 			run: func(t *testing.T, cfg any) error {
@@ -105,14 +115,15 @@ func TestSpecT4(t *testing.T) {
 						Metadata: config.Metadata{Name: "t4-parent"},
 						Spec:     config.Spec{Modules: []config.ModuleRef{*cfg.(*config.ModuleRef)}},
 					},
-					Params: map[string]string{},
+					Params: map[string]any{},
 					Logger: testLogger(),
 				}
 				return Execute(context.Background(), parent, t.TempDir(), RunOptions{})
 			},
 		},
 		{
-			// resolveChildTarget renders url, branch, and featureBranch.
+			// ResolveTarget renders url, branch, and featureBranch — the one
+			// render site for the run's root (pkg/engine) and every child.
 			name: "target",
 			cfg: func(t *testing.T) any {
 				return &config.TargetSpec{URL: initBareRepo(t), FeatureBranch: "t4-branch"}
@@ -120,10 +131,10 @@ func TestSpecT4(t *testing.T) {
 			run: func(t *testing.T, cfg any) error {
 				childMod := &Module{
 					Config: &config.LoomFile{Spec: config.Spec{Target: cfg.(*config.TargetSpec)}},
-					Params: map[string]string{},
+					Params: map[string]any{},
 					Logger: testLogger(),
 				}
-				_, cleanup, err := resolveChildTarget(context.Background(), childMod, "/unused", &RunOptions{})
+				_, cleanup, err := ResolveTarget(context.Background(), childMod, "/unused", &RunOptions{}, nil, childMod.Logger)
 				if cleanup != nil {
 					cleanup()
 				}

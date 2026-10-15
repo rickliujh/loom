@@ -26,6 +26,10 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 	if err != nil {
 		return actionError("newFiles", fmt.Errorf("rendering dest: %w", err))
 	}
+	// Checked before the walk so a bad dest fails even when nothing is rendered.
+	if _, err := resolveTargetPath(execCtx.TargetDir, "newFiles dest", dest); err != nil {
+		return actionError("newFiles", err)
+	}
 
 	sourceDir := util.ExpandPath(execCtx.ModuleDir, source)
 
@@ -47,7 +51,9 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 
 		rendered, err := tmpl.RenderFile(content, execCtx.Params)
 		if err != nil {
-			return actionError("newFiles", err)
+			// Name the file: a module renders many, and a missing-value or
+			// required failure is only actionable once you know which.
+			return actionError("newFiles", fmt.Errorf("rendering template file %q: %w", relPath, err))
 		}
 
 		// Convert filesystem-friendly __param__ placeholders, then render.
@@ -56,19 +62,28 @@ func (a *NewFilesAction) Execute(ctx context.Context, execCtx *ExecutionContext)
 			return actionError("newFiles", err)
 		}
 
-		destPath := filepath.Join(execCtx.TargetDir, dest, destRel)
+		// File and directory names are templates too, so each rendered path is
+		// checked, not just dest.
+		displayPath := filepath.Join(dest, destRel)
+		destPath, err := resolveTargetPath(execCtx.TargetDir, "newFiles destination", displayPath)
+		if err != nil {
+			return actionError("newFiles", err)
+		}
 
-		execCtx.Logger.Info("writing file", "path", destPath)
 		if execCtx.DryRun {
 			if _, err := os.Stat(destPath); err == nil {
-				execCtx.Logger.Warn("dry-run: destination file already exists, would fail", "path", destPath)
+				execCtx.Logger.Warn("destination file already exists, a real run would fail", "path", displayPath)
 			}
-			execCtx.Logger.Info("dry-run: would write", "path", destPath, "size", len(rendered))
+			execCtx.Logger.Info("dry-run: would write file", "path", displayPath, "bytes", len(rendered))
 			if execCtx.ShowDiff {
-				printDiff(execCtx, destRel, "", string(rendered))
+				// Named from the target's root, dest included — the path the
+				// file lands at, and the one a full-mode git diff shows.
+				printDiff(execCtx, filepath.ToSlash(displayPath), "", string(rendered))
 			}
 			continue
 		}
+
+		execCtx.Logger.Info("writing file", "path", displayPath)
 
 		if _, err := os.Stat(destPath); err == nil {
 			return actionError("newFiles", fmt.Errorf("destination file already exists: %s", destPath))

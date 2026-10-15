@@ -1,10 +1,13 @@
 package module
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/rickliujh/loom/pkg/action"
@@ -57,7 +60,7 @@ func writeLoomYAML(t *testing.T, dir, content string) {
 	}
 }
 
-// --- resolveChildTarget tests ---
+// --- ResolveTarget tests ---
 
 func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 	childMod := &Module{
@@ -65,7 +68,7 @@ func TestResolveChildTarget_NoTarget_ReturnsParentDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +92,7 @@ func TestResolveChildTarget_WithTarget_ClonesRepo(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,10 +124,10 @@ func TestResolveChildTarget_WithFeatureBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"env": "staging"},
+		Params: map[string]any{"env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,10 +154,10 @@ func TestResolveChildTarget_TemplatesURL(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"repoPath": bare},
+		Params: map[string]any{"repoPath": bare},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,10 +197,10 @@ func TestResolveChildTarget_TemplatesBranch(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"env": "prod"},
+		Params: map[string]any{"env": "prod"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,10 +246,10 @@ func TestResolveChildTarget_TemplatesAllFields(t *testing.T) {
 			},
 		},
 		Logger: testLogger(),
-		Params: map[string]string{"repoPath": bare, "env": "staging"},
+		Params: map[string]any{"repoPath": bare, "env": "staging"},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,13 +282,13 @@ func TestResolveChildTarget_UsesModuleResolvedParams(t *testing.T) {
 		},
 		Logger: testLogger(),
 		// Params simulates the output of Load(): both static and dynamic resolved.
-		Params: map[string]string{
+		Params: map[string]any{
 			"env":  "staging",
 			"hash": "abc123", // would come from a dynamicParam
 		},
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +316,7 @@ func TestResolveChildTarget_Cleanup_RemovesDir(t *testing.T) {
 		Logger: testLogger(),
 	}
 
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent", &RunOptions{})
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent", &RunOptions{}, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,6 +402,242 @@ spec:
 
 	if _, err := os.Stat(filepath.Join(dir, "output.txt")); err != nil {
 		t.Errorf("expected output.txt to be created: %v", err)
+	}
+}
+
+func TestExecute_OperationRunsWhenConditionTrue(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-true
+spec:
+  operations:
+    - name: create-file
+      if: "true"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); err != nil {
+		t.Errorf("expected output.txt when condition true: %v", err)
+	}
+}
+
+func TestExecute_OperationSkippedWhenConditionFalse(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-false
+spec:
+  operations:
+    - name: create-file
+      if: "false"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected output.txt NOT created when condition false, stat err: %v", err)
+	}
+}
+
+func TestExecute_OperationConditionTemplatedWithParams(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-templated
+spec:
+  params:
+    - name: enabled
+      default: "yes"
+  operations:
+    - name: create-file
+      if: '[ {{ .enabled }} = yes ]'
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, map[string]any{"enabled": "no"}, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "output.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected output.txt NOT created when enabled=no, stat err: %v", err)
+	}
+}
+
+// The condition is control flow, so it is evaluated even under --dry-run —
+// otherwise a dry-run would misreport which steps a real run would perform.
+// The predicate here writes a marker and then returns false: after a dry run
+// the marker proves the predicate ran, while the operation was skipped.
+func TestExecute_IF5_ConditionEvaluatedInDryRun(t *testing.T) {
+	dir := t.TempDir()
+	writeLoomYAML(t, dir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: cond-dryrun
+spec:
+  operations:
+    - name: gated
+      if: "touch cond-ran.txt; false"
+      shell:
+        command: touch output.txt
+`)
+
+	mod, err := Load(dir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, dir, RunOptions{DryRun: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "cond-ran.txt")); err != nil {
+		t.Errorf("expected condition to be evaluated in dry-run (cond-ran.txt): %v", err)
+	}
+}
+
+// A malformed if template surfaces as an error on the runtime render path.
+// The Module is built directly (bypassing Load's validation) so Execute itself
+// reaches evalCondition — the operation-level if is not walked by any T4
+// reflection harness, so this is its runtime-render coverage.
+func TestExecute_OperationConditionTemplateError(t *testing.T) {
+	dir := t.TempDir()
+	mod := &Module{
+		Dir: dir,
+		Config: &config.LoomFile{
+			Metadata: config.Metadata{Name: "cond-bad-tmpl"},
+			Spec: config.Spec{
+				Operations: []config.Operation{
+					{Name: "gated", If: "test {{ .x", Shell: &config.Shell{Command: "true"}},
+				},
+			},
+		},
+		Params: map[string]any{},
+		Logger: testLogger(),
+	}
+
+	err := Execute(context.Background(), mod, dir, RunOptions{})
+	if err == nil {
+		t.Fatal("expected error from malformed condition template")
+	}
+	if !strings.Contains(err.Error(), "template") {
+		t.Errorf("expected template error, got: %v", err)
+	}
+}
+
+func TestExecute_ChildModuleSkippedWhenConditionFalse(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := t.TempDir()
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+      if: "false"
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "marker.txt")); !os.IsNotExist(err) {
+		t.Errorf("expected child ops skipped when module condition false, stat err: %v", err)
+	}
+}
+
+func TestExecute_IF4_ChildModuleConditionInspectsTargetDir(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Child inherits the parent target dir; the predicate inspects a file there.
+	targetDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(targetDir, "trigger"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: child-mod
+spec:
+  operations:
+    - name: create-marker
+      shell:
+        command: touch marker.txt
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: parent-mod
+spec:
+  modules:
+    - name: child
+      source: ./child
+      if: "test -f trigger"
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, targetDir, RunOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(targetDir, "marker.txt")); err != nil {
+		t.Errorf("expected child to run when predicate finds trigger in target dir: %v", err)
 	}
 }
 
@@ -602,6 +841,84 @@ spec:
 	}
 }
 
+// TestExecute_ChildLogsLabeledByInstanceName guards bulk-run readability: when
+// several items share one source (and thus one metadata name), each item's log
+// lines must be tagged with its unique instance name (childRef.Name), not the
+// shared metadata name — otherwise the interleaved output is indistinguishable.
+func TestExecute_ChildLogsLabeledByInstanceName(t *testing.T) {
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both instances point at this one child module named "greeter".
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: greeter
+spec:
+  params:
+    - name: who
+      required: true
+  operations:
+    - name: hello
+      shell:
+        command: echo hi
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: bulk-greeter
+spec:
+  modules:
+    - name: greeter-alice
+      source: ./child
+      params:
+        who: alice
+    - name: greeter-bob
+      source: ./child
+      params:
+        who: bob
+  operations: []
+`)
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	mod, err := Load(parentDir, nil, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), mod, parentDir, RunOptions{}); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{
+		// Each child's own operation logs carry its unique instance name.
+		`module=greeter-alice`,
+		`module=greeter-bob`,
+		// The batch header is the orchestrator's line: it carries the root
+		// module (marked with root=true) and names the item it dispatches to.
+		`msg="greeter-alice (1/2)" module=bulk-greeter root=true`,
+		`msg="greeter-bob (2/2)" module=bulk-greeter root=true`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("child log output missing %q:\n%s", want, out)
+		}
+	}
+
+	// The shared metadata name must not leak in as a standalone label — every
+	// child line carries an instance name instead.
+	if strings.Contains(out, "module=greeter ") || strings.HasSuffix(out, "module=greeter") {
+		t.Errorf("child logs used shared metadata name instead of instance name:\n%s", out)
+	}
+}
+
 // --- LocalRun tests ---
 
 // M2+L4: LocalRun propagates to child modules.
@@ -664,7 +981,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 	}
 
 	opts := &RunOptions{LocalRun: true, TargetPath: targetPath}
-	dir, cleanup, err := resolveChildTarget(context.Background(), childMod, "/parent/target", opts)
+	dir, cleanup, err := ResolveTarget(context.Background(), childMod, "/parent/target", opts, nil, childMod.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -693,7 +1010,7 @@ func TestResolveChildTarget_LocalRun_ClonesIntoNumberedSubdir(t *testing.T) {
 		},
 		Logger: testLogger(),
 	}
-	dir2, _, err := resolveChildTarget(context.Background(), childMod2, "/parent/target", opts)
+	dir2, _, err := ResolveTarget(context.Background(), childMod2, "/parent/target", opts, nil, childMod2.Logger)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -855,7 +1172,7 @@ spec:
 func TestNewExecutionContext_SetsLocalRun(t *testing.T) {
 	mod := &Module{
 		Config: &config.LoomFile{Spec: config.Spec{}},
-		Params: map[string]string{"key": "val"},
+		Params: map[string]any{"key": "val"},
 		Logger: testLogger(),
 	}
 
@@ -890,7 +1207,7 @@ func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
 			Metadata: config.Metadata{Name: "my-module"},
 			Spec:     config.Spec{},
 		},
-		Params: map[string]string{},
+		Params: map[string]any{},
 		Logger: testLogger(),
 	}
 
@@ -901,5 +1218,91 @@ func TestNewExecutionContext_PropagatesSummaryAndModuleName(t *testing.T) {
 	}
 	if ctx.ModuleName != "my-module" {
 		t.Errorf("expected ModuleName my-module, got %q", ctx.ModuleName)
+	}
+}
+
+func TestNewExecutionContext_PropagatesModulePath(t *testing.T) {
+	mod := &Module{
+		Config: &config.LoomFile{Metadata: config.Metadata{Name: "leaf"}, Spec: config.Spec{}},
+		Params: map[string]any{},
+		Logger: testLogger(),
+	}
+
+	ctx := mod.NewExecutionContext("/target", RunOptions{ModulePath: []string{"root", "leaf"}})
+	if strings.Join(ctx.ModulePath, "/") != "root/leaf" {
+		t.Errorf("expected breadcrumb [root leaf], got %v", ctx.ModulePath)
+	}
+}
+
+// The breadcrumb registry maps each local clone dir to the instance path of the
+// module that cloned into it — root name → child instance name — so full-mode
+// diff can tell one bulk item's changes from another's, which the shared
+// metadata name cannot.
+func TestExecute_LocalRun_DirLabelsRecordBreadcrumb(t *testing.T) {
+	bare := initBareRepo(t)
+	targetPath := t.TempDir()
+
+	parentDir := t.TempDir()
+	childDir := filepath.Join(parentDir, "child")
+	if err := os.Mkdir(childDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both items share one source, so both clone dirs derive from metadata name
+	// "patch-repo"; only the breadcrumb's instance segment tells them apart.
+	writeLoomYAML(t, childDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: patch-repo
+spec:
+  target:
+    url: `+bare+`
+  operations:
+    - name: noop
+      shell:
+        command: "true"
+        pure: true
+`)
+
+	writeLoomYAML(t, parentDir, `
+apiVersion: loom.rickliujh.github.io/v1beta1
+kind: Loom
+metadata:
+  name: bulk-patch
+spec:
+  modules:
+    - name: patch-repo-a
+      source: ./child
+    - name: patch-repo-b
+      source: ./child
+  operations: []
+`)
+
+	mod, err := Load(parentDir, nil, testLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// DirLabels is shared by value-copy through child dispatch, so registrations
+	// during Execute land back in this map.
+	opts := RunOptions{LocalRun: true, TargetPath: targetPath, DirLabels: map[string][]string{}}
+	if err := Execute(context.Background(), mod, parentDir, opts); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	want := map[string]string{
+		filepath.Join(targetPath, "00-patch-repo"): "bulk-patch › patch-repo-a",
+		filepath.Join(targetPath, "01-patch-repo"): "bulk-patch › patch-repo-b",
+	}
+	for dir, crumb := range want {
+		got, ok := opts.DirLabels[dir]
+		if !ok {
+			t.Errorf("no breadcrumb recorded for %s; have %v", dir, opts.DirLabels)
+			continue
+		}
+		if strings.Join(got, " › ") != crumb {
+			t.Errorf("dir %s: got breadcrumb %v, want %q", dir, got, crumb)
+		}
 	}
 }

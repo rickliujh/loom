@@ -13,6 +13,9 @@ spec:
       command: "git rev-parse --short HEAD"
   excludes:
     - __functions
+    # A demo module of its own, not output of this one — without this its
+    # loom.yaml is walked as a template and its params render as "<no value>".
+    - llm-test
   target:
     url: "https://github.com/myorg/gitops-repo.git"
     branch: "main"
@@ -37,7 +40,7 @@ spec:
         timeout: "30s"
     - name: commit
       commitPush:
-        message: "feat: onboard {{ .serviceName }}"
+        message: "feat: onboard {{ .serviceName }} ({{ .commitHash }})"
         author: "loom-bot"
         email: "loom@example.com"
     - name: open-pr

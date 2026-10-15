@@ -87,7 +87,7 @@ When you run `loom run ./onboard-service -p serviceName=payments`, Loom:
 4. Walks through operations in order — rendering templates, running shell commands, committing, pushing, opening a PR
 5. Reports what it did
 
-With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. Add `--diff` to also see the rendered file contents and patch diffs in the output.
+With `--dry-run`, nothing is written, committed, or pushed. Loom just shows you what _would_ happen. To see the actual file diffs a run would produce, use the [`loom diff`](#loom-diff) command.
 
 With `--local-run`, Loom runs all local operations (rendering templates, writing files, committing) but skips anything that touches a remote — no push, no PR creation. Shell commands are also skipped by default in `--local-run` mode unless explicitly marked with `pure: true` in the operation config. `--local-run` requires `--target-path` so you have a persistent directory to inspect the results.
 
@@ -167,10 +167,13 @@ Parameters are the inputs to your module. They're injected into every template �
 | Field | Description |
 |-------|-------------|
 | `name` | Parameter name, referenced as `{{ .name }}` in templates |
+| `type` | `string` (default), `list`, or `map` |
 | `required` | If `true`, the run fails when this param is not provided |
-| `default` | Fallback value when the param is not provided |
+| `default` | Fallback value when the param is not provided — YAML of the param's shape |
 
 Resolution priority: **provided (`-p`) → default → required error**.
+
+Params can be structured. A `list` or `map` param holds real YAML — say, the `sources` of a multi-source Argo CD `Application` — which a params file gives as nested YAML, `-p` as a YAML string (`-p sources='[{repoURL: https://x, chart: y}]'`), and a parent module as a literal list. Templates `range` over it or write it back with `toYaml`, and numbers keep the text they were written with (`1.10` stays `1.10`). See [Structured Parameters](docs/guide/structured-params.md).
 
 ### `spec.dynamicParams`
 
@@ -276,7 +279,7 @@ Child modules to execute before this module's operations. This is how you compos
 |-------|-------------|
 | `name` | Identifier for the child module |
 | `source` | Path to the child module — local (`./sub-module`) or a Git URL |
-| `params` | Parameters to pass down, rendered through the parent's context |
+| `params` | Parameters to pass down — strings, lists or maps — every string rendered through the parent's context |
 
 Child modules execute first, in order. Then the parent's operations run. This lets you build layered workflows: a base module that creates the namespace, a service module that creates the ArgoCD app, a policy module that adds the Gatekeeper constraint — all composed from a single root module.
 
@@ -285,6 +288,27 @@ Child modules execute first, in order. Then the parent's operations run. This le
 The ordered list of steps. Each operation has a `name` and exactly one action type.
 
 ## Operations Reference
+
+### Conditional execution (`if`)
+
+Any operation can carry an optional `if` predicate — a shell expression that decides whether the operation runs. The string is templated with your params, then run via `sh -c`: **exit `0` runs the operation, any non-zero exit skips it** (standard shell semantics). Omit `if` and the operation always runs.
+
+```yaml
+operations:
+  - name: apply-overlay
+    if: "test -f {{ .service }}/kustomization.yaml"   # only if the file exists
+    patch:
+      path: "__functions/patches/overlay.yaml"
+      target: "{{ .service }}/kustomization.yaml"
+  - name: deploy
+    if: '[ {{ .env }} = prod ]'                        # only in prod
+    shell:
+      command: "kubectl apply -f ."
+```
+
+An operation's `if` runs in the target directory, so predicates can inspect the repository being changed. Child modules take the same `if` field (see [Module Composition](#module-composition)). The predicate is evaluated in every mode, including `--dry-run`, since it determines which steps a run would perform — keep it side-effect-free (`test`, `grep`, file checks).
+
+> Like `shell` and `dynamicParams`, param values are templated into the shell string, so treat untrusted params (e.g. from `bulk` data) with care.
 
 ### `newFiles` — Render and Write Templates
 
@@ -582,8 +606,11 @@ Available functions:
 |----------|---------|--------|
 | Parameter access | `{{ .serviceName }}` | `payments` |
 | Default value | `{{ default "prod" .env }}` | `prod` if `.env` is empty |
+| Required value | `{{ required "repoURL is required" .repoURL }}` | the value, or the run fails with the message |
 | Uppercase | `{{ upper .serviceName }}` | `PAYMENTS` |
 | Lowercase | `{{ lower .serviceName }}` | `payments` |
+
+More — `toYaml`, `toJson`, `fromYaml`, `split`, `join`, `hasKey`, `indent`, `nindent`, `quote` — in the [templates guide](docs/guide/templates.md). A template that prints a missing value fails the run rather than writing `<no value>` into your repo.
 
 Templates work in:
 - File contents (newFiles)
@@ -664,6 +691,15 @@ spec:
         email: "loom@example.com"
 ```
 
+A child reference also accepts an [`if`](#conditional-execution-if) predicate to skip the whole module (and its operations and sub-modules) when the shell expression exits non-zero. It runs in the child's resolved target directory, so it can inspect that repository before deciding:
+
+```yaml
+modules:
+  - name: argocd-app
+    source: "./modules/argocd-app"
+    if: "test -d argocd"          # skip unless the target has an argocd/ dir
+```
+
 Execution order:
 1. Child modules run first, in the order they're listed
 2. Each child module can have its own child modules (recursive)
@@ -694,7 +730,6 @@ loom run [path] [flags]
 | `--author name` | Default git author name for `commitPush` (used when not set in `loom.yaml`) |
 | `--email email` | Default git author email for `commitPush` (used when not set in `loom.yaml`) |
 | `--dry-run` | Show what would happen without writing anything |
-| `--diff` | Show file diffs during dry-run (implies `--dry-run`) |
 | `--local-run` | Run all operations locally but skip remote push and PR creation |
 | `-v, --verbose` | Enable debug logging |
 | `--log-level level` | Set log level: `debug`, `info`, `warn`, `error` |
@@ -709,11 +744,9 @@ loom run ./onboard-service \
   --target-path ~/repos/gitops \
   --dry-run
 
-# Dry run with diffs — see exactly what files would be created and changed
-loom run ./onboard-service \
-  -p serviceName=payments \
-  --target-path ~/repos/gitops \
-  --diff
+# See exactly what files would be created and changed
+loom diff ./onboard-service \
+  -p serviceName=payments
 
 # Local mode — render, write, and commit, but don't push or open a PR
 # --target-path is required with --local-run so you can inspect the results
@@ -725,6 +758,118 @@ loom run ./onboard-service \
 # Parameters from file
 loom run ./onboard-service --params-file params.yaml
 ```
+
+### `loom inspect`
+
+Show what a module is made of — its operations, the submodules it composes, and the parameters it needs — without running any of it.
+
+```
+loom inspect [path] [flags]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-p, --param key=value` | Set a parameter for the root module (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--full` | Describe every module in the tree (same as `--depth 0`) |
+| `--depth n` | Levels of module to describe (`1`, the default, is the subject alone) |
+| `-m, --module name` | Describe this submodule instead of the root, by name or `parent/child` path (repeatable) |
+| `--no-fetch` | Don't clone modules sourced from a Git URL; list them instead |
+| `-o, --output format` | `tree` (default) or `json` |
+
+Nothing executes: operations don't run, `dynamicParams` commands are shown but never evaluated, `if` conditions are shown but never tested, and no target repo is cloned.
+
+By default one module is described and its submodules are listed by name — the usual question, answered without reading a tree that may span several repositories. A listed submodule is never fetched, so the default view does no network I/O.
+
+```bash
+loom inspect ./platform-rollout -p env=prod
+```
+
+```
+[≡ platform-rollout ≡] ./platform-rollout
+├─ params
+│    env         provided  = "prod"
+│    owner       default   = "platform-team"
+│    commitHash  dynamic   $ git rev-parse --short HEAD
+├─ operations (1, in order)
+│    announce  shell  echo rolling out to {{ .env }}
+├─ ▸ svc-a-prod  ../child  if: test -d ./svc-a  …
+└─ ▸ svc-b  ../child  …
+
+✔ every required parameter of the module(s) shown is satisfied
+
+2 submodule(s) not expanded — they may need parameters of their own:
+  platform-rollout › svc-a-prod
+  platform-rollout › svc-b
+
+  --full describes all of them; --module svc-a-prod describes one
+```
+
+A `…` marks a module that was listed but not read. Open one up with `--full`, `--depth n`, or `-m`:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod
+```
+
+```
+[≡ svc-a-prod ≡] ../child
+in platform-rollout › svc-a-prod
+├─ params
+│    service    provided    = "svc-a"
+│    namespace  provided    = "prod-apps" ← {{ .env }}-apps
+│    region     required    must be supplied
+│    stamp      unresolved  resolved at run time ← {{ .commitHash }}
+├─ target  https://github.com/acme/svc-a-gitops.git (main) → loom/onboard-svc-a
+├─ operations (3, in order)
+│    render   newFiles  templates → manifests
+│    gate     shell     kubeconform manifests  if: test -f manifests/app.yaml
+│    open-pr  pr        github: Onboard {{ .service }}
+└─ ▸ docs  ../grandchild  …
+
+⚠ 1 required parameter(s) not supplied — a run would fail:
+  region  platform-rollout › svc-a-prod
+```
+
+Repeat `-m` to describe several modules at once — two siblings side by side, say — each with its own breadcrumb, under one shared summary:
+
+```bash
+loom inspect ./platform-rollout -p env=prod -m svc-a-prod -m svc-b
+```
+
+Each parameter carries where its value comes from, and a value handed down by a parent is shown with the expression that produced it (`← {{ .env }}-apps`). The summary collects every required parameter still unsupplied, located by the module that declares it — in a composed tree, that is often not the module you invoke. It never claims a tree is fully parameterized on the strength of modules it did not read.
+
+Use `-o json` for scripting; the document carries the described modules plus `missingParams`, `problems`, and `unexpanded` roll-ups.
+
+### `loom diff`
+
+Show the changes a module run would produce, without opening a PR.
+
+By default, `loom diff` runs the module in local mode — it clones each target, executes every operation (including `pure: true` shell commands), commits locally, and skips push and PR creation — then prints a `git diff` of each target against its base branch. Because operations actually run, this is the complete picture, including files rewritten by shell commands (formatters, codegen).
+
+```bash
+# Full diff: the complete change, including shell-op effects
+loom diff ./onboard-service -p serviceName=payments
+
+# Keep the clones for inspection instead of a temp dir
+loom diff ./onboard-service -p serviceName=payments --target-path ./preview
+```
+
+Add `--quick` for a fast, no-execution preview: it simulates the run (dry-run) and prints unified diffs for `newFiles` and `patch` operations only. It never executes anything, so it cannot show changes made by shell commands.
+
+```bash
+# Quick preview: newFiles/patch diffs, executes nothing
+loom diff ./onboard-service -p serviceName=payments --quick
+```
+
+| Flag | Description |
+|------|-------------|
+| `--quick` | Simulate the run (dry-run); show `newFiles`/`patch` diffs only, execute nothing |
+| `--partial` | On failure, still print the diff of changes made before the error (below a warning) |
+| `-p, --param key=value` | Set a parameter (repeatable) |
+| `--params-file file.yaml` | Load parameters from a YAML file |
+| `--target-path /path` | Keep target clones here for inspection instead of a temp dir |
+| `--author name` | Default git author name for `commitPush` |
+| `--email email` | Default git author email for `commitPush` |
 
 ### `loom generate`
 
@@ -789,6 +934,35 @@ loom validate [path]
 ```
 
 Validates: `apiVersion`, `kind`, required metadata, unique parameter names, unique operation names, and that each operation has exactly one action type.
+
+### `loom skill`
+
+```bash
+loom skill                        # the guide for AI agents, then the list of topics
+loom skill list                   # the topics alone
+loom skill reference/op-patch     # one topic ("op-patch" works too)
+```
+
+Prints Loom's guide for AI agents, straight from the binary. Nothing is installed and nothing is fetched: the documentation is embedded in `loom` itself, so an agent always reads the text that matches the version it is about to run.
+
+To point an agent at it, add one line to your `AGENTS.md`, rules file, or skill:
+
+```markdown
+Before working with Loom modules, run `loom skill` and follow what it prints.
+```
+
+Every guide page, reference page and behavioral spec is available as a topic.
+
+### `loom serve`
+
+```bash
+loom serve                          # the modules under the current directory
+loom serve --root ~/gitops --open   # another root, and open the browser
+```
+
+Starts a web UI on `127.0.0.1:7788` for browsing, editing, inspecting, diffing and running the modules under `--root`. It prints one URL whose fragment carries a per-process token; opening it signs the browser in. Every run, diff, `generate` and `bulk` started from the UI goes through the same code as the command, streams its logs and changes live, is kept in a job history, and shows the `loom` command line that repeats it.
+
+The server listens on loopback only unless you pass `--allow-remote` (prefer an SSH tunnel), requires the token on every API call, and reads and writes only inside the roots. Browsing, inspecting and validating never execute a module's commands. See [`loom serve`](docs/reference/cli-serve.md) and the [API reference](docs/reference/serve-api.md).
 
 ### `loom version`
 

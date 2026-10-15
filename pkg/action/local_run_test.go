@@ -55,7 +55,7 @@ func localExecCtx(t *testing.T, targetDir string) *ExecutionContext {
 	return &ExecutionContext{
 		ModuleDir: t.TempDir(),
 		TargetDir: targetDir,
-		Params:    map[string]string{},
+		Params:    map[string]any{},
 		LocalRun: true,
 		Logger:    slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
@@ -154,7 +154,7 @@ func TestCommitPushAction_LocalRun_TemplatesMessage(t *testing.T) {
 	}
 
 	execCtx := localExecCtx(t, repoDir)
-	execCtx.Params = map[string]string{"env": "staging"}
+	execCtx.Params = map[string]any{"env": "staging"}
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -273,7 +273,7 @@ func TestCommitPushAction_TemplatesAuthorEmail(t *testing.T) {
 	var buf bytes.Buffer
 	execCtx := localExecCtx(t, t.TempDir())
 	execCtx.DryRun = true
-	execCtx.Params = map[string]string{"team": "infra"}
+	execCtx.Params = map[string]any{"team": "infra"}
 	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
@@ -361,7 +361,7 @@ func TestPRAction_LocalRun_TemplatesBeforeSkipping(t *testing.T) {
 
 	var buf bytes.Buffer
 	execCtx := localExecCtx(t, t.TempDir())
-	execCtx.Params = map[string]string{"env": "prod"}
+	execCtx.Params = map[string]any{"env": "prod"}
 	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	err := action.Execute(context.Background(), execCtx)
@@ -528,7 +528,7 @@ func TestPRAction_TemplatesProviderAndBaseBranch(t *testing.T) {
 	var buf bytes.Buffer
 	execCtx := localExecCtx(t, t.TempDir())
 	execCtx.DryRun = true
-	execCtx.Params = map[string]string{"env": "prod", "version": "2.0", "team": "platform", "provider": "github"}
+	execCtx.Params = map[string]any{"env": "prod", "version": "2.0", "team": "platform", "provider": "github"}
 	execCtx.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	if err := action.Execute(context.Background(), execCtx); err != nil {
@@ -555,7 +555,7 @@ func TestPRAction_TemplatesLabels_ErrorOnBadTemplate(t *testing.T) {
 
 	execCtx := localExecCtx(t, t.TempDir())
 	execCtx.DryRun = true
-	execCtx.Params = map[string]string{}
+	execCtx.Params = map[string]any{}
 
 	err := action.Execute(context.Background(), execCtx)
 	if err == nil {

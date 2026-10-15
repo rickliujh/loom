@@ -19,15 +19,15 @@ All operations are simulated:
 
 ## Diff
 
-Add `--diff` to see the actual rendered file contents and patch results as a colored unified diff in your terminal.
+To see the actual rendered file contents and patch results as a colored unified diff, use the [`loom diff`](/reference/cli-diff) command. Add `--quick` for a fast, no-execution preview equivalent to a dry-run:
 
 ```bash
-loom run ./onboard-service \
+loom diff ./onboard-service \
   -p serviceName=payments \
-  --diff
+  --quick
 ```
 
-`--diff` implies `--dry-run` -- no files are written.
+`--quick` simulates the run -- no files are written and nothing executes.
 
 ### Example output
 
@@ -65,13 +65,12 @@ The diff output is colored in terminals: green for additions, red for removals, 
 
 ## Combining with Local Run
 
-Modules with a `target` spec always clone the target repo before previewing — into a temporary directory by default. Add `--local-run --target-path` to keep the clones in numbered subdirectories you can inspect afterwards:
+Full `loom diff` (without `--quick`) already runs the module in local mode and prints a real `git diff` — including changes made by shell commands, which the dry-run preview cannot show. Add `--target-path` to keep the clones in numbered subdirectories you can inspect afterwards:
 
 ```bash
-loom run ./onboard-service \
+loom diff ./onboard-service \
   -p serviceName=payments \
-  --local-run --target-path ./preview \
-  --diff
+  --target-path ./preview
 ```
 
 For modules without a `target` spec, `--target-path` is used directly as the target directory.

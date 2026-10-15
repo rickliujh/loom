@@ -34,7 +34,7 @@ func readTarget(t *testing.T, targetDir, targetFile string) string {
 	return string(data)
 }
 
-func runPatch(t *testing.T, engine string, params map[string]string, patchContent, targetContent string) string {
+func runPatch(t *testing.T, engine string, params map[string]any, patchContent, targetContent string) string {
 	t.Helper()
 	moduleDir, targetDir, targetFile := setupPatch(t, patchContent, targetContent)
 
@@ -56,7 +56,7 @@ func runPatch(t *testing.T, engine string, params map[string]string, patchConten
 	return readTarget(t, targetDir, targetFile)
 }
 
-func runPatchErr(t *testing.T, engine string, params map[string]string, patchContent, targetContent string) error {
+func runPatchErr(t *testing.T, engine string, params map[string]any, patchContent, targetContent string) error {
 	t.Helper()
 	moduleDir, targetDir, targetFile := setupPatch(t, patchContent, targetContent)
 
@@ -83,7 +83,7 @@ func TestPatch_TemplatedPathAndTarget(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, moduleDir, targetDir)
-	execCtx.Params = map[string]string{
+	execCtx.Params = map[string]any{
 		"patchName":  "patch",
 		"targetName": strings.TrimSuffix(targetFile, ".yaml"),
 	}
@@ -525,7 +525,7 @@ func TestSMP_B7_TemplateRendering(t *testing.T) {
   name: "{{ .serviceName }}"
   namespace: "{{ .namespace }}"
 `
-	params := map[string]string{
+	params := map[string]any{
 		"serviceName": "payments",
 		"namespace":   "production",
 	}
@@ -546,7 +546,7 @@ func TestSMP_B7_TemplateFuncUpper(t *testing.T) {
 	patch := `metadata:
   env: '{{ .env | upper }}'
 `
-	params := map[string]string{"env": "prod"}
+	params := map[string]any{"env": "prod"}
 	result := runPatch(t, "smp", params, patch, target)
 
 	if !strings.Contains(result, "PROD") {
@@ -561,7 +561,7 @@ func TestSMP_B7_TemplateFuncLower(t *testing.T) {
 	patch := `metadata:
   env: '{{ .env | lower }}'
 `
-	params := map[string]string{"env": "STAGING"}
+	params := map[string]any{"env": "STAGING"}
 	result := runPatch(t, "smp", params, patch, target)
 
 	if !strings.Contains(result, "staging") {
@@ -577,7 +577,7 @@ func TestSMP_B7_TemplateFuncDefault(t *testing.T) {
   team: '{{ default "platform" .team }}'
 `
 	// team param is empty string — should use default
-	params := map[string]string{"team": ""}
+	params := map[string]any{"team": ""}
 	result := runPatch(t, "smp", params, patch, target)
 
 	if !strings.Contains(result, "platform") {
@@ -712,7 +712,7 @@ func TestSMP_B9_TemplatedPreserveComments(t *testing.T) {
 	}}
 
 	execCtx := testExecCtx(t, moduleDir, targetDir)
-	execCtx.Params = map[string]string{"keepComments": "false"}
+	execCtx.Params = map[string]any{"keepComments": "false"}
 
 	if err := a.Execute(context.Background(), execCtx); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -925,7 +925,7 @@ metadata:
   path: /metadata/name
   value: "{{ .serviceName }}"
 `
-	params := map[string]string{"serviceName": "payments"}
+	params := map[string]any{"serviceName": "payments"}
 	result := runPatch(t, "json6902", params, patch, target)
 
 	if !strings.Contains(result, "name: payments") {

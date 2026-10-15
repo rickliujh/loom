@@ -34,6 +34,11 @@ type Options struct {
 	Include []string
 	Exclude []string
 	Base    string
+	// Provider, when set, fetches every PR/MR source in place of the
+	// provider its ref names — for a caller with its own client, and for
+	// tests. Refs must still parse, as they decide which token is read.
+	// Commit and snapshot sources are unaffected.
+	Provider ChangeSource
 }
 
 // Run generates a loom module from one or more sources.
@@ -73,11 +78,15 @@ func Run(ctx context.Context, opts Options, logger *slog.Logger) error {
 	sets := make([]*ChangeSet, 0, len(sources))
 	for i, src := range sources {
 		token := ""
+		fetcher := src.ChangeSource
 		if src.Kind == KindPR {
 			token = tokenFromEnv(opts.TokenEnv, src.Provider, logger)
+			if opts.Provider != nil {
+				fetcher = opts.Provider
+			}
 		}
 		logger.Info("fetching source", "ref", opts.Refs[i], "kind", src.Kind.String())
-		cs, err := src.ChangeSource.Fetch(ctx, opts.Refs[i], token, logger)
+		cs, err := fetcher.Fetch(ctx, opts.Refs[i], token, logger)
 		if err != nil {
 			return fmt.Errorf("fetching diff: %w", err)
 		}

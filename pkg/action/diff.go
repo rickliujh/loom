@@ -1,26 +1,34 @@
 package action
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
+
+	"github.com/rickliujh/loom/pkg/event"
 )
 
 // ANSI color codes for diff output.
 const (
 	diffColorReset  = "\033[0m"
+	diffColorBold   = "\033[1m"
 	diffColorRed    = "\033[31m"
 	diffColorGreen  = "\033[32m"
 	diffColorCyan   = "\033[36m"
+	diffColorInvert = "\033[7m"
+	diffColorMuted  = "\033[38;5;244m" // mid gray — matches the log handler's muted tone
+	diffColorRoot   = "\033[38;5;61m"  // muted indigo — the orchestrator chip (log's root color)
+	diffColorWorker = "\033[38;5;66m"  // slate teal — the hand-off marker (log's worker color)
 )
 
-// printDiff writes a colored unified diff between old and new content
-// directly to execCtx.DiffWriter, bypassing the structured logger.
+// printDiff computes a unified diff between old and new content and hands it to
+// execCtx.Diffs, which holds it until the end of the run. It does not write to
+// the logger or stdout itself, so diffs stay out of the interleaved operation
+// logs and print together once the run finishes.
 func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
-	if execCtx.DiffWriter == nil {
+	if execCtx.Diffs == nil {
 		return
 	}
 
@@ -53,8 +61,39 @@ func printDiff(execCtx *ExecutionContext, path, oldContent, newContent string) {
 		return
 	}
 
-	colored := colorizeDiff(text, isTerminalWriter(execCtx.DiffWriter))
-	fmt.Fprint(execCtx.DiffWriter, colored)
+	status := event.StatusModified
+	if fromName == "/dev/null" {
+		status = event.StatusAdded
+	}
+	file := event.FileDiff{Path: path, Status: status, Unified: stripFileHeader(text)}
+	breadcrumb := execCtx.diffBreadcrumb()
+	execCtx.Diffs.AddEntry(DiffEntry{
+		Breadcrumb: breadcrumb,
+		Target:     execCtx.TargetLabel,
+		Repo:       execCtx.TargetRepo,
+		Branch:     execCtx.TargetBranch,
+		Dir:        execCtx.TargetDir,
+		Text:       text,
+		File:       file,
+	})
+	execCtx.Events.Emit(event.Event{Type: event.DiffFile, Path: breadcrumb,
+		Target: execCtx.TargetLabel, Diff: &file})
+}
+
+// stripFileHeader drops the leading "---"/"+++" lines of a unified diff,
+// leaving its hunks — what event.FileDiff.Unified carries.
+func stripFileHeader(text string) string {
+	for _, prefix := range []string{"--- ", "+++ "} {
+		if !strings.HasPrefix(text, prefix) {
+			break
+		}
+		_, rest, ok := strings.Cut(text, "\n")
+		if !ok {
+			return ""
+		}
+		text = rest
+	}
+	return text
 }
 
 // colorizeDiff applies ANSI colors to unified diff lines.

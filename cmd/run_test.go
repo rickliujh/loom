@@ -46,13 +46,22 @@ func initGitRepo(t *testing.T, dir string) {
 func resetFlags() {
 	dryRun = false
 	localRun = false
-	showDiff = false
 	targetPath = ""
-	params = nil
+	runParams = nil
 	paramsFile = ""
 	verbose = false
 	logLevel = "info"
 	logFormat = "pretty"
+
+	diffQuick = false
+	diffPartial = false
+	diffTargetPath = ""
+	diffParams = nil
+	diffParamsFile = ""
+	diffAuthor = ""
+	diffEmail = ""
+
+	validateRecursive = false
 }
 
 // L1: --local-run without --target-path errors (with target spec).
@@ -290,37 +299,57 @@ spec:
 	}
 }
 
-// DR2: --diff implies --dry-run — no files written.
-func TestRun_DiffImpliesDryRun(t *testing.T) {
+// A params file may carry real lists; -p still overrides it, and a list param
+// parses a -p string as YAML.
+func TestRun_SP11_NestedParamsFileAndCLIOverride(t *testing.T) {
 	resetFlags()
 
 	moduleDir := t.TempDir()
 	targetDir := t.TempDir()
-
 	srcDir := filepath.Join(moduleDir, "templates")
-	os.MkdirAll(srcDir, 0o755)
-	os.WriteFile(filepath.Join(srcDir, "new.txt"), []byte("new content\n"), 0o644)
-
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmplBody := "{{ range .sources }}- {{ .repoURL }}@{{ default \"HEAD\" .targetRevision }}\n{{ end }}env={{ .env }}\n"
+	if err := os.WriteFile(filepath.Join(srcDir, "out.txt"), []byte(tmplBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	writeLoomYAML(t, moduleDir, `
 apiVersion: loom.rickliujh.github.io/v1beta1
 kind: Loom
 metadata:
-  name: test-diff
+  name: nested
 spec:
+  params:
+    - name: env
+    - name: sources
+      type: list
   operations:
-    - name: write-files
+    - name: write
       newFiles:
-        source: "templates"
-        dest: ""
+        source: templates
 `)
-
-	rootCmd.SetArgs([]string{"run", moduleDir, "--diff", "--target-path", targetDir})
-	err := rootCmd.Execute()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	paramsPath := filepath.Join(t.TempDir(), "params.yaml")
+	if err := os.WriteFile(paramsPath, []byte("env: prod\nsources:\n  - repoURL: a\n    targetRevision: 1.10\n  - repoURL: b\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	if _, err := os.Stat(filepath.Join(targetDir, "new.txt")); !os.IsNotExist(err) {
-		t.Error("--diff should imply --dry-run, file should not be written")
+	rootCmd.SetArgs([]string{"run", moduleDir, "--target-path", targetDir, "--params-file", paramsPath, "-p", "env=staging"})
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(targetDir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "- a@1.10\n- b@HEAD\nenv=staging\n"; string(got) != want {
+		t.Errorf("rendered %q, want %q", got, want)
+	}
+
+	resetFlags()
+	rootCmd.SetArgs([]string{"run", moduleDir, "--target-path", t.TempDir(), "-p", "sources={repoURL: a}"})
+	err = rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), `param "sources" is declared list, but received a string that parses as a map, not a list`) {
+		t.Errorf("err = %v, want a clear type error", err)
 	}
 }
